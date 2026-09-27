@@ -42,8 +42,9 @@ erDiagram
   series ||--o{ points : has
   resources {
     int id PK
+    int hash "xxh3 of service and attributes, unique"
     text service
-    text attributes "JSON, deduplicated by hash"
+    text attributes "JSON"
   }
   logs {
     int ts "unix nanos"
@@ -70,6 +71,7 @@ erDiagram
   }
   series {
     int id PK
+    int hash "xxh3 of resource, name, kind, unit, labels, unique"
     int resource_id FK
     text name
     text kind "gauge, sum, histogram"
