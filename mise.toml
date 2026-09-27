@@ -1,0 +1,15 @@
+[tasks."check:fmt"]
+description = "Rust formatting"
+run = "cargo fmt --all --check"
+
+[tasks."check:clippy"]
+description = "Rust lints, with every warning a failure"
+run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+
+[tasks."check:test"]
+description = "Rust tests"
+run = "cargo test --workspace"
+
+[tasks.check]
+description = "Everything a change has to pass"
+depends = ["check:fmt", "check:clippy", "check:test"]
