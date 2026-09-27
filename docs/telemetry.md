@@ -27,7 +27,7 @@ flowchart LR
 ## Rules
 
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
-- SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data and 90 days of rollups.
+- SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
 - A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached.
 - `service` is the OTel `service.name` resource attribute. For a journald record it is the systemd unit without `.service`.
 - Journald and the host collector read Linux interfaces. On macOS they compile to nothing, and their tests read recorded fixtures.
