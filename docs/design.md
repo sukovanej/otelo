@@ -3,16 +3,16 @@ created: 2026-09-27T18:10:53Z
 ---
 # Design
 
-Siner deploys, runs, and observes the apps on one Linux server. It is one binary. The same binary is the daemon on the server and the CLI on a laptop or in CI.
+Siner deploys, runs, and observes the apps on one Linux or macOS server. It is one binary. The same binary is the daemon on the server and the CLI on a laptop or in CI.
 
 The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCPU, 1 GB of memory. mudro, Caddy, and siner share that memory, so siner targets about 50 MB RSS.
 
 ## Decisions
 
-- One server only. Multi-server is out of scope, and the README says so. The code can assume one SQLite, one journald, and one clock.
+- One server only. Multi-server is out of scope, and the README says so. The code can assume one SQLite and one clock.
 - Native processes only: binaries, Node run directly, static files. No Docker for now.
-- Siner does not own Caddy. Siner keeps stable paths (`/srv/<app>/current/...`) and a fixed port per app, so the Caddyfile does not change on a deploy. `siner init` prints a Caddyfile snippet for the siner UI host.
-- systemd supervises the apps. Siner writes one unit per app and reads per-service CPU and memory from cgroup v2.
+- Siner does not own Caddy. Siner keeps stable paths (`<root>/apps/<app>/current/...`) and a fixed port per app, so the Caddyfile does not change on a deploy. `siner init` prints a Caddyfile snippet for the siner UI host.
+- The service manager of the OS supervises the apps: systemd on Linux, launchd on macOS. Siner writes one unit or plist per app. [[./platforms.md]] lists what differs between the two.
 - A CLI, not MCP. Humans and agents use the same commands. The CLI prints a table to a terminal and JSON otherwise; `--json` and `--table` override. Every query has a row limit and says when it truncated. `siner guide` prints how to debug with siner.
 - App config is `siner.json` in the app repository, shipped inside the release tarball.
 - No alerts for now. Health checks run and show in the UI and the timeline.
@@ -20,10 +20,10 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 ## Parts of the daemon
 
 - Deploy API. It takes a tarball, unpacks it into `releases/<time>-<sha>/`, runs the drain hook, switches `current`, restarts the unit, waits for the health check, and rolls back when the check fails. It keeps the last N releases.
-- Secrets. Encrypted at rest with age. Set with the CLI or the UI. The UI shows names, never values. Siner writes a `0600` env file (or uses `LoadCredential`) when the unit starts.
+- Secrets. Encrypted at rest with age. Set with the CLI or the UI. The UI shows names, never values. The unit runs `siner exec <app>`, which gets the app's secrets from the daemon and starts the app with them in its environment. Secrets never touch the disk in plain text.
 - OTLP receiver on 4317 (gRPC) and 4318 (HTTP) for logs, traces, and metrics.
-- Journald tailer, so an app without OTel (Caddy, a backup script) still has logs.
-- Host collector: CPU, memory, swap, load, disk, network, from `/proc` and `statfs`.
+- Service log source, so an app without OTel (Caddy, a backup script) still has logs: journald on Linux, the log files launchd writes on macOS.
+- Host collector: CPU, memory, swap, load, disk, network, through the `sysinfo` crate on both platforms.
 - Health checks: HTTP, TCP, command, and heartbeats (a job POSTs to siner; a missing POST is a failure).
 - Timeline: deploys, restarts, OOM kills, health changes, and error logs in one stream.
 - UI: an SPA embedded in the binary.
