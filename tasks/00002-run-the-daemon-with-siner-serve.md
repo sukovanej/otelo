@@ -1,7 +1,7 @@
 ---
 status: in_progress
 created: 2026-09-27T18:27:45Z
-parent: ./00001-collect-and-query-telemetry.md
+parent: '1'
 tags:
 - feature
 ---
@@ -13,3 +13,9 @@ tags:
 - `--data <dir>`, default `/var/lib/siner` on Linux and `/usr/local/var/siner` on macOS. The daemon makes the directory when it is missing.
 - SIGTERM and Ctrl-C stop the sources, flush the writer, and exit.
 - The daemon logs to stderr, so journald keeps its log when systemd runs it.
+
+## Comments
+
+### 2026-09-27T19:44:17Z by Milan Suk via claude-code
+
+> No sources or writer exist yet, so shutdown only stops the HTTP server. serve::run cancels one CancellationToken; the sources must stop on it, and SIN-3 must flush the writer before run returns.
