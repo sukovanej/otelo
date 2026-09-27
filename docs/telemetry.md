@@ -10,8 +10,8 @@ How siner takes in logs, traces, and metrics, where it keeps them, and how a hum
 flowchart LR
   app[App with OTel SDK] -->|OTLP HTTP :4318| recv[OTLP receiver]
   app -->|OTLP gRPC :4317| recv
-  journal[(journald)] --> tail[Journald tailer]
-  proc[/proc, statfs, cgroup v2/] --> host[Host collector]
+  journal[(journald or launchd log files)] --> tail[Service log source]
+  sys[sysinfo] --> host[Host collector]
   recv --> writer[Writer]
   tail --> writer
   host --> writer
@@ -29,8 +29,8 @@ flowchart LR
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
 - SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
 - A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached.
-- `service` is the OTel `service.name` resource attribute. For a journald record it is the systemd unit without `.service`.
-- Journald and the host collector read Linux interfaces. On macOS they compile to nothing, and their tests read recorded fixtures.
+- `service` is the OTel `service.name` resource attribute. For a record from the service log source, it is the app name.
+- The service log source has a Linux and a macOS implementation. [[./platforms.md]] describes both.
 
 ## Schema of a day file
 
