@@ -1,10 +1,10 @@
 ---
 status: backlog
 created: 2026-09-27T18:27:45Z
-parent: '1'
+parent: ./00001-collect-and-query-telemetry.md
 dependencies:
-- '2'
-- '3'
+- ./00002-run-the-daemon-with-siner-serve.md
+- ./00003-store-telemetry-in-daily-sqlite-f.md
 tags:
 - feature
 ---
