@@ -9,6 +9,7 @@ publish.workspace = true
 anyhow = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
+siner-telemetry = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
