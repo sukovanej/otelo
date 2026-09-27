@@ -10,7 +10,7 @@ tags:
 ---
 # Serve the query API
 
-HTTP endpoints on the daemon that the CLI and the UI share. Every endpoint takes a time range (\`since\`, \`until\`) and a \`limit\`, and says when it cut the result.
+HTTP endpoints on the daemon that the CLI and the UI share. Every endpoint takes a time range (`since`, `until`) and a `limit`, and says when it cut the result.
 
 - Logs: filter by service, severity, text (FTS5), and trace ID. Two forms: raw lines, and groups by message template with a count and samples. The template replaces numbers, UUIDs, hex IDs, and quoted strings with placeholders.
 - Traces: list roots with service, name, duration, span count, and an error flag. Filter by service, name, minimum duration, and errors only.
