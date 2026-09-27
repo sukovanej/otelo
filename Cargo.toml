@@ -11,11 +11,16 @@ publish = false
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 clap = { version = "4", features = ["derive"] }
+jiff = "0.2.37"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde_json = "1.0.151"
+siner-telemetry = { path = "crates/telemetry" }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-util = "0.7.19"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+twox-hash = { version = "2.1.2", default-features = false, features = ["xxhash3_64"] }
 
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }

@@ -14,6 +14,10 @@ const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_DATA_DIR: &str = "/var/lib/siner";
 
+/// Batches the sources can queue for the telemetry writer. An OTLP batch can
+/// hold a few hundred kilobytes, so this bounds the queue to tens of megabytes.
+const TELEMETRY_CAPACITY: usize = 64;
+
 #[derive(clap::Args)]
 pub struct Args {
     /// Address of the HTTP server
@@ -60,6 +64,11 @@ fn init_logging() {
 async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
+    let (telemetry, inbox) = siner_telemetry::channel(TELEMETRY_CAPACITY);
+    let writer = siner_telemetry::Writer::spawn(
+        siner_telemetry::Config::new(args.data.join("telemetry")),
+        inbox,
+    )?;
     let listener = TcpListener::bind(args.listen)
         .await
         .with_context(|| format!("listen on {}", args.listen))?;
@@ -72,6 +81,11 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown.cancelled_owned())
         .await
         .context("serve HTTP")?;
+    // The writer ends once the last sender is gone.
+    drop(telemetry);
+    tokio::task::spawn_blocking(|| writer.join())
+        .await
+        .context("wait for the telemetry writer")??;
     tracing::info!("stopped");
     Ok(())
 }

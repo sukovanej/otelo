@@ -102,6 +102,20 @@ fn makes_the_missing_data_directory() {
 }
 
 #[test]
+fn writes_telemetry_under_the_data_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    stop(start(dir.path()), "TERM");
+    let files: Vec<_> = std::fs::read_dir(dir.path().join("telemetry"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(
+        files.iter().any(|name| name.ends_with(".sqlite")),
+        "{files:?}"
+    );
+}
+
+#[test]
 fn sigterm_stops_it() {
     let dir = tempfile::tempdir().unwrap();
     let log = stop(start(dir.path()), "TERM");
