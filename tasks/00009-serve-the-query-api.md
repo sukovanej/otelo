@@ -1,10 +1,10 @@
 ---
 status: backlog
 created: 2026-09-27T18:27:45Z
-parent: ./00001-collect-and-query-telemetry.md
+parent: '1'
 dependencies:
-- ./00002-run-the-daemon-with-siner-serve.md
-- ./00003-store-telemetry-in-daily-sqlite-f.md
+- '2'
+- '3'
 tags:
 - feature
 ---
@@ -33,3 +33,9 @@ An OpenAPI spec comes out of the code, so the UI can generate its client later.
 - A cut result prints one line that names the flag that narrows it.
 - The daemon address comes from `--daemon` or `SINER_URL`, default `http://127.0.0.1:7070`.
 - `siner trace` prints the span tree with durations, and marks the error spans.
+
+## Comments
+
+### 2026-09-27T20:22:56Z by Milan Suk via claude-code
+
+> The reader's views (logs, spans, …) union the day files, but FTS5 does not: search each "<day>".logs_fts and join on that file's rowid. Ids count per file, so every join on resource_id or series_id also matches day.
