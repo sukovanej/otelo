@@ -3,7 +3,7 @@ status: backlog
 created: 2026-09-27T18:27:45Z
 parent: ./00001-collect-and-query-telemetry.md
 dependencies:
-- ./00010-query-telemetry-from-the-cli.md
+- ./00009-serve-the-query-api.md
 tags:
 - feature
 ---
