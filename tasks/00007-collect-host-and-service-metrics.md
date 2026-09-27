@@ -10,12 +10,13 @@ tags:
 ---
 # Collect host and service metrics
 
-Every 15 seconds, the machine's own numbers, named by the OTel semantic conventions:
+Every 15 seconds, the machine's own numbers, read with the `sysinfo` crate on Linux and macOS, and named by the OTel semantic conventions:
 
 - `system.cpu.utilization`, `system.cpu.load_average.1m`, `.5m`, `.15m`
 - `system.memory.usage` and `system.paging.usage` (swap), by state
-- `system.filesystem.usage` for each real mount, by state
-- `system.network.io` for each interface except `lo`
-- For each systemd service: CPU time and memory from its cgroup v2 files, as `process.cpu.time` and `process.memory.usage` with `service` set to the unit
+- `system.filesystem.usage` for each real mount, by state. On macOS, APFS volumes share their container's free space, so report the container once.
+- `system.network.io` for each interface except loopback
 
-Linux only: `/proc`, `statfs`, and `/sys/fs/cgroup`. The tests read fixture copies of those files.
+For each service: `process.cpu.time` and `process.memory.usage` for the process tree under its main PID, with `service` set to the app. The PID comes from `systemctl show --property MainPID` on Linux and `launchctl print` on macOS. Which services to watch comes from a flag for now.
+
+Tests: the mapping from a `sysinfo` snapshot to metric points is a function, tested with a built snapshot. The PID lookup parses recorded `systemctl` and `launchctl` output.
