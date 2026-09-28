@@ -26,7 +26,7 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 - Host collector: CPU, memory, swap, load, disk, network, through the `sysinfo` crate on both platforms.
 - Health checks: HTTP, TCP, command, and heartbeats (a job POSTs to siner; a missing POST is a failure).
 - Timeline: deploys, restarts, OOM kills, health changes, and error logs in one stream.
-- UI: a SolidJS SPA, built with Vite, in a pnpm workspace under `packages/`: `app` is the SPA and `ui` its components, its Tailwind v4 theme of colors and type, and its fonts. The UI ships IBM Plex Sans and IBM Plex Mono, so it looks the same on macOS, Windows, and Linux. A release binary embeds `packages/app/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
+- UI: a SolidJS SPA, built with Vite, in a pnpm workspace under `packages/`: `app` is the SPA, `ui` its components, its Tailwind v4 theme of colors and type, and its fonts, and `viz` the parts that show data: a chart of values over time, a table, a stat, a sparkline, and the panel that frames them. The pages build on `viz`, and so will custom dashboards, so its props are plain data and name units (`count`, `duration`, `ratio`, `rate`, `bytes`) and series colors (`series-1` to `series-8`, `error`, `p95`) by string, which a dashboard can keep as JSON. The UI ships IBM Plex Sans and IBM Plex Mono, so it looks the same on macOS, Windows, and Linux. A release binary embeds `packages/app/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
 
 ## Storage
 
