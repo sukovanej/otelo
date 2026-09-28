@@ -26,7 +26,7 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 - Host collector: CPU, memory, swap, load, disk, network, through the `sysinfo` crate on both platforms.
 - Health checks: HTTP, TCP, command, and heartbeats (a job POSTs to siner; a missing POST is a failure).
 - Timeline: deploys, restarts, OOM kills, health changes, and error logs in one stream.
-- UI: a SolidJS SPA in `ui/`, built with Vite. A release binary embeds `ui/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
+- UI: a SolidJS SPA, built with Vite, in a pnpm workspace under `packages/`: `app` is the SPA and `ui` its components and color tokens. A release binary embeds `packages/app/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
 
 ## Storage
 
