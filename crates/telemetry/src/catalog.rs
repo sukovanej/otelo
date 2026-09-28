@@ -4,7 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, Transaction, params};
-use serde_json::{Map, Value};
+
+use crate::{AttributeValue, Attributes};
 
 /// The most values a key keeps. A key with more, such as a user ID, keeps the
 /// first ones and is marked as having many values.
@@ -46,19 +47,6 @@ impl Group {
         ]
         .into_iter()
         .find(|group| group.as_str() == text)
-    }
-}
-
-/// The JSON type of a value, as the catalog names it.
-pub fn type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "bool",
-        Value::Number(n) if n.is_f64() => "float",
-        Value::Number(_) => "int",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
     }
 }
 
@@ -120,15 +108,15 @@ impl Catalog {
     }
 
     /// Counts every attribute of one record.
-    pub fn record(&mut self, delta: &mut Delta, group: Group, attributes: &Map<String, Value>) {
+    pub fn record(&mut self, delta: &mut Delta, group: Group, attributes: &Attributes) {
         for (key, value) in attributes {
             self.value(delta, group, key, value);
         }
     }
 
     /// Counts one value of `key`.
-    pub fn value(&mut self, delta: &mut Delta, group: Group, key: &str, value: &Value) {
-        let kind = type_name(value);
+    pub fn value(&mut self, delta: &mut Delta, group: Group, key: &str, value: &AttributeValue) {
+        let kind = value.type_name();
         let slot = (group, key.to_owned());
         let known = self.keys.entry(slot.clone()).or_insert_with(|| Known {
             kind,
@@ -187,10 +175,13 @@ impl Catalog {
 
 /// A scalar value as the JSON the catalog keeps, or `None` when it is not
 /// worth completing.
-fn value_text(value: &Value) -> Option<String> {
+fn value_text(value: &AttributeValue) -> Option<String> {
     match value {
-        Value::String(text) if text.len() > MAX_VALUE_LEN => None,
-        Value::String(_) | Value::Number(_) | Value::Bool(_) => Some(value.to_string()),
+        AttributeValue::String(text) if text.len() > MAX_VALUE_LEN => None,
+        AttributeValue::String(_)
+        | AttributeValue::Int(_)
+        | AttributeValue::Double(_)
+        | AttributeValue::Bool(_) => Some(value.to_string()),
         _ => None,
     }
 }

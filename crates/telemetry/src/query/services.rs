@@ -3,12 +3,11 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::ensure;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use utoipa::ToSchema;
 
 use super::metrics::MAX_BUCKETS;
 use super::{Filter, STATUS_ERROR, cut, statement_span, time};
-use crate::Reader;
+use crate::{Attributes, Reader};
 
 /// The spans that enter a service, which count as its requests: a root span,
 /// or a span of the server or the consumer kind.
@@ -37,8 +36,7 @@ pub struct ServiceSummary {
     pub service: String,
     /// The attributes of the newest resource of the service that has any,
     /// such as `telemetry.sdk.language`.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
+    pub resource: Attributes,
     pub stats: ServiceStats,
     /// Every step of the range, oldest first.
     pub buckets: Vec<ServiceBucket>,
@@ -50,8 +48,7 @@ pub struct Service {
     pub service: String,
     /// The attributes of the newest resource of the service. Empty when the
     /// range has none of its telemetry.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
+    pub resource: Attributes,
     /// The range, after the retention capped it.
     #[schema(value_type = String, format = DateTime)]
     pub since: Timestamp,
@@ -97,8 +94,7 @@ pub struct Operation {
     pub kind: i32,
     /// The attributes of its newest request, which tell what the operation
     /// is, such as `http.request.method` and `http.route`.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
     pub requests: Requests,
 }
 
@@ -112,8 +108,7 @@ pub struct OperationDetail {
     /// The OpenTelemetry span kind.
     pub kind: i32,
     /// The attributes of its newest request. Empty when the range has none.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
     /// The range, after the retention capped it.
     #[schema(value_type = String, format = DateTime)]
     pub since: Timestamp,
@@ -432,7 +427,7 @@ impl Reader {
     fn span_attributes<'a>(
         &self,
         rows: impl Iterator<Item = &'a SpanRow>,
-    ) -> anyhow::Result<HashMap<SpanRow, Map<String, Value>>> {
+    ) -> anyhow::Result<HashMap<SpanRow, Attributes>> {
         let mut by_day: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
         for (day, rowid) in rows {
             by_day.entry(day).or_default().push(*rowid);
@@ -622,7 +617,7 @@ impl Reader {
     /// The attributes of the newest resource of each service, or of `only`
     /// that one, in the day files of the range. A resource with attributes
     /// wins over one without, such as the one of the writer's own counters.
-    fn resources(&self, only: Option<&str>) -> anyhow::Result<HashMap<String, Map<String, Value>>> {
+    fn resources(&self, only: Option<&str>) -> anyhow::Result<HashMap<String, Attributes>> {
         let mut where_ = Filter::new();
         if let Some(service) = only {
             where_.push("service = :service", ":service", service.to_owned());

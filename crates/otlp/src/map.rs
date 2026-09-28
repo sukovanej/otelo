@@ -16,9 +16,9 @@ use opentelemetry_proto::tonic::metrics::v1::{
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
-use serde_json::{Map, Value, json};
 use siner_telemetry::{
-    Batch, Histogram, Log, Metric, MetricKind, Point, Records, Resource, Span, now,
+    AttributeValue, Attributes, Batch, Histogram, Log, Metric, MetricKind, Point, Records,
+    Resource, Span, SpanEvent, now,
 };
 
 /// The service of a resource without `service.name`, as the OpenTelemetry SDKs name it.
@@ -155,7 +155,7 @@ pub fn metrics(request: ExportMetricsServiceRequest) -> Mapped {
 fn records(resource: Option<OtlpResource>) -> Records {
     let attributes = attributes(resource.map(|r| r.attributes).unwrap_or_default());
     let service = match attributes.get("service.name") {
-        Some(Value::String(name)) if !name.is_empty() => name.clone(),
+        Some(AttributeValue::String(name)) if !name.is_empty() => name.clone(),
         _ => UNKNOWN_SERVICE.into(),
     };
     Records {
@@ -171,27 +171,27 @@ fn records(resource: Option<OtlpResource>) -> Records {
 
 /// The attributes that name the instrumentation scope, which each record of
 /// the scope carries, as the OpenTelemetry spec maps a scope to formats without one.
-fn scope(scope: Option<InstrumentationScope>) -> Map<String, Value> {
-    let mut attributes = Map::new();
+fn scope(scope: Option<InstrumentationScope>) -> Attributes {
+    let mut attributes = Attributes::new();
     if let Some(scope) = scope {
         if !scope.name.is_empty() {
-            attributes.insert("otel.scope.name".into(), scope.name.into());
+            attributes.insert("otel.scope.name", scope.name);
         }
         if !scope.version.is_empty() {
-            attributes.insert("otel.scope.version".into(), scope.version.into());
+            attributes.insert("otel.scope.version", scope.version);
         }
     }
     attributes
 }
 
 /// The scope attributes, then the record's own, which win a clash.
-fn with_scope(scope: &Map<String, Value>, own: Vec<KeyValue>) -> Map<String, Value> {
+fn with_scope(scope: &Attributes, own: Vec<KeyValue>) -> Attributes {
     let mut attributes = scope.clone();
     attributes.extend(self::attributes(own));
     attributes
 }
 
-fn log(record: LogRecord, scope: &Map<String, Value>) -> Log {
+fn log(record: LogRecord, scope: &Attributes) -> Log {
     let ts = [record.time_unix_nano, record.observed_time_unix_nano]
         .into_iter()
         .find(|&ts| ts != 0)
@@ -203,7 +203,7 @@ fn log(record: LogRecord, scope: &Map<String, Value>) -> Log {
     };
     let mut attributes = with_scope(scope, record.attributes);
     if !record.event_name.is_empty() {
-        attributes.insert("event.name".into(), record.event_name.into());
+        attributes.insert("event.name", record.event_name);
     }
     Log {
         ts,
@@ -217,21 +217,19 @@ fn log(record: LogRecord, scope: &Map<String, Value>) -> Log {
 }
 
 /// `None` when the span has no valid trace or span ID.
-fn span(span: OtlpSpan, scope: &Map<String, Value>) -> Option<Span> {
+fn span(span: OtlpSpan, scope: &Attributes) -> Option<Span> {
     let mut attributes = with_scope(scope, span.attributes);
     let status = span.status.unwrap_or_default();
     if !status.message.is_empty() {
-        attributes.insert("otel.status_description".into(), status.message.into());
+        attributes.insert("otel.status_description", status.message);
     }
     let events = span
         .events
         .into_iter()
-        .map(|event| {
-            json!({
-                "ts": nanos(event.time_unix_nano),
-                "name": event.name,
-                "attributes": self::attributes(event.attributes),
-            })
+        .map(|event| SpanEvent {
+            ts: nanos(event.time_unix_nano),
+            name: event.name,
+            attributes: self::attributes(event.attributes),
         })
         .collect();
     Some(Span {
@@ -255,7 +253,7 @@ fn span(span: OtlpSpan, scope: &Map<String, Value>) -> Option<Span> {
 struct Series<'a> {
     name: String,
     unit: String,
-    scope: &'a Map<String, Value>,
+    scope: &'a Attributes,
 }
 
 impl Series<'_> {
@@ -357,33 +355,37 @@ fn id<const N: usize>(bytes: &[u8]) -> Option<[u8; N]> {
     id.iter().any(|&byte| byte != 0).then_some(id)
 }
 
-fn attributes(list: Vec<KeyValue>) -> Map<String, Value> {
+fn attributes(list: Vec<KeyValue>) -> Attributes {
     list.into_iter()
         .map(|kv| {
-            let value = kv.value.and_then(|v| v.value).map_or(Value::Null, value);
+            let value = kv
+                .value
+                .and_then(|v| v.value)
+                .map_or(AttributeValue::Null, value);
             (kv.key, value)
         })
         .collect()
 }
 
-/// An attribute value as JSON. Bytes are base64, as OTLP/JSON writes them.
-fn value(value: any_value::Value) -> Value {
+/// An attribute value. Bytes are base64, as OTLP/JSON writes them, and a
+/// double that JSON cannot hold, such as NaN, is its text.
+fn value(value: any_value::Value) -> AttributeValue {
     match value {
-        any_value::Value::StringValue(s) => Value::String(s),
-        any_value::Value::BoolValue(b) => Value::Bool(b),
-        any_value::Value::IntValue(i) => Value::from(i),
-        any_value::Value::DoubleValue(d) => serde_json::Number::from_f64(d)
-            .map_or_else(|| Value::String(d.to_string()), Value::Number),
-        any_value::Value::ArrayValue(array) => Value::Array(
+        any_value::Value::StringValue(s) => AttributeValue::String(s),
+        any_value::Value::BoolValue(b) => AttributeValue::Bool(b),
+        any_value::Value::IntValue(i) => AttributeValue::Int(i),
+        any_value::Value::DoubleValue(d) if d.is_finite() => AttributeValue::Double(d),
+        any_value::Value::DoubleValue(d) => AttributeValue::String(d.to_string()),
+        any_value::Value::ArrayValue(array) => AttributeValue::Array(
             array
                 .values
                 .into_iter()
-                .map(|v: AnyValue| v.value.map_or(Value::Null, self::value))
+                .map(|v: AnyValue| v.value.map_or(AttributeValue::Null, self::value))
                 .collect(),
         ),
-        any_value::Value::KvlistValue(list) => Value::Object(attributes(list.values)),
-        any_value::Value::BytesValue(bytes) => Value::String(STANDARD.encode(bytes)),
+        any_value::Value::KvlistValue(list) => AttributeValue::Map(attributes(list.values)),
+        any_value::Value::BytesValue(bytes) => AttributeValue::String(STANDARD.encode(bytes)),
         // Only profiles use the string table.
-        any_value::Value::StringValueStrindex(_) => Value::Null,
+        any_value::Value::StringValueStrindex(_) => AttributeValue::Null,
     }
 }

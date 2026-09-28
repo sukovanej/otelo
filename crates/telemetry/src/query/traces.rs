@@ -4,13 +4,12 @@ use anyhow::ensure;
 use jiff::Timestamp;
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use siner_query::{Builtin, Expr, Field, Op, Query, Signal};
 use utoipa::ToSchema;
 
 use super::compile::{Aliases, compile};
 use super::{Filter, LogLine, STATUS_ERROR, cut, hex, time, union};
-use crate::Reader;
+use crate::{Attributes, Reader, SpanEvent};
 
 /// Traces by their root span, newest first.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -38,11 +37,9 @@ pub struct TraceSummary {
     /// Whether a span of the trace failed.
     pub error: bool,
     /// The attributes of the root span, such as `http.route`.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
     /// The attributes of the resource that sent the root span.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
+    pub resource: Attributes,
 }
 
 /// The root span of a trace, before the counts of its spans.
@@ -53,8 +50,8 @@ struct Root {
     name: String,
     kind: i32,
     duration_ns: i64,
-    attributes: Map<String, Value>,
-    resource: Map<String, Value>,
+    attributes: Attributes,
+    resource: Attributes,
 }
 
 /// Spans, newest first.
@@ -94,22 +91,10 @@ pub struct TraceSpan {
     /// The OpenTelemetry status code.
     pub status: i32,
     pub error: bool,
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
     pub events: Vec<SpanEvent>,
     /// The attributes of the resource that sent the span.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
-}
-
-/// Something that happened at one time in a span, such as an exception.
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct SpanEvent {
-    /// Nanoseconds since the Unix epoch.
-    pub ts: i64,
-    pub name: String,
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub attributes: Map<String, Value>,
+    pub resource: Attributes,
 }
 
 const SPAN_COLUMNS: &str = "s.trace_id, s.span_id, s.parent_span_id, r.service, s.name, s.kind,

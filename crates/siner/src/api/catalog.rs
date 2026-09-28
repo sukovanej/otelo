@@ -8,7 +8,7 @@ use axum::extract::{Path, Query, State};
 use serde::{Deserialize, Serialize};
 use siner_query::{Signal, SuggestionKind};
 use siner_telemetry::IndexedKey;
-use siner_telemetry::query::{Attributes, ReaderCatalog};
+use siner_telemetry::query::{AttributeKeys, ReaderCatalog};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Api, ApiError, ApiResult, ErrorBody, WHOLE_RETENTION, parse_signal};
@@ -60,14 +60,14 @@ pub(super) struct SignalParams {
     path = "/api/attributes",
     params(SignalParams),
     responses(
-        (status = 200, body = Attributes),
+        (status = 200, body = AttributeKeys),
         (status = 400, body = ErrorBody),
     ),
 )]
 pub(super) async fn attributes(
     State(api): State<Api>,
     Query(params): Query<SignalParams>,
-) -> ApiResult<Attributes> {
+) -> ApiResult<AttributeKeys> {
     let signal = parse_signal(&params.signal)?;
     api.run([None, None], WHOLE_RETENTION, (None, 1), move |r| {
         Ok(r.reader.attributes(signal)?)
