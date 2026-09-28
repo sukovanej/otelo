@@ -1,0 +1,88 @@
+/* The Tailwind theme of the siner UI: its colors in light and dark, its fonts,
+   and its type scale. An app imports it after `tailwindcss`, and the fonts
+   with `@siner/ui/fonts.css`. Only these colors exist: `bg-surface`,
+   `text-muted`, `border-line`, and so on. */
+
+@theme {
+  --color-*: initial;
+  --color-surface: #ffffff;
+  --color-subtle: #f6f7f9;
+  --color-hover: #eef1f5;
+  --color-active: #e3e9f3;
+  --color-line: #dde1e7;
+  --color-line-focus: #b8c2d2;
+  --color-ink: #1c2027;
+  --color-muted: #69707d;
+  --color-accent: #2f6fdf;
+  --color-on-accent: #ffffff;
+  --color-placeholder: #8a5cc2;
+  --color-trace: #9aa1ad;
+  --color-debug: #69707d;
+  --color-info: #2f6fdf;
+  --color-warn: #b7791f;
+  --color-error: #d1343b;
+  --color-fatal: #a3167a;
+  --color-error-soft: #fdecec;
+  --color-hint: #fff7e0;
+  --color-bar: #dbe6fb;
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.45;
+  --text-xs: 11.5px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 12.5px;
+  --text-sm--line-height: 1.5;
+  --text-base: 13px;
+  --text-base--line-height: 1.45;
+  --text-md: 13.5px;
+  --text-md--line-height: 1.45;
+
+  --shadow-popup: 0 8px 28px rgb(0 0 0 / 0.16);
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-surface: #15171b;
+      --color-subtle: #1c1f24;
+      --color-hover: #23272e;
+      --color-active: #2a3140;
+      --color-line: #2e333b;
+      --color-line-focus: #4a5568;
+      --color-ink: #dfe3ea;
+      --color-muted: #8d95a3;
+      --color-accent: #5b8ff0;
+      --color-on-accent: #0d1117;
+      --color-placeholder: #b995e6;
+      --color-trace: #5f6672;
+      --color-debug: #8d95a3;
+      --color-info: #6ea0f5;
+      --color-warn: #e0a83a;
+      --color-error: #f0666b;
+      --color-fatal: #e36ac2;
+      --color-error-soft: #3a1d20;
+      --color-hint: #332b15;
+      --color-bar: #253552;
+    }
+  }
+
+  body {
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -1px;
+  }
+}

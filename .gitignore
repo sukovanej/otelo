@@ -2,3 +2,4 @@
 /.claude/worktrees/
 .DS_Store
 node_modules/
+/packages/app/dist/

@@ -1,0 +1,10 @@
+{
+  "name": "siner-web",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
+  }
+}

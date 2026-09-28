@@ -1,3 +1,41 @@
+[tools]
+node = "24"
+pnpm = "12"
+
+[vars]
+# The files oxfmt formats: the web packages and their configuration.
+web_files = "packages package.json pnpm-workspace.yaml tsconfig.base.json .oxlintrc.json .oxfmtrc.json"
+
+[tasks.fmt]
+description = "Format the Rust crates and the web packages"
+depends = ["web:fmt"]
+run = "cargo fmt --all"
+
+[tasks."web:install"]
+description = "Install the packages of the web UI"
+run = "pnpm install --frozen-lockfile"
+sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/*/package.json"]
+outputs = ["node_modules/.modules.yaml"]
+
+[tasks."web:build"]
+description = "Build the web UI into packages/app/dist, which the siner binary embeds"
+depends = ["web:install"]
+dir = "packages/app"
+run = "pnpm exec vite build"
+sources = ["../*/src/**/*", "index.html", "vite.config.ts", "../../pnpm-lock.yaml"]
+outputs = ["dist/index.html"]
+
+[tasks."web:dev"]
+description = "Serve the web UI with reloading on :5173, with the API of a daemon on :7070"
+depends = ["web:install"]
+dir = "packages/app"
+run = "pnpm exec vite"
+
+[tasks."web:fmt"]
+description = "Format the web packages with oxfmt"
+depends = ["web:install"]
+run = "pnpm exec oxfmt {{vars.web_files}}"
+
 [tasks."check:fmt"]
 description = "Rust formatting"
 run = "cargo fmt --all --check"
@@ -7,9 +45,38 @@ description = "Rust lints, with every warning a failure"
 run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
 
 [tasks."check:test"]
-description = "Rust tests"
+description = "Rust tests, against the built UI"
+depends = ["web:build"]
 run = "cargo test --workspace"
+
+[tasks."check:web:fmt"]
+description = "Web formatting"
+depends = ["web:install"]
+run = "pnpm exec oxfmt --check {{vars.web_files}}"
+
+[tasks."check:web:lint"]
+description = "Web lints with type information, with every warning a failure"
+depends = ["web:install"]
+run = "pnpm exec oxlint --type-aware --deny-warnings packages"
+
+[tasks."check:web:types"]
+description = "Web types, with tsc in each package"
+depends = ["web:install"]
+run = "pnpm --recursive exec tsc"
+
+[tasks."check:web:test"]
+description = "Web tests, with vitest in each package"
+depends = ["web:install"]
+run = "pnpm --recursive exec vitest run"
 
 [tasks.check]
 description = "Everything a change has to pass"
-depends = ["check:fmt", "check:clippy", "check:test"]
+depends = [
+  "check:fmt",
+  "check:clippy",
+  "check:test",
+  "check:web:fmt",
+  "check:web:lint",
+  "check:web:types",
+  "check:web:test",
+]

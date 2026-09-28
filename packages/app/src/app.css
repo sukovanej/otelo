@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@siner/ui/theme.css";
+
+/* The components of @siner/ui carry their classes in their source. */
+@source "../../ui/src";

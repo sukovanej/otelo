@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use crate::api::{self, Api};
 use crate::own::{self, Destination};
 use crate::state::State;
+use crate::ui;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
@@ -165,6 +166,7 @@ fn router(api: Api) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .merge(api::router(api))
+        .fallback(ui::serve)
 }
 
 /// Resolves on Ctrl-C, and on SIGTERM where there is one.

@@ -1,0 +1,25 @@
+{
+  "name": "@siner/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fonts.css": "./src/fonts.css",
+    "./theme.css": "./src/theme.css"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "catalog:",
+    "@fontsource/ibm-plex-sans": "catalog:"
+  },
+  "devDependencies": {
+    "solid-js": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "solid-js": "catalog:",
+    "tailwindcss": "catalog:"
+  }
+}
