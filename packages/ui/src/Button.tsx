@@ -1,4 +1,5 @@
 import { type JSX, splitProps } from "solid-js";
+
 import { control, cx, plain, type Size, sizes } from "./classes";
 
 const variants = {

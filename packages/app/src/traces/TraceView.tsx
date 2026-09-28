@@ -1,6 +1,8 @@
-import { Button, Callout, Tabs } from "@siner/ui";
 import { type Accessor, createMemo, createSignal, type JSX, Match, Show, Switch } from "solid-js";
+
 import { getTrace, type LogLine, search } from "@siner/api";
+import { Button, Callout, Tabs } from "@siner/ui";
+
 import Duration from "../Duration";
 import { createFetch } from "../fetch";
 import { count } from "../list";

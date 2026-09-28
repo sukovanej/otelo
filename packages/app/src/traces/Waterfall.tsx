@@ -1,7 +1,9 @@
 import { createSignal, For, Show } from "solid-js";
+
 import type { TraceSpan } from "@siner/api";
-import { closedErrorRow, closedRow, header, openRow, row, waterfallColumns } from "../classes";
 import { ChevronIcon } from "@siner/icons";
+
+import { closedErrorRow, closedRow, header, openRow, row, waterfallColumns } from "../classes";
 import Duration from "../Duration";
 import { toggleRow } from "../row";
 import Service from "../Service";

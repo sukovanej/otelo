@@ -3,6 +3,7 @@
 
 import type { Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
+
 import Icon, { type IconProps } from "./Icon";
 import { CodeIcon } from "./ui";
 

@@ -1,10 +1,12 @@
-import { Level } from "@siner/ui";
 import { For } from "solid-js";
+
 import type { LogLine } from "@siner/api";
+import { Level } from "@siner/ui";
+
+import { closedErrorRow, closedRow, header, lineColumns, openRow, row } from "../classes";
 import { toggleRow } from "../row";
 import Service from "../Service";
 import { formatTime, parseTime, timeWidth } from "../time";
-import { closedErrorRow, closedRow, header, lineColumns, openRow, row } from "../classes";
 
 /** What tells a line apart, so it stays selected when a reload brings it
  * again. */

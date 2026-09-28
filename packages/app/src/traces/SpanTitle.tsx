@@ -1,6 +1,8 @@
+import { Match, Show, Switch } from "solid-js";
+
 import { databaseName, DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@siner/icons";
 import { Badge, Level, type Tone, Tooltip } from "@siner/ui";
-import { Match, Show, Switch } from "solid-js";
+
 import { databaseId, type DbSpan, type HttpSpan, nameRest, spanMeaning } from "../semantics";
 
 const methodTones: Record<string, Tone> = {

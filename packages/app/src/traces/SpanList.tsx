@@ -1,5 +1,7 @@
 import { For } from "solid-js";
+
 import type { TraceSpan } from "@siner/api";
+
 import { closedErrorRow, closedRow, header, openRow, row, spanColumns } from "../classes";
 import Duration from "../Duration";
 import Measure from "../Measure";

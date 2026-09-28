@@ -1,6 +1,7 @@
+import type { JSX } from "solid-js";
+
 import { CloseIcon } from "@siner/icons";
 import { Button } from "@siner/ui";
-import type { JSX } from "solid-js";
 
 /** A panel beside a list that shows one of its rows in full: a bar of
  * `header` and Close over the scrolling `children`. */

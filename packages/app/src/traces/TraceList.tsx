@@ -1,6 +1,8 @@
 import { A } from "@solidjs/router";
 import { For } from "solid-js";
+
 import type { TraceSummary } from "@siner/api";
+
 import { closedErrorRow, closedRow, header, row, traceColumns } from "../classes";
 import Duration from "../Duration";
 import Measure from "../Measure";

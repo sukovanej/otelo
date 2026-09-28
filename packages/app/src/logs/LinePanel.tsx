@@ -1,7 +1,9 @@
-import { Level } from "@siner/ui";
 import { A } from "@solidjs/router";
 import { Show } from "solid-js";
+
 import type { LogLine } from "@siner/api";
+import { Level } from "@siner/ui";
+
 import { link } from "../classes";
 import Panel from "../Panel";
 import Service from "../Service";

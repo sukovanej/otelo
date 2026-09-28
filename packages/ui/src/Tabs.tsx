@@ -1,4 +1,5 @@
 import { For } from "solid-js";
+
 import { plain } from "./classes";
 
 /** A row of tabs, one of them selected. */

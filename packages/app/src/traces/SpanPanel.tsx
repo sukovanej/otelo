@@ -1,12 +1,14 @@
 import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
+
 import type { TraceSpan } from "@siner/api";
+
 import { heading, link, times } from "../classes";
 import Duration from "../Duration";
 import FieldTable, { Fields } from "../FieldTable";
 import Panel from "../Panel";
-import Service from "../Service";
 import { plainClick } from "../row";
+import Service from "../Service";
 import { formatDateTime, formatTime, nanosAfter, parseTime } from "../time";
 import KindBadge from "./KindBadge";
 import { spanSections } from "./span";

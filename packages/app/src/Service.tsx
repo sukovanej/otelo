@@ -1,5 +1,6 @@
 import { LanguageIcon, languageName } from "@siner/icons";
 import { Tooltip } from "@siner/ui";
+
 import { language } from "./semantics";
 
 /** The name of a service after the icon of its language, or of code when
