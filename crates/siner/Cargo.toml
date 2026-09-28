@@ -11,7 +11,9 @@ axum = { workspace = true }
 clap = { workspace = true }
 jiff = { workspace = true }
 serde = { workspace = true }
+rusqlite = { workspace = true }
 serde_json = { workspace = true }
+siner-query = { workspace = true }
 siner-telemetry = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

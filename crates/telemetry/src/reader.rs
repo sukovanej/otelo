@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -6,13 +7,22 @@ use anyhow::{Context, ensure};
 use rusqlite::Connection;
 
 use crate::day::Day;
+use crate::indexes::IndexedKey;
 use crate::writer::SCHEMA;
 
 /// The most day files one reader attaches: `SQLITE_MAX_ATTACHED` in the
 /// bundled SQLite.
 const MAX_DAYS: usize = 10;
 
-const TABLES: [&str; 5] = ["resources", "logs", "spans", "series", "points"];
+const TABLES: [&str; 7] = [
+    "resources",
+    "logs",
+    "spans",
+    "series",
+    "points",
+    "attribute_keys",
+    "attribute_values",
+];
 
 /// A read-only connection to the day files that a time range covers.
 ///
@@ -26,6 +36,7 @@ pub struct Reader {
     days: Vec<Day>,
     since: i64,
     until: i64,
+    indexes: BTreeSet<IndexedKey>,
 }
 
 impl Reader {
@@ -78,6 +89,7 @@ impl Reader {
             days,
             since,
             until,
+            indexes: BTreeSet::new(),
         })
     }
 
@@ -98,6 +110,17 @@ impl Reader {
     #[must_use]
     pub fn days(&self) -> &[Day] {
         &self.days
+    }
+
+    /// Tells the queries which attributes have an index, so they can report
+    /// the ones that do not.
+    pub fn set_indexes(&mut self, indexes: BTreeSet<IndexedKey>) {
+        self.indexes = indexes;
+    }
+
+    #[must_use]
+    pub const fn indexes(&self) -> &BTreeSet<IndexedKey> {
+        &self.indexes
     }
 
     /// The start of the range, in unix nanoseconds.

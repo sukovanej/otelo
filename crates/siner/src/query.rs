@@ -1,17 +1,22 @@
-//! The CLI commands that read telemetry: `logs`, `traces`, `trace`,
-//! `metrics`, and `sql`.
+//! The CLI commands that read telemetry: `logs`, `spans`, `traces`, `trace`,
+//! `metrics`, `metric`, `sql`, `attributes`, `complete`, and `index`.
 
 use std::collections::HashMap;
 use std::io::{self, Read};
 
+use siner_query::Signal;
 use siner_telemetry::query::{
-    GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, SqlResult, Trace, TraceSpan,
-    Traces,
+    Attributes, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Spans, SqlResult,
+    Trace, TraceSpan, Traces,
 };
 
-use crate::api::SqlRequest;
+use crate::api::{Completions, IndexList, SqlRequest};
 use crate::client::{Client, note_cut, path_segment, print_json};
 use crate::table::{self, Table};
+
+const QUERY_HELP: &str = "The records to keep, such as 'http.route = \"/matches\" OR user.id = 7'. \
+    Built-in fields come first; resource.<key> reads a resource attribute, and attr.<key> an \
+    attribute named like a built-in field. Quote it for the shell";
 
 /// The time range and the row limit of every query.
 #[derive(clap::Args)]
@@ -40,27 +45,31 @@ impl Range {
     }
 }
 
+/// A query given as one argument or as several words.
+fn joined(words: &[String]) -> Option<String> {
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+/// Tells on stderr which attributes of the query have no index.
+fn note_unindexed(signal: Signal, keys: &[String]) {
+    if let Some(first) = keys.first() {
+        let verb = if keys.len() == 1 { "has" } else { "have" };
+        eprintln!(
+            "{} {verb} no index, so the query read every record in the range; \
+             `siner index add {signal} {first}` adds one.",
+            keys.join(", ")
+        );
+    }
+}
+
 #[derive(clap::Args)]
 pub struct LogsArgs {
+    #[arg(help = QUERY_HELP)]
+    query: Vec<String>,
+
     /// Print the lines, not the groups by message template
     #[arg(long)]
     raw: bool,
-
-    /// Only the lines of this service
-    #[arg(long)]
-    service: Option<String>,
-
-    /// The lowest severity: trace, debug, info, warn, error, or fatal
-    #[arg(long)]
-    severity: Option<String>,
-
-    /// Words that every line contains
-    #[arg(long)]
-    search: Option<String>,
-
-    /// Only the lines of this trace
-    #[arg(long)]
-    trace: Option<String>,
 
     #[command(flatten)]
     range: Range,
@@ -71,13 +80,8 @@ pub struct LogsArgs {
 
 pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
-    params.extend([
-        ("service", args.service.clone()),
-        ("severity", args.severity.clone()),
-        ("search", args.search.clone()),
-        ("trace_id", args.trace.clone()),
-    ]);
-    let narrow = "narrow them with --since, --service, --severity, or --search, or raise --limit";
+    params.push(("q", joined(&args.query)));
+    let narrow = "narrow them with the query or --since, or raise --limit";
     if args.raw {
         let logs: Logs = args.client.get("/api/logs", &params)?;
         if args.client.wants_table() {
@@ -96,6 +100,7 @@ pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
             print_json(&logs)?;
         }
         note_cut(logs.truncated, &format!("More lines match; {narrow}."));
+        note_unindexed(Signal::Logs, &logs.unindexed);
         return Ok(());
     }
     let groups: LogGroups = args.client.get("/api/logs/groups", &params)?;
@@ -121,29 +126,66 @@ pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
     note_cut(
         groups.partial,
         &format!(
-            "The groups count only the newest {GROUP_SCAN_LIMIT} lines; narrow the range with --since."
+            "The groups count only the newest {GROUP_SCAN_LIMIT} lines; narrow the query or --since."
         ),
     );
+    note_unindexed(Signal::Logs, &groups.unindexed);
+    Ok(())
+}
+
+#[derive(clap::Args)]
+pub struct SpansArgs {
+    #[arg(help = QUERY_HELP)]
+    query: Vec<String>,
+
+    #[command(flatten)]
+    range: Range,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+pub fn spans(args: &SpansArgs) -> anyhow::Result<()> {
+    let mut params = args.range.params();
+    params.push(("q", joined(&args.query)));
+    let spans: Spans = args.client.get("/api/spans", &params)?;
+    if args.client.wants_table() {
+        let mut table = Table::new(&[
+            "TRACE",
+            "START (UTC)",
+            "SERVICE",
+            "DURATION",
+            "ERROR",
+            "NAME",
+        ]);
+        for span in &spans.spans {
+            table.row(vec![
+                span.trace_id.clone(),
+                table::time(span.time),
+                span.service.clone(),
+                table::duration(span.duration_ns),
+                if span.error { "ERROR" } else { "" }.into(),
+                span.name.clone(),
+            ]);
+        }
+        table.print()?;
+    } else {
+        print_json(&spans)?;
+    }
+    note_cut(
+        spans.truncated,
+        "More spans match; narrow them with the query or --since, or raise --limit.",
+    );
+    note_unindexed(Signal::Spans, &spans.unindexed);
     Ok(())
 }
 
 #[derive(clap::Args)]
 pub struct TracesArgs {
-    /// Only the traces whose root span is of this service
-    #[arg(long)]
-    service: Option<String>,
-
-    /// Only the traces whose root span name contains this text
-    #[arg(long)]
-    name: Option<String>,
-
-    /// Only the traces that take at least this long, such as 500ms
-    #[arg(long)]
-    min_duration: Option<String>,
-
-    /// Only the traces with a failed span
-    #[arg(long)]
-    errors: bool,
+    /// The traces to keep: those with a span that the query keeps, such as
+    /// 'error = true' or 'root = true AND duration > 500ms'. Quote it for the
+    /// shell
+    query: Vec<String>,
 
     #[command(flatten)]
     range: Range,
@@ -154,12 +196,7 @@ pub struct TracesArgs {
 
 pub fn traces(args: &TracesArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
-    params.extend([
-        ("service", args.service.clone()),
-        ("name", args.name.clone()),
-        ("min_duration", args.min_duration.clone()),
-        ("errors", args.errors.then(|| "true".into())),
-    ]);
+    params.push(("q", joined(&args.query)));
     let traces: Traces = args.client.get("/api/traces", &params)?;
     if args.client.wants_table() {
         let mut table = Table::new(&[
@@ -188,9 +225,9 @@ pub fn traces(args: &TracesArgs) -> anyhow::Result<()> {
     }
     note_cut(
         traces.truncated,
-        "More traces match; narrow them with --since, --service, --name, --min-duration, or \
-         --errors, or raise --limit.",
+        "More traces match; narrow them with the query or --since, or raise --limit.",
     );
+    note_unindexed(Signal::Spans, &traces.unindexed);
     Ok(())
 }
 
@@ -301,16 +338,51 @@ fn print_tree(trace: &Trace) -> anyhow::Result<()> {
 
 #[derive(clap::Args)]
 pub struct MetricsArgs {
-    /// The metric to print; without it, the list of series
-    name: Option<String>,
+    /// The series to keep, by name, service, kind, unit, labels, and
+    /// resource, such as 'name ~ http service = api'. Quote it for the shell
+    query: Vec<String>,
 
-    /// Only the series of this service
-    #[arg(long)]
-    service: Option<String>,
+    #[command(flatten)]
+    range: Range,
 
-    /// Only the series with this label, as name=value; repeat for more
-    #[arg(long = "label", value_name = "NAME=VALUE")]
-    labels: Vec<String>,
+    #[command(flatten)]
+    client: Client,
+}
+
+pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
+    let mut params = args.range.params();
+    params.push(("q", joined(&args.query)));
+    let list: MetricList = args.client.get("/api/metrics", &params)?;
+    if args.client.wants_table() {
+        let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "LABELS"]);
+        for series in &list.series {
+            table.row(vec![
+                series.name.clone(),
+                series.kind.clone(),
+                series.unit.clone(),
+                series.service.clone(),
+                table::labels(&series.labels),
+            ]);
+        }
+        table.print()?;
+    } else {
+        print_json(&list)?;
+    }
+    note_cut(
+        list.truncated,
+        "More series exist; narrow them with the query, or raise --limit.",
+    );
+    Ok(())
+}
+
+#[derive(clap::Args)]
+pub struct MetricArgs {
+    /// The name of the metric
+    name: String,
+
+    /// The series of the metric to keep, by labels and resource, such as
+    /// 'state = used'. Quote it for the shell
+    query: Vec<String>,
 
     /// The length of a bucket, such as 1m [default: one that makes 120 buckets
     /// at most]
@@ -324,42 +396,13 @@ pub struct MetricsArgs {
     client: Client,
 }
 
-pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
+pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
-    params.push(("service", args.service.clone()));
-    let Some(name) = &args.name else {
-        let list: MetricList = args.client.get("/api/metrics", &params)?;
-        if args.client.wants_table() {
-            let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "LABELS"]);
-            for series in &list.series {
-                table.row(vec![
-                    series.name.clone(),
-                    series.kind.clone(),
-                    series.unit.clone(),
-                    series.service.clone(),
-                    table::labels(&series.labels),
-                ]);
-            }
-            table.print()?;
-        } else {
-            print_json(&list)?;
-        }
-        note_cut(
-            list.truncated,
-            "More series exist; narrow them with --service, or raise --limit.",
-        );
-        return Ok(());
-    };
-    params.extend([
-        (
-            "labels",
-            (!args.labels.is_empty()).then(|| args.labels.join(",")),
-        ),
-        ("step", args.step.clone()),
-    ]);
-    let metric: MetricSeries = args
-        .client
-        .get(&format!("/api/metrics/{}", path_segment(name)), &params)?;
+    params.extend([("q", joined(&args.query)), ("step", args.step.clone())]);
+    let metric: MetricSeries = args.client.get(
+        &format!("/api/metrics/{}", path_segment(&args.name)),
+        &params,
+    )?;
     if args.client.wants_table() {
         for (i, series) in metric.series.iter().enumerate() {
             if i > 0 {
@@ -397,7 +440,7 @@ pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
     }
     note_cut(
         metric.truncated,
-        "More series match; narrow them with --service or --label, or raise --limit.",
+        "More series match; narrow them with the query, or raise --limit.",
     );
     Ok(())
 }
@@ -406,7 +449,7 @@ pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
 pub struct SqlArgs {
     /// One SELECT, or - to read it from stdin. It reads the views resources,
     /// logs, spans, series, and points, which join the day files of the range
-    /// with a day column in front
+    /// with a day column in front, and the attribute catalog
     query: String,
 
     #[command(flatten)]
@@ -449,5 +492,137 @@ pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
         result.truncated,
         "The query returned more rows; narrow it with a WHERE, or raise --limit.",
     );
+    Ok(())
+}
+
+#[derive(clap::Args)]
+pub struct AttributesArgs {
+    /// logs, spans, or metrics
+    signal: Signal,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+pub fn attributes(args: &AttributesArgs) -> anyhow::Result<()> {
+    let attributes: Attributes = args.client.get(
+        "/api/attributes",
+        &[("signal", Some(args.signal.to_string()))],
+    )?;
+    if args.client.wants_table() {
+        let mut table = Table::new(&["FIELD", "TYPE", "COUNT", "INDEXED"]);
+        let rows = attributes
+            .record
+            .iter()
+            .map(|a| (siner_query::Field::Attribute(a.key.clone()), a))
+            .chain(
+                attributes
+                    .resource
+                    .iter()
+                    .map(|a| (siner_query::Field::Resource(a.key.clone()), a)),
+            );
+        for (field, attribute) in rows {
+            table.row(vec![
+                field.to_string(),
+                attribute.kind.clone(),
+                attribute.count.to_string(),
+                if attribute.indexed { "yes" } else { "" }.into(),
+            ]);
+        }
+        table.print()?;
+    } else {
+        print_json(&attributes)?;
+    }
+    Ok(())
+}
+
+#[derive(clap::Args)]
+pub struct CompleteArgs {
+    /// logs, spans, or metrics
+    signal: Signal,
+
+    /// The query as typed so far
+    #[arg(default_value = "")]
+    query: String,
+
+    /// The position of the cursor in the query, in characters [default: the
+    /// end]
+    #[arg(long)]
+    cursor: Option<usize>,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+pub fn complete(args: &CompleteArgs) -> anyhow::Result<()> {
+    let completions: Completions = args.client.get(
+        "/api/complete",
+        &[
+            ("signal", Some(args.signal.to_string())),
+            ("q", Some(args.query.clone())),
+            ("cursor", args.cursor.map(|n| n.to_string())),
+        ],
+    )?;
+    if args.client.wants_table() {
+        let mut table = Table::new(&["SUGGESTION", "KIND", "DETAIL"]);
+        for suggestion in &completions.suggestions {
+            table.row(vec![
+                suggestion.text.clone(),
+                suggestion.kind.clone(),
+                suggestion.detail.clone().unwrap_or_default(),
+            ]);
+        }
+        table.print()?;
+    } else {
+        print_json(&completions)?;
+    }
+    Ok(())
+}
+
+#[derive(clap::Args)]
+pub struct IndexArgs {
+    #[command(subcommand)]
+    command: IndexCommand,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+#[derive(clap::Subcommand)]
+enum IndexCommand {
+    /// List the indexed attributes
+    List,
+    /// Index an attribute of the logs or the spans in every day file
+    Add {
+        /// logs or spans
+        signal: Signal,
+        /// The attribute key, such as user.id
+        key: String,
+    },
+    /// Drop the index of an attribute
+    Remove {
+        /// logs or spans
+        signal: Signal,
+        /// The attribute key
+        key: String,
+    },
+}
+
+pub fn index(args: &IndexArgs) -> anyhow::Result<()> {
+    let path = |signal: &Signal, key: &str| format!("/api/indexes/{signal}/{}", path_segment(key));
+    let list: IndexList = match &args.command {
+        IndexCommand::List => args.client.get("/api/indexes", &[])?,
+        IndexCommand::Add { signal, key } => args.client.put(&path(signal, key))?,
+        IndexCommand::Remove { signal, key } => args.client.delete(&path(signal, key))?,
+    };
+    if args.client.wants_table() {
+        let mut table = Table::new(&["SIGNAL", "KEY"]);
+        for index in &list.indexes {
+            table.row(vec![index.signal.clone(), index.key.clone()]);
+        }
+        table.print()?;
+    } else {
+        print_json(&list)?;
+    }
     Ok(())
 }

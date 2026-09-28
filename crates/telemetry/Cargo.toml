@@ -11,6 +11,7 @@ jiff = { workspace = true, features = ["serde"] }
 rusqlite = { workspace = true, features = ["hooks", "limits"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+siner-query = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
 utoipa = { workspace = true }

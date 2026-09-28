@@ -6,12 +6,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use utoipa::ToSchema;
 
+use siner_query::{Query, Signal};
+
+use super::compile::{Aliases, compile};
 use super::{Filter, cut, time};
 use crate::Reader;
 
-/// The service, kind, unit, and labels of a series. Series from different
-/// day files are one series when these match.
-type Key = (String, String, String, String);
+/// The service, kind, unit, labels, and resource attributes of a series.
+/// Series from different day files are one series when these match.
+type Key = (String, String, String, String, String);
+
+const ALIASES: Aliases = Aliases {
+    record: "s",
+    resource: "r",
+};
 
 /// The most buckets one series can have.
 pub const MAX_BUCKETS: i64 = 10_000;
@@ -65,14 +73,16 @@ pub struct SeriesInfo {
     pub service: String,
     #[schema(value_type = Object)]
     pub labels: Map<String, Value>,
+    /// The attributes of the resource that sends the series.
+    #[schema(value_type = Object)]
+    pub resource: Map<String, Value>,
 }
 
 #[derive(Clone, Debug)]
 pub struct MetricFilter {
     pub name: String,
-    pub service: Option<String>,
-    /// Label names and the values they must have.
-    pub labels: Vec<(String, String)>,
+    /// The series of the metric to keep, by their labels and resource.
+    pub query: Query,
     /// The length of a bucket in nanoseconds.
     pub step_ns: i64,
 }
@@ -94,6 +104,8 @@ pub struct Series {
     pub unit: String,
     #[schema(value_type = Object)]
     pub labels: Map<String, Value>,
+    #[schema(value_type = Object)]
+    pub resource: Map<String, Value>,
     /// The buckets that have points, oldest first.
     pub buckets: Vec<Bucket>,
 }
@@ -113,12 +125,19 @@ pub struct Bucket {
 }
 
 impl Reader {
-    /// The series that have points in the range, `limit` at most.
+    /// The series with points in the range that `query` keeps, `limit` at
+    /// most.
     ///
     /// # Errors
     ///
-    /// When the query fails, such as when it runs past the time limit.
-    pub fn metrics(&self, service: Option<&str>, limit: usize) -> anyhow::Result<MetricList> {
+    /// When the query is invalid for metrics, or when it fails, such as when
+    /// it runs past the time limit.
+    pub fn metrics(&self, query: &Query, limit: usize) -> anyhow::Result<MetricList> {
+        ensure!(
+            query.signal == Signal::Metrics,
+            "the query is over {}, not metrics",
+            query.signal
+        );
         let mut where_ = Filter::new();
         where_.push_clause(
             "EXISTS (SELECT 1 FROM $day.points p
@@ -127,15 +146,14 @@ impl Reader {
         );
         where_.param(":since", self.since());
         where_.param(":until", self.until());
-        if let Some(service) = service {
-            where_.push("r.service = :service", ":service", service.to_owned());
-        }
+        compile(query, ALIASES, self.indexes(), "q", &mut where_)?;
         let tail = format!(") ORDER BY name, service, labels LIMIT {}", limit + 1);
         let mut series = self.collect(
             ["SELECT DISTINCT * FROM (", &tail],
             |day| {
                 format!(
-                    "SELECT s.name, s.kind, s.unit, r.service, s.labels
+                    "SELECT s.name, s.kind, s.unit, r.service, s.labels,
+                            r.attributes AS resource
                      FROM {day}.series s JOIN {day}.resources r ON r.id = s.resource_id
                      WHERE {}",
                     where_.sql(day)
@@ -144,12 +162,14 @@ impl Reader {
             &where_,
             |row| {
                 let labels: String = row.get(4)?;
+                let resource: String = row.get(5)?;
                 Ok(SeriesInfo {
                     name: row.get(0)?,
                     kind: row.get(1)?,
                     unit: row.get(2)?,
                     service: row.get(3)?,
                     labels: serde_json::from_str(&labels)?,
+                    resource: serde_json::from_str(&resource)?,
                 })
             },
         )?;
@@ -171,27 +191,21 @@ impl Reader {
             (self.until() - self.since()) / step <= MAX_BUCKETS,
             "the step makes more than {MAX_BUCKETS} buckets in the range; raise the step"
         );
+        ensure!(
+            filter.query.signal == Signal::Metrics,
+            "the query is over {}, not metrics",
+            filter.query.signal
+        );
         let mut where_ = Filter::range(self, "p.ts");
         where_.push("s.name = :name", ":name", filter.name.clone());
-        if let Some(service) = &filter.service {
-            where_.push("r.service = :service", ":service", service.clone());
-        }
-        for (i, (label, value)) in filter.labels.iter().enumerate() {
-            let path = format!("$.\"{}\"", label.replace('"', "\\\""));
-            where_.push(
-                &format!("CAST(json_extract(s.labels, :label{i}) AS TEXT) = :value{i}"),
-                &format!(":label{i}"),
-                path,
-            );
-            where_.param(&format!(":value{i}"), value.clone());
-        }
+        compile(&filter.query, ALIASES, self.indexes(), "q", &mut where_)?;
         let mut series: BTreeMap<Key, BTreeMap<i64, Bucket>> = BTreeMap::new();
         let mut truncated = false;
         self.scan(
             ["", " ORDER BY ts"],
             |day| {
                 format!(
-                    "SELECT r.service, s.kind, s.unit, s.labels, p.ts, p.value
+                    "SELECT r.service, s.kind, s.unit, s.labels, r.attributes, p.ts, p.value
                      FROM {day}.points p
                      JOIN {day}.series s ON s.id = p.series_id
                      JOIN {day}.resources r ON r.id = s.resource_id
@@ -201,9 +215,15 @@ impl Reader {
             },
             &where_,
             |row| {
-                let key: Key = (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);
-                let ts: i64 = row.get(4)?;
-                let value: f64 = row.get(5)?;
+                let key: Key = (
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                );
+                let ts: i64 = row.get(5)?;
+                let value: f64 = row.get(6)?;
                 let len = series.len();
                 let buckets = match series.entry(key) {
                     Entry::Occupied(entry) => entry.into_mut(),
@@ -233,12 +253,13 @@ impl Reader {
         )?;
         let series = series
             .into_iter()
-            .map(|((service, kind, unit, labels), buckets)| {
+            .map(|((service, kind, unit, labels, resource), buckets)| {
                 Ok(Series {
                     service,
                     kind,
                     unit,
                     labels: serde_json::from_str(&labels)?,
+                    resource: serde_json::from_str(&resource)?,
                     buckets: buckets
                         .into_values()
                         .map(|mut bucket| {

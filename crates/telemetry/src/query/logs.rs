@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use utoipa::ToSchema;
 
+use anyhow::ensure;
+use siner_query::{Query, Signal};
+
+use super::compile::{Aliases, compile};
 use super::{Filter, cut, hex, level, template, time};
 use crate::Reader;
 
@@ -16,22 +20,15 @@ pub const GROUP_SCAN_LIMIT: u64 = 50_000;
 /// How many different bodies a group keeps as samples.
 const SAMPLES: usize = 3;
 
-#[derive(Clone, Debug, Default)]
-pub struct LogFilter {
-    pub service: Option<String>,
-    /// The lowest severity number to keep.
-    pub min_severity: Option<i32>,
-    /// Words that every body has to contain, found with FTS5.
-    pub search: Option<String>,
-    pub trace_id: Option<[u8; 16]>,
-}
-
 /// Log lines, newest first.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Logs {
     pub logs: Vec<LogLine>,
     /// More lines match than the limit let through.
     pub truncated: bool,
+    /// The attributes the query compares that have no index, so it read every
+    /// line in the range.
+    pub unindexed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -48,6 +45,9 @@ pub struct LogLine {
     pub span_id: Option<String>,
     #[schema(value_type = Object)]
     pub attributes: Map<String, Value>,
+    /// The attributes of the resource that sent the line.
+    #[schema(value_type = Object)]
+    pub resource: Map<String, Value>,
     /// `otlp`, or the service log source that read the line.
     pub source: String,
 }
@@ -63,6 +63,8 @@ pub struct LogGroups {
     /// The range has more lines than the grouping reads, so the groups count
     /// only the newest ones.
     pub partial: bool,
+    /// The attributes the query compares that have no index.
+    pub unindexed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -83,32 +85,26 @@ pub struct LogGroup {
     pub samples: Vec<String>,
 }
 
-impl LogFilter {
-    fn filter(&self, reader: &Reader) -> Filter {
-        let mut filter = Filter::range(reader, "l.ts");
-        if let Some(service) = &self.service {
-            filter.push("r.service = :service", ":service", service.clone());
-        }
-        if let Some(severity) = self.min_severity {
-            filter.push("l.severity >= :severity", ":severity", i64::from(severity));
-        }
-        if let Some(id) = self.trace_id {
-            filter.push("l.trace_id = :trace_id", ":trace_id", id.to_vec());
-        }
-        if let Some(search) = self.search.as_deref().and_then(fts_query) {
-            filter.push(
-                "l.rowid IN (SELECT rowid FROM $day.logs_fts WHERE logs_fts MATCH :search)",
-                ":search",
-                search,
-            );
-        }
-        filter
-    }
+/// The conditions of a log query, and the attributes it compares that have no
+/// index.
+fn filter(reader: &Reader, query: &Query) -> anyhow::Result<(Filter, Vec<String>)> {
+    ensure!(
+        query.signal == Signal::Logs,
+        "the query is over {}, not logs",
+        query.signal
+    );
+    let mut filter = Filter::range(reader, "l.ts");
+    let aliases = Aliases {
+        record: "l",
+        resource: "r",
+    };
+    let unindexed = compile(query, aliases, reader.indexes(), "q", &mut filter)?;
+    Ok((filter, unindexed))
 }
 
 /// Each word of `text` as an FTS5 string, so that punctuation in it is
 /// matched and not read as query syntax. `None` when there are no words.
-fn fts_query(text: &str) -> Option<String> {
+pub(super) fn fts_query(text: &str) -> Option<String> {
     let words: Vec<String> = text
         .split_whitespace()
         .map(|word| format!("\"{}\"", word.replace('"', "\"\"")))
@@ -127,30 +123,35 @@ fn select(columns: &str, filter: &Filter) -> impl Fn(&str) -> String {
 }
 
 impl Reader {
-    /// The newest `limit` log lines that pass `filter`.
+    /// The newest `limit` log lines that `query` keeps.
     ///
     /// # Errors
     ///
-    /// When the query fails, such as when it runs past the time limit.
-    pub fn logs(&self, filter: &LogFilter, limit: usize) -> anyhow::Result<Logs> {
-        let where_ = filter.filter(self);
-        let columns =
-            "l.ts, r.service, l.severity, l.body, l.trace_id, l.span_id, l.attributes, l.source";
+    /// When the query is invalid for logs, or when it fails, such as when it
+    /// runs past the time limit.
+    pub fn logs(&self, query: &Query, limit: usize) -> anyhow::Result<Logs> {
+        let (where_, unindexed) = filter(self, query)?;
+        let columns = "l.ts, r.service, l.severity, l.body, l.trace_id, l.span_id, l.attributes,
+                       l.source, r.attributes AS resource";
         let tail = format!(" ORDER BY ts DESC LIMIT {}", limit + 1);
         let mut logs = self.collect(["", &tail], select(columns, &where_), &where_, log_line)?;
         let truncated = cut(&mut logs, limit);
-        Ok(Logs { logs, truncated })
+        Ok(Logs {
+            logs,
+            truncated,
+            unindexed,
+        })
     }
 
-    /// The log lines that pass `filter`, grouped by message template. Reads
+    /// The log lines that `query` keeps, grouped by message template. Reads
     /// the newest [`GROUP_SCAN_LIMIT`] lines at most, and returns the `limit`
     /// largest groups.
     ///
     /// # Errors
     ///
     /// When the query fails, such as when it runs past the time limit.
-    pub fn log_groups(&self, filter: &LogFilter, limit: usize) -> anyhow::Result<LogGroups> {
-        let where_ = filter.filter(self);
+    pub fn log_groups(&self, query: &Query, limit: usize) -> anyhow::Result<LogGroups> {
+        let (where_, unindexed) = filter(self, query)?;
         let columns = "l.ts, r.service, l.severity, l.body";
         let tail = format!(" ORDER BY ts DESC LIMIT {}", GROUP_SCAN_LIMIT + 1);
         let mut groups: HashMap<String, Acc> = HashMap::new();
@@ -204,6 +205,7 @@ impl Reader {
             truncated,
             scanned,
             partial,
+            unindexed,
         })
     }
 }
@@ -222,6 +224,7 @@ fn log_line(row: &Row) -> anyhow::Result<LogLine> {
     let trace_id: Option<Vec<u8>> = row.get(4)?;
     let span_id: Option<Vec<u8>> = row.get(5)?;
     let attributes: String = row.get(6)?;
+    let resource: String = row.get(8)?;
     Ok(LogLine {
         time: time(row.get(0)?),
         service: row.get(1)?,
@@ -231,6 +234,7 @@ fn log_line(row: &Row) -> anyhow::Result<LogLine> {
         trace_id: trace_id.as_deref().map(hex),
         span_id: span_id.as_deref().map(hex),
         attributes: serde_json::from_str(&attributes)?,
+        resource: serde_json::from_str(&resource)?,
         source: row.get(7)?,
     })
 }

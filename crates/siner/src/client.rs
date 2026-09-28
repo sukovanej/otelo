@@ -15,15 +15,20 @@ const MAX_RESPONSE: u64 = 256 * 1024 * 1024;
 #[derive(clap::Args)]
 pub struct Client {
     /// Address of the siner daemon
-    #[arg(long, env = "SINER_URL", default_value = "http://127.0.0.1:7070")]
+    #[arg(
+        long,
+        env = "SINER_URL",
+        default_value = "http://127.0.0.1:7070",
+        global = true
+    )]
     daemon: String,
 
     /// Print JSON, the default when stdout is not a terminal
-    #[arg(long, conflicts_with = "table")]
+    #[arg(long, conflicts_with = "table", global = true)]
     json: bool,
 
     /// Print a table, the default when stdout is a terminal
-    #[arg(long)]
+    #[arg(long, global = true)]
     table: bool,
 }
 
@@ -62,6 +67,22 @@ impl Client {
         let response = Self::agent()
             .post(self.url(path))
             .send_json(body)
+            .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
+        read(response)
+    }
+
+    pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
+        let response = Self::agent()
+            .put(self.url(path))
+            .send_empty()
+            .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
+        read(response)
+    }
+
+    pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
+        let response = Self::agent()
+            .delete(self.url(path))
+            .call()
             .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
         read(response)
     }

@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,7 +13,9 @@ use rusqlite::{Connection, Transaction, params};
 use serde_json::Map;
 use twox_hash::XxHash3_64;
 
+use crate::catalog::{Catalog, Delta, Group};
 use crate::day::{self, Day};
+use crate::indexes::{self, IndexedKey, Indexes};
 use crate::{Batch, Log, Metric, MetricKind, Point, Records, Resource, Span};
 
 pub const SCHEMA: &str = include_str!("schema.sql");
@@ -24,20 +26,25 @@ const REPORT_EVERY: Duration = Duration::from_mins(1);
 const RETAIN_EVERY: Duration = Duration::from_hours(1);
 /// The most batches the writer takes into one transaction.
 const MAX_ROUND: usize = 64;
+/// How long a change to the indexed attributes waits for the writer.
+const CHECK_INDEXES_EVERY: Duration = Duration::from_secs(1);
 
 pub struct Config {
     /// The directory of the day files, made when it is missing.
     pub dir: PathBuf,
     /// How many days of files to keep, today included.
     pub retention_days: u16,
+    /// The attributes to index in every day file.
+    pub indexes: Indexes,
 }
 
 impl Config {
     #[must_use]
-    pub const fn new(dir: PathBuf) -> Self {
+    pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
             retention_days: 7,
+            indexes: Indexes::new(BTreeSet::new()),
         }
     }
 }
@@ -128,6 +135,8 @@ struct State {
     files: HashMap<Day, DayFile>,
     dropped: Arc<AtomicU64>,
     reported: u64,
+    /// The indexed attributes the day files have, and the version of the set.
+    indexed: (Option<u64>, BTreeSet<IndexedKey>),
 }
 
 impl State {
@@ -137,6 +146,7 @@ impl State {
             files: HashMap::new(),
             dropped,
             reported: 0,
+            indexed: (None, BTreeSet::new()),
         }
     }
 
@@ -145,9 +155,11 @@ impl State {
         let mut next_report = Instant::now() + REPORT_EVERY;
         let mut next_retain = Instant::now() + RETAIN_EVERY;
         loop {
+            self.apply_indexes();
             let wait = next_report
                 .min(next_retain)
-                .saturating_duration_since(Instant::now());
+                .saturating_duration_since(Instant::now())
+                .min(CHECK_INDEXES_EVERY);
             match inbox.recv_timeout(wait) {
                 Ok(batch) => {
                     let mut batches = vec![batch];
@@ -217,15 +229,50 @@ impl State {
     fn write_day(&mut self, day: Day, parts: &[(&Resource, Part)]) -> anyhow::Result<()> {
         let file = match self.files.entry(day) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert(DayFile::open(&self.config.dir, day)?),
+            Entry::Vacant(entry) => {
+                entry.insert(DayFile::open(&self.config.dir, day, &self.indexed.1)?)
+            }
         };
         let result = file.write(parts);
         if result.is_err() {
-            // The rollback took back the ids the caches learned.
+            // The rollback took back what the caches learned.
             file.resources.clear();
             file.series.clear();
+            file.catalog = Catalog::load(&file.conn).unwrap_or_default();
         }
         result
+    }
+
+    /// Brings the indexes of every day file in line with the configured set,
+    /// when the set changed.
+    fn apply_indexes(&mut self) {
+        let (version, keys) = self.config.indexes.snapshot();
+        if self.indexed.0 == Some(version) {
+            return;
+        }
+        let names = match fs::read_dir(&self.config.dir) {
+            Ok(entries) => entries
+                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                .filter(|name| name.ends_with(".sqlite"))
+                .filter_map(|name| Day::from_file_name(&name))
+                .collect::<Vec<_>>(),
+            Err(error) => {
+                tracing::error!("list the day files: {error:#}");
+                return;
+            }
+        };
+        for day in names {
+            let result = match self.files.get(&day) {
+                Some(file) => indexes::apply(&file.conn, &keys).map_err(anyhow::Error::from),
+                None => Connection::open(self.config.dir.join(day.file_name()))
+                    .map_err(anyhow::Error::from)
+                    .and_then(|conn| Ok(indexes::apply(&conn, &keys)?)),
+            };
+            if let Err(error) = result {
+                tracing::error!(%day, "index the attributes: {error:#}");
+            }
+        }
+        self.indexed = (Some(version), keys);
     }
 
     /// Records the drop counter as a cumulative sum in today's file.
@@ -329,30 +376,41 @@ struct DayFile {
     resources: HashMap<i64, i64>,
     /// Series hash to id.
     series: HashMap<i64, i64>,
+    catalog: Catalog,
 }
 
 impl DayFile {
-    fn open(dir: &Path, day: Day) -> anyhow::Result<Self> {
+    fn open(dir: &Path, day: Day, indexed: &BTreeSet<IndexedKey>) -> anyhow::Result<Self> {
         let path = dir.join(day.file_name());
         let conn = Connection::open(&path).with_context(|| format!("open {}", path.display()))?;
         conn.execute_batch(SCHEMA)
             .with_context(|| format!("create the schema in {}", path.display()))?;
+        indexes::apply(&conn, indexed)
+            .with_context(|| format!("index the attributes in {}", path.display()))?;
+        let catalog = Catalog::load(&conn)
+            .with_context(|| format!("read the attribute catalog of {}", path.display()))?;
         Ok(Self {
             conn,
             resources: HashMap::new(),
             series: HashMap::new(),
+            catalog,
         })
     }
 
     fn write(&mut self, parts: &[(&Resource, Part)]) -> anyhow::Result<()> {
         let tx = self.conn.transaction()?;
+        let mut delta = Delta::default();
+        let catalog = &mut self.catalog;
         for (resource, part) in parts {
-            let resource_id = resource_id(&tx, &mut self.resources, resource)?;
+            let resource_id = resource_id(&tx, &mut self.resources, resource, |attributes| {
+                catalog.record(&mut delta, Group::Resource, attributes);
+            })?;
             let mut insert = tx.prepare_cached(
                 "INSERT INTO logs (ts, resource_id, severity, body, trace_id, span_id, attributes, source)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for log in &part.logs {
+                catalog.record(&mut delta, Group::Logs, &log.attributes);
                 insert.execute(params![
                     log.ts,
                     resource_id,
@@ -370,6 +428,13 @@ impl DayFile {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             for span in &part.spans {
+                catalog.record(&mut delta, Group::Spans, &span.attributes);
+                catalog.value(
+                    &mut delta,
+                    Group::SpanNames,
+                    "name",
+                    &serde_json::Value::String(span.name.clone()),
+                );
                 insert.execute(params![
                     span.trace_id,
                     span.span_id,
@@ -388,33 +453,43 @@ impl DayFile {
                 "INSERT INTO points (series_id, ts, value, histogram) VALUES (?1, ?2, ?3, ?4)",
             )?;
             for (metric, points) in &part.points {
-                let series_id = series_id(&tx, &mut self.series, resource_id, metric)?;
+                let series_id = series_id(&tx, &mut self.series, resource_id, metric, |labels| {
+                    catalog.record(&mut delta, Group::Metrics, labels);
+                })?;
                 for point in points {
                     let histogram = point.histogram.as_ref().map(ToString::to_string);
                     insert.execute(params![series_id, point.ts, point.value, histogram])?;
                 }
             }
         }
+        catalog.flush(&tx, delta)?;
         tx.commit()?;
         Ok(())
     }
 }
 
+/// The id of `resource` in the day file. Calls `new` with the attributes when
+/// the resource is new to the file.
 fn resource_id(
     tx: &Transaction,
     cache: &mut HashMap<i64, i64>,
     resource: &Resource,
+    new: impl FnOnce(&Map<String, serde_json::Value>),
 ) -> anyhow::Result<i64> {
     let attributes = serde_json::to_string(&resource.attributes)?;
     let hash = hash(&[&resource.service, &attributes]);
     if let Some(&id) = cache.get(&hash) {
         return Ok(id);
     }
-    tx.prepare_cached(
-        "INSERT INTO resources (hash, service, attributes) VALUES (?1, ?2, ?3)
-         ON CONFLICT (hash) DO NOTHING",
-    )?
-    .execute(params![hash, resource.service, attributes])?;
+    let inserted = tx
+        .prepare_cached(
+            "INSERT INTO resources (hash, service, attributes) VALUES (?1, ?2, ?3)
+             ON CONFLICT (hash) DO NOTHING",
+        )?
+        .execute(params![hash, resource.service, attributes])?;
+    if inserted > 0 {
+        new(&resource.attributes);
+    }
     let id = tx
         .prepare_cached("SELECT id FROM resources WHERE hash = ?1")?
         .query_row([hash], |row| row.get(0))?;
@@ -422,11 +497,14 @@ fn resource_id(
     Ok(id)
 }
 
+/// The id of the series of `metric` in the day file. Calls `new` with the
+/// labels when the series is new to the file.
 fn series_id(
     tx: &Transaction,
     cache: &mut HashMap<i64, i64>,
     resource_id: i64,
     metric: &Metric,
+    new: impl FnOnce(&Map<String, serde_json::Value>),
 ) -> anyhow::Result<i64> {
     let labels = serde_json::to_string(&metric.labels)?;
     let kind = metric.kind.as_str();
@@ -440,19 +518,23 @@ fn series_id(
     if let Some(&id) = cache.get(&hash) {
         return Ok(id);
     }
-    tx.prepare_cached(
-        "INSERT INTO series (hash, resource_id, name, kind, unit, labels)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT (hash) DO NOTHING",
-    )?
-    .execute(params![
-        hash,
-        resource_id,
-        metric.name,
-        kind,
-        metric.unit,
-        labels
-    ])?;
+    let inserted = tx
+        .prepare_cached(
+            "INSERT INTO series (hash, resource_id, name, kind, unit, labels)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (hash) DO NOTHING",
+        )?
+        .execute(params![
+            hash,
+            resource_id,
+            metric.name,
+            kind,
+            metric.unit,
+            labels
+        ])?;
+    if inserted > 0 {
+        new(&metric.labels);
+    }
     let id = tx
         .prepare_cached("SELECT id FROM series WHERE hash = ?1")?
         .query_row([hash], |row| row.get(0))?;
@@ -463,7 +545,7 @@ fn series_id(
 /// The xxh3 of the fields, each after its length, so that no two lists of
 /// fields hash the same bytes. Serde writes JSON with sorted keys, so equal
 /// attributes hash equal.
-fn hash(fields: &[&str]) -> i64 {
+pub fn hash(fields: &[&str]) -> i64 {
     let mut bytes = Vec::new();
     for field in fields {
         bytes.extend_from_slice(&(field.len() as u64).to_le_bytes());

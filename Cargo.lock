@@ -1169,8 +1169,10 @@ dependencies = [
  "axum",
  "clap",
  "jiff",
+ "rusqlite",
  "serde",
  "serde_json",
+ "siner-query",
  "siner-telemetry",
  "tempfile",
  "tokio",
@@ -1183,6 +1185,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "siner-query"
+version = "0.0.1"
+
+[[package]]
 name = "siner-telemetry"
 version = "0.0.1"
 dependencies = [
@@ -1191,6 +1197,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "siner-query",
  "tempfile",
  "tracing",
  "twox-hash",

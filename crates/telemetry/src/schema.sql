@@ -63,3 +63,26 @@ CREATE TABLE IF NOT EXISTS points (
   histogram TEXT
 );
 CREATE INDEX IF NOT EXISTS points_series_ts ON points (series_id, ts);
+
+-- The attribute keys the records carry, so a query can complete them. signal
+-- is logs, spans, metrics (series labels), or resource. type is the JSON type
+-- of the values, or mixed.
+CREATE TABLE IF NOT EXISTS attribute_keys (
+  signal TEXT NOT NULL,
+  key TEXT NOT NULL,
+  type TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  -- 1 once the key has more distinct values than attribute_values keeps.
+  many_values INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (signal, key)
+) WITHOUT ROWID;
+
+-- Up to 200 values of each key, as JSON, with how often they occur. The
+-- signal span_names holds the names of the spans under the key name.
+CREATE TABLE IF NOT EXISTS attribute_values (
+  signal TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  PRIMARY KEY (signal, key, value)
+) WITHOUT ROWID;

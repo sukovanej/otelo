@@ -1,15 +1,18 @@
 use std::io::{self, IsTerminal};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use axum::Router;
 use axum::routing::get;
+use siner_telemetry::Indexes;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use crate::api::{self, Api};
+use crate::state::State;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
@@ -66,11 +69,15 @@ fn init_logging() {
 async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
+    let state = State::open(&args.data)?;
     let (telemetry, inbox) = siner_telemetry::channel(TELEMETRY_CAPACITY);
-    let config = siner_telemetry::Config::new(args.data.join("telemetry"));
+    let mut config = siner_telemetry::Config::new(args.data.join("telemetry"));
+    config.indexes = Indexes::new(state.indexes()?);
     let api = Api {
         dir: config.dir.clone(),
         retention_days: config.retention_days,
+        indexes: config.indexes.clone(),
+        state: Arc::new(state),
     };
     let writer = siner_telemetry::Writer::spawn(config, inbox)?;
     let listener = TcpListener::bind(args.listen)

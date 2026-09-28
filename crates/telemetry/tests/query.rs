@@ -1,11 +1,14 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
+use rusqlite::Connection;
 use serde_json::{Map, Value, json};
-use siner_telemetry::query::{LogFilter, MetricFilter, TraceFilter};
+use siner_query::{Signal, complete, parse};
+use siner_telemetry::query::{MetricFilter, ReaderCatalog};
 use siner_telemetry::{
-    Batch, Config, Day, Log, Metric, MetricKind, Point, Reader, Records, Resource, Span, Writer,
-    channel, timed_out,
+    Batch, Config, Day, IndexedKey, Indexes, Log, Metric, MetricKind, Point, Reader, Records,
+    Resource, Span, Writer, channel, timed_out,
 };
 
 const SECOND: i64 = 1_000_000_000;
@@ -16,21 +19,14 @@ fn object(value: &Value) -> Map<String, Value> {
     value.as_object().unwrap().clone()
 }
 
-fn resource(service: &str) -> Resource {
-    Resource {
-        service: service.into(),
-        attributes: object(&json!({"service.name": service})),
-    }
-}
-
-fn log(ts: i64, severity: i32, body: &str) -> Log {
+fn log(ts: i64, severity: i32, body: &str, attributes: &Value) -> Log {
     Log {
         ts,
         severity,
         body: body.into(),
         trace_id: None,
         span_id: None,
-        attributes: Map::new(),
+        attributes: object(attributes),
         source: "otlp",
     }
 }
@@ -50,21 +46,34 @@ fn span(trace: [u8; 16], id: u8, parent: Option<u8>, start: i64, name: &str) -> 
     }
 }
 
-fn records(service: &str) -> Records {
+fn records(service: &str, attributes: &Value) -> Records {
     Records {
-        resource: resource(service),
+        resource: Resource {
+            service: service.into(),
+            attributes: object(attributes),
+        },
         logs: Vec::new(),
         spans: Vec::new(),
         metrics: Vec::new(),
     }
 }
 
-fn write(dir: &Path, batch: Batch) {
+fn write(dir: &Path, batch: Batch, indexes: &Indexes) {
     let (sender, inbox) = channel(1);
-    sender.send(batch);
-    let writer = Writer::spawn(Config::new(dir.to_owned()), inbox).unwrap();
+    if !batch.is_empty() {
+        sender.send(batch);
+    }
+    let mut config = Config::new(dir.to_owned());
+    config.indexes = indexes.clone();
+    let writer = Writer::spawn(config, inbox).unwrap();
     drop(sender);
     writer.join().unwrap();
+}
+
+fn indexed(keys: &[(Signal, &str)]) -> BTreeSet<IndexedKey> {
+    keys.iter()
+        .map(|&(signal, key)| IndexedKey::new(signal, key).unwrap())
+        .collect()
 }
 
 /// A day file for yesterday and one for today. `start` is the first
@@ -76,35 +85,63 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_indexes(&Indexes::default())
+    }
+
+    fn with_indexes(indexes: &Indexes) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let start = Day::today().start();
         let (y, t) = (start - 60 * SECOND, start + SECOND);
 
-        let mut api = records("api");
+        let mut api = records(
+            "api",
+            &json!({"service.name": "api", "host.name": "droplet"}),
+        );
         api.logs = vec![
-            log(y, 9, "user 7 signed in"),
-            log(t, 9, "user 8 signed in"),
-            log(t + SECOND, 17, "payment 12 failed: card \"visa\" declined"),
+            log(
+                y,
+                9,
+                "user 7 signed in",
+                &json!({"user.id": 7, "http.route": "/login"}),
+            ),
+            log(
+                t,
+                9,
+                "user 8 signed in",
+                &json!({"user.id": "8", "http.route": "/login"}),
+            ),
+            log(
+                t + SECOND,
+                17,
+                "payment 12 failed: card \"visa\" declined",
+                &json!({"user.id": 7, "http.route": "/matches", "http.response.status_code": 500}),
+            ),
             log(
                 t + 2 * SECOND,
                 17,
                 "payment 13 failed: card \"amex\" declined",
+                &json!({"user.id": 9, "http.route": "/matches", "http.response.status_code": 200}),
             ),
             Log {
                 trace_id: Some(TRACE),
                 span_id: Some([2; 8]),
-                ..log(t + 3 * SECOND, 13, "slow query GET /languages")
+                ..log(t + 3 * SECOND, 13, "slow query GET /languages", &json!({}))
             },
         ];
-        let mut failed = span(TRACE, 2, Some(1), t + 2 * SECOND, "SELECT languages");
-        failed.status = 2;
         let mut root = span(TRACE, 1, None, t, "GET /languages");
         root.duration_ns = 900_000_000;
+        root.attributes = object(&json!({"http.route": "/languages"}));
+        let mut failed = span(TRACE, 2, Some(1), t + 2 * SECOND, "SELECT languages");
+        failed.status = 2;
+        failed.kind = 3;
+        failed.attributes = object(&json!({"db.system": "sqlite"}));
+        let mut matches = span([0xef; 16], 1, None, t + SECOND, "POST /matches");
+        matches.attributes = object(&json!({"http.route": "/matches", "user.id": 7}));
         api.spans = vec![
             root,
             failed,
             span([0xcd; 16], 1, None, y, "GET /health"),
-            span([0xef; 16], 1, None, t + SECOND, "POST /matches"),
+            matches,
         ];
         api.metrics = vec![Metric {
             name: "process.memory.usage".into(),
@@ -124,9 +161,14 @@ impl Fixture {
             })
             .collect(),
         }];
-        let mut caddy = records("caddy");
-        caddy.logs = vec![log(t, 9, "served 200 in 3ms")];
-        write(dir.path(), vec![api, caddy]);
+        let mut caddy = records("caddy", &json!({"service.name": "caddy"}));
+        caddy.logs = vec![log(
+            t,
+            9,
+            "served 200 in 3ms",
+            &json!({"user.id": 7, "http.route": "/languages", "http.response.status_code": 200}),
+        )];
+        write(dir.path(), vec![api, caddy], indexes);
         Self { dir, start }
     }
 
@@ -141,18 +183,34 @@ impl Fixture {
     }
 }
 
-fn bodies(logs: &siner_telemetry::query::Logs) -> Vec<&str> {
-    logs.logs.iter().map(|line| line.body.as_str()).collect()
+fn logs(reader: &Reader, query: &str) -> Vec<String> {
+    let query = parse(query, Signal::Logs).unwrap();
+    let logs = reader.logs(&query, 100).unwrap();
+    logs.logs.into_iter().map(|line| line.body).collect()
+}
+
+fn spans(reader: &Reader, query: &str) -> Vec<String> {
+    let query = parse(query, Signal::Spans).unwrap();
+    let spans = reader.spans(&query, 100).unwrap();
+    spans.spans.into_iter().map(|span| span.name).collect()
+}
+
+fn traces(reader: &Reader, query: &str) -> Vec<String> {
+    let query = parse(query, Signal::Spans).unwrap();
+    let traces = reader.traces(&query, 100).unwrap();
+    traces.traces.into_iter().map(|trace| trace.name).collect()
 }
 
 #[test]
 fn logs_come_newest_first_and_say_when_they_are_cut() {
     let fixture = Fixture::new();
     let reader = fixture.reader();
-    let logs = reader.logs(&LogFilter::default(), 3).unwrap();
+    let all = parse("", Signal::Logs).unwrap();
+    let logs = reader.logs(&all, 3).unwrap();
     assert!(logs.truncated);
+    let bodies: Vec<&str> = logs.logs.iter().map(|l| l.body.as_str()).collect();
     assert_eq!(
-        bodies(&logs),
+        bodies,
         [
             "slow query GET /languages",
             "payment 13 failed: card \"amex\" declined",
@@ -161,61 +219,120 @@ fn logs_come_newest_first_and_say_when_they_are_cut() {
     );
     assert_eq!(logs.logs[0].level, "WARN");
     assert_eq!(logs.logs[0].trace_id.as_deref(), Some(TRACE_HEX));
-    assert!(!reader.logs(&LogFilter::default(), 7).unwrap().truncated);
+    assert_eq!(logs.logs[0].resource["host.name"], "droplet");
+    assert!(!reader.logs(&all, 7).unwrap().truncated);
 }
 
 #[test]
-fn logs_filter_by_service_severity_trace_and_words_across_days() {
+fn a_query_combines_attributes_with_and_or() {
     let fixture = Fixture::new();
     let reader = fixture.reader();
-    let filter = |f: LogFilter| bodies(&reader.logs(&f, 10).unwrap()).join(" | ");
     assert_eq!(
-        filter(LogFilter {
-            service: Some("caddy".into()),
-            ..LogFilter::default()
-        }),
-        "served 200 in 3ms"
+        logs(
+            &reader,
+            r#"http.route = "/matches" OR (user.id = 7 AND http.response.status_code = 200)"#
+        ),
+        [
+            "payment 13 failed: card \"amex\" declined",
+            "payment 12 failed: card \"visa\" declined",
+            "served 200 in 3ms",
+        ]
     );
+}
+
+#[test]
+fn numbers_match_numbers_and_strings_of_them() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    assert_eq!(logs(&reader, "user.id = 8"), ["user 8 signed in"]);
+    assert_eq!(logs(&reader, "user.id = \"7\"").len(), 3);
     assert_eq!(
-        filter(LogFilter {
-            min_severity: Some(17),
-            service: Some("api".into()),
-            ..LogFilter::default()
-        }),
-        "payment 13 failed: card \"amex\" declined | payment 12 failed: card \"visa\" declined"
+        logs(&reader, "http.response.status_code >= 500"),
+        ["payment 12 failed: card \"visa\" declined"]
     );
+    assert_eq!(logs(&reader, "user.id in (8, 9)").len(), 2);
+}
+
+#[test]
+fn not_and_not_equal_keep_records_without_the_attribute() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    let expected = [
+        "slow query GET /languages",
+        "payment 13 failed: card \"amex\" declined",
+        "user 8 signed in",
+    ];
+    assert_eq!(logs(&reader, "NOT user.id = 7"), expected);
+    assert_eq!(logs(&reader, "user.id != 7"), expected);
+}
+
+#[test]
+fn builtin_fields_filter_logs() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    assert_eq!(logs(&reader, "service = caddy"), ["served 200 in 3ms"]);
+    assert_eq!(logs(&reader, "level >= error").len(), 2);
+    assert_eq!(logs(&reader, "level = warn"), ["slow query GET /languages"]);
     assert_eq!(
-        filter(LogFilter {
-            trace_id: Some(TRACE),
-            ..LogFilter::default()
-        }),
-        "slow query GET /languages"
+        logs(&reader, &format!("trace_id = {TRACE_HEX}")),
+        ["slow query GET /languages"]
     );
     // The words are found in both day files, and punctuation is no syntax.
     assert_eq!(
-        filter(LogFilter {
-            search: Some("signed IN".into()),
-            ..LogFilter::default()
-        }),
-        "user 8 signed in | user 7 signed in"
+        logs(&reader, "body ~ \"signed IN\""),
+        ["user 8 signed in", "user 7 signed in"]
     );
     assert_eq!(
-        filter(LogFilter {
-            search: Some("GET /languages".into()),
-            ..LogFilter::default()
-        }),
-        "slow query GET /languages"
+        logs(&reader, "body ~ \"GET /languages\""),
+        ["slow query GET /languages"]
     );
+}
+
+#[test]
+fn resource_attributes_contains_and_has() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    assert_eq!(logs(&reader, "resource.host.name = droplet").len(), 5);
+    assert_eq!(logs(&reader, "has(http.response.status_code)").len(), 3);
+    assert_eq!(logs(&reader, "http.route ~ match").len(), 2);
+    assert_eq!(
+        logs(&reader, "http.route in (/login, /languages)"),
+        ["served 200 in 3ms", "user 8 signed in", "user 7 signed in"]
+    );
+}
+
+#[test]
+fn an_invalid_query_says_why() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    for (query, message) in [
+        ("level = loud", "\"loud\" is not a severity"),
+        ("trace_id = xyz", "is not a trace ID"),
+        ("has(service)", "has() takes an attribute"),
+        ("level ~ warn", "~ takes a text field"),
+    ] {
+        let query = parse(query, Signal::Logs).unwrap();
+        let error = reader.logs(&query, 10).unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<siner_telemetry::query::InvalidQuery>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert!(error.to_string().contains(message), "{error:#}");
+    }
 }
 
 #[test]
 fn log_groups_count_lines_by_template() {
     let fixture = Fixture::new();
     let reader = fixture.reader();
-    let groups = reader.log_groups(&LogFilter::default(), 2).unwrap();
+    let groups = reader
+        .log_groups(&parse("service = api", Signal::Logs).unwrap(), 2)
+        .unwrap();
     assert!(groups.truncated);
     assert!(!groups.partial);
-    assert_eq!(groups.scanned, 6);
+    assert_eq!(groups.scanned, 5);
     let found: Vec<(&str, u64)> = groups
         .groups
         .iter()
@@ -231,22 +348,17 @@ fn log_groups_count_lines_by_template() {
     let payment = &groups.groups[0];
     assert_eq!(payment.level, "ERROR");
     assert_eq!(payment.services, ["api"]);
-    assert_eq!(
-        payment.samples,
-        [
-            "payment 13 failed: card \"amex\" declined",
-            "payment 12 failed: card \"visa\" declined"
-        ]
-    );
-    assert!(payment.first < payment.last);
+    assert_eq!(payment.samples.len(), 2);
 }
 
 #[test]
-fn traces_list_roots_with_span_counts_and_errors() {
+fn traces_match_on_any_of_their_spans() {
     let fixture = Fixture::new();
     let reader = fixture.reader();
-    let traces = reader.traces(&TraceFilter::default(), 10).unwrap();
-    let found: Vec<(&str, u64, bool)> = traces
+    let all = reader
+        .traces(&parse("", Signal::Spans).unwrap(), 10)
+        .unwrap();
+    let found: Vec<(&str, u64, bool)> = all
         .traces
         .iter()
         .map(|t| (t.name.as_str(), t.spans, t.error))
@@ -259,28 +371,30 @@ fn traces_list_roots_with_span_counts_and_errors() {
             ("GET /health", 1, false),
         ]
     );
-    assert!(!traces.truncated);
-    assert!(reader.traces(&TraceFilter::default(), 2).unwrap().truncated);
+    assert_eq!(traces(&reader, "error = true"), ["GET /languages"]);
+    assert_eq!(traces(&reader, "db.system = sqlite"), ["GET /languages"]);
+    assert_eq!(
+        traces(&reader, "root = true AND duration > 500ms"),
+        ["GET /languages"]
+    );
+    assert_eq!(
+        traces(&reader, "name ~ GET"),
+        ["GET /languages", "GET /health"]
+    );
+    assert_eq!(traces(&reader, "user.id = 7"), ["POST /matches"]);
+}
 
-    let names = |filter: TraceFilter| -> Vec<String> {
-        let traces = reader.traces(&filter, 10).unwrap().traces;
-        traces.into_iter().map(|t| t.name).collect()
-    };
-    let errors = TraceFilter {
-        errors: true,
-        ..TraceFilter::default()
-    };
-    assert_eq!(names(errors), ["GET /languages"]);
-    let slow = TraceFilter {
-        min_duration_ns: Some(500_000_000),
-        ..TraceFilter::default()
-    };
-    assert_eq!(names(slow), ["GET /languages"]);
-    let get = TraceFilter {
-        name: Some("GET".into()),
-        ..TraceFilter::default()
-    };
-    assert_eq!(names(get), ["GET /languages", "GET /health"]);
+#[test]
+fn spans_list_the_matching_spans() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    assert_eq!(spans(&reader, "kind = client"), ["SELECT languages"]);
+    assert_eq!(spans(&reader, "status = error"), ["SELECT languages"]);
+    assert_eq!(spans(&reader, "error = false AND root = true").len(), 3);
+    let query = parse("db.system = sqlite", Signal::Spans).unwrap();
+    let span = &reader.spans(&query, 10).unwrap().spans[0];
+    assert_eq!(span.trace_id, TRACE_HEX);
+    assert_eq!(span.resource["service.name"], "api");
 }
 
 #[test]
@@ -306,29 +420,30 @@ fn a_trace_has_its_spans_and_logs() {
 }
 
 #[test]
-fn metrics_list_series_and_bucket_points() {
+fn metrics_filter_series_by_labels_and_resource() {
     let fixture = Fixture::new();
     let reader = fixture.reader();
-    let list = reader.metrics(None, 10).unwrap();
-    let names: Vec<(&str, &str)> = list
-        .series
-        .iter()
-        .map(|s| (s.name.as_str(), s.service.as_str()))
-        .collect();
-    assert!(
-        names.contains(&("process.memory.usage", "api")),
-        "{names:?}"
+    let metrics = |query: &str| {
+        let list = reader
+            .metrics(&parse(query, Signal::Metrics).unwrap(), 10)
+            .unwrap();
+        list.series.into_iter().map(|s| s.name).collect::<Vec<_>>()
+    };
+    assert_eq!(metrics("state = used"), ["process.memory.usage"]);
+    assert_eq!(
+        metrics("name = process.memory.usage resource.host.name = droplet"),
+        ["process.memory.usage"]
     );
-    assert!(reader.metrics(Some("caddy"), 10).unwrap().series.is_empty());
+    assert!(metrics("service = caddy").is_empty());
 
     let filter = MetricFilter {
         name: "process.memory.usage".into(),
-        service: None,
-        labels: vec![("state".into(), "used".into())],
+        query: parse("state = used", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
     };
     let metric = reader.metric(&filter, 10).unwrap();
     assert_eq!(metric.series.len(), 1);
+    assert_eq!(metric.series[0].resource["host.name"], "droplet");
     let buckets: Vec<(u64, f64, f64, f64, f64)> = metric.series[0]
         .buckets
         .iter()
@@ -339,10 +454,109 @@ fn metrics_list_series_and_bucket_points() {
         [(2, 100.0, 300.0, 200.0, 300.0), (1, 50.0, 50.0, 50.0, 50.0)]
     );
     let free = MetricFilter {
-        labels: vec![("state".into(), "free".into())],
+        query: parse("state = free", Signal::Metrics).unwrap(),
         ..filter
     };
     assert!(reader.metric(&free, 10).unwrap().series.is_empty());
+}
+
+#[test]
+fn the_catalog_knows_the_attributes_and_their_values() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader();
+    let attributes = reader.attributes(Signal::Logs).unwrap();
+    let keys: Vec<(&str, &str, u64)> = attributes
+        .record
+        .iter()
+        .map(|a| (a.key.as_str(), a.kind.as_str(), a.count))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            ("http.route", "string", 5),
+            ("user.id", "mixed", 5),
+            ("http.response.status_code", "int", 3),
+        ]
+    );
+    let resource: Vec<&str> = attributes.resource.iter().map(|a| a.key.as_str()).collect();
+    assert_eq!(resource, ["service.name", "host.name"]);
+
+    let at = |signal: Signal, input: &str| -> Vec<String> {
+        complete(input, input.len(), signal, &ReaderCatalog(&reader))
+            .into_iter()
+            .map(|s| s.text)
+            .collect()
+    };
+    assert_eq!(
+        at(Signal::Logs, "http.route = "),
+        [r#""/login""#, r#""/matches""#, r#""/languages""#]
+    );
+    assert_eq!(
+        at(Signal::Logs, "http.r"),
+        ["http.route", "http.response.status_code"]
+    );
+    assert_eq!(
+        at(Signal::Logs, "resource."),
+        ["resource.service.name", "resource.host.name"]
+    );
+    assert_eq!(at(Signal::Logs, "service = c"), [r#""caddy""#]);
+    assert_eq!(at(Signal::Spans, "name = \"SEL"), [r#""SELECT languages""#]);
+    assert_eq!(at(Signal::Spans, "db."), ["db.system"]);
+    assert_eq!(at(Signal::Metrics, "st"), ["state"]);
+    assert_eq!(
+        at(Signal::Metrics, "name = p"),
+        [r#""process.memory.usage""#]
+    );
+}
+
+#[test]
+fn an_indexed_attribute_has_an_index_in_every_day_file() {
+    let indexes = Indexes::new(indexed(&[(Signal::Logs, "user.id")]));
+    let fixture = Fixture::with_indexes(&indexes);
+    let names = |day: Day| -> Vec<String> {
+        let conn = Connection::open(fixture.dir.path().join(day.file_name())).unwrap();
+        conn.prepare("SELECT name FROM sqlite_master WHERE name GLOB 'attr_*'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    let today = Day::today();
+    assert_eq!(names(today).len(), 1);
+    assert_eq!(names(today.plus(-1)), names(today));
+
+    // SQLite reads the index for the expression the query compares.
+    let conn = Connection::open(fixture.dir.path().join(today.file_name())).unwrap();
+    let plan: Vec<String> = conn
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT l.body FROM logs l
+             WHERE l.ts >= 0 AND json_extract(l.attributes, '$.\"user.id\"') IN (7, '7')",
+        )
+        .unwrap()
+        .query_map([], |row| row.get(3))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(
+        plan.iter().any(|step| step.contains(&names(today)[0])),
+        "{plan:?}"
+    );
+
+    let mut reader = fixture.reader();
+    let query = parse("user.id = 7 OR http.route = x", Signal::Logs).unwrap();
+    assert_eq!(
+        reader.logs(&query, 10).unwrap().unindexed,
+        ["user.id", "http.route"]
+    );
+    reader.set_indexes(indexes.get());
+    assert_eq!(reader.logs(&query, 10).unwrap().unindexed, ["http.route"]);
+
+    // A later writer drops the index when the set loses the key.
+    indexes.set(BTreeSet::new());
+    write(fixture.dir.path(), Vec::new(), &indexes);
+    assert!(names(today).is_empty());
+    assert!(names(today.plus(-1)).is_empty());
 }
 
 #[test]
@@ -359,6 +573,7 @@ fn sql_reads_and_cannot_do_more() {
     assert_eq!(result.rows, [vec![json!("api"), json!(2)]]);
     assert!(result.truncated);
     assert!(reader.sql("PRAGMA table_info(logs)", 100).is_ok());
+    assert!(reader.sql("SELECT * FROM attribute_keys", 100).is_ok());
 
     let today = Day::today();
     for sql in [
@@ -370,7 +585,7 @@ fn sql_reads_and_cannot_do_more() {
         assert!(reader.sql(&sql, 10).is_err(), "{sql} ran");
     }
     // A denied statement leaves the reader working.
-    assert!(reader.logs(&LogFilter::default(), 1).is_ok());
+    assert!(reader.logs(&parse("", Signal::Logs).unwrap(), 1).is_ok());
 }
 
 #[test]

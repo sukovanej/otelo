@@ -4,7 +4,9 @@
 //! [`Sender`], and a [`Reader`] attaches the day files that a time range covers.
 //! Every timestamp is in unix nanoseconds.
 
+mod catalog;
 mod day;
+mod indexes;
 pub mod query;
 mod reader;
 mod writer;
@@ -12,6 +14,7 @@ mod writer;
 use serde_json::{Map, Value};
 
 pub use day::Day;
+pub use indexes::{IndexedKey, Indexes};
 pub use reader::{Reader, timed_out};
 pub use writer::{Config, Inbox, Sender, Writer, channel};
 

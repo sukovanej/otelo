@@ -5,6 +5,8 @@
 //! with `UNION ALL`, because FTS5 and the ids only work within one file. Every
 //! query takes a row limit and says when it cut the result.
 
+mod catalog;
+mod compile;
 mod logs;
 mod metrics;
 mod sql;
@@ -16,13 +18,15 @@ use jiff::Timestamp;
 use rusqlite::types::Value;
 use rusqlite::{Row, ToSql};
 
-pub use logs::{GROUP_SCAN_LIMIT, LogFilter, LogGroup, LogGroups, LogLine, Logs};
+pub use catalog::{Attribute, Attributes, ReaderCatalog};
+pub use compile::InvalidQuery;
+pub use logs::{GROUP_SCAN_LIMIT, LogGroup, LogGroups, LogLine, Logs};
 pub use metrics::{
     Bucket, MAX_BUCKETS, MetricFilter, MetricList, MetricSeries, Series, SeriesInfo, default_step,
 };
 pub use sql::SqlResult;
 pub use template::template;
-pub use traces::{Trace, TraceFilter, TraceSpan, TraceSummary, Traces};
+pub use traces::{Spans, Trace, TraceSpan, TraceSummary, Traces};
 
 use crate::{Day, Reader};
 
@@ -124,6 +128,16 @@ impl Filter {
     pub(crate) fn push(&mut self, clause: &str, name: &str, value: impl Into<Value>) {
         self.clauses.push(clause.to_owned());
         self.params.push((name.to_owned(), value.into()));
+    }
+
+    /// Takes the parameters of `other`, whose clauses went into one of this
+    /// filter's.
+    pub(crate) fn absorb(&mut self, other: Self) {
+        for (name, value) in other.params {
+            if !self.params.iter().any(|(n, _)| *n == name) {
+                self.params.push((name, value));
+            }
+        }
     }
 
     /// Adds a clause without a parameter. `$day` in it stands for the
