@@ -8,3 +8,4 @@ pub mod query;
 pub mod serve;
 pub mod state;
 pub mod table;
+pub mod ui;
