@@ -601,3 +601,20 @@ fn a_query_stops_at_the_time_limit() {
         .unwrap_err();
     assert!(timed_out(&error), "{error:#}");
 }
+
+#[test]
+fn a_day_file_from_before_the_catalog_gets_its_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let yesterday = Day::today().plus(-1);
+    let conn = Connection::open(dir.path().join(yesterday.file_name())).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE logs (ts INTEGER NOT NULL, resource_id INTEGER NOT NULL,
+           severity INTEGER NOT NULL, body TEXT NOT NULL, trace_id BLOB, span_id BLOB,
+           attributes TEXT NOT NULL, source TEXT NOT NULL)",
+    )
+    .unwrap();
+    drop(conn);
+    write(dir.path(), Vec::new(), &Indexes::default());
+    let reader = Reader::open(dir.path(), yesterday.start(), Day::today().start()).unwrap();
+    assert!(reader.attributes(Signal::Logs).unwrap().record.is_empty());
+}

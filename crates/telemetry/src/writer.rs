@@ -264,9 +264,13 @@ impl State {
         for day in names {
             let result = match self.files.get(&day) {
                 Some(file) => indexes::apply(&file.conn, &keys).map_err(anyhow::Error::from),
+                // A file from an older siner may lack the newer tables.
                 None => Connection::open(self.config.dir.join(day.file_name()))
-                    .map_err(anyhow::Error::from)
-                    .and_then(|conn| Ok(indexes::apply(&conn, &keys)?)),
+                    .and_then(|conn| {
+                        conn.execute_batch(SCHEMA)?;
+                        indexes::apply(&conn, &keys)
+                    })
+                    .map_err(anyhow::Error::from),
             };
             if let Err(error) = result {
                 tracing::error!(%day, "index the attributes: {error:#}");
