@@ -96,6 +96,14 @@ The `siner-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 - Exponential histograms, summaries, and a span without valid IDs are rejected. Span links, severity text, and trace state are not kept.
 - A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
 
+## The daemon's own telemetry
+
+`siner serve` sends its own spans and logs over OTLP/HTTP to its own receiver, under the service `siner`, so siner can be tried and debugged on itself. `--own-telemetry off` keeps them on stderr only, and `--own-telemetry http://host:4318` sends them to another receiver. Every event also goes to stderr, where journald reads it.
+
+- Each query API request gets a server span named after its route, such as `GET /api/logs`, with a child span for opening the reader and one `SELECT` span per SQLite statement, which carries the SQL and the rows it read. A 5xx response logs an error in the span.
+- Nothing on the path from the OTLP receiver to the day files opens a span. A span there would make each export of the daemon's telemetry cause another export, forever. Events of the exporter's crates (`opentelemetry`, `reqwest`, `hyper`, `h2`, `tower`) stay on stderr for the same reason.
+- On SIGTERM the daemon exports what it has queued before it stops its receivers, and what it logs after that reaches stderr only.
+
 ## Querying
 
 The CLI and the UI use the same HTTP query API. Every CLI command prints a table to a terminal and JSON otherwise, and `--json` and `--table` override that. Every query has a row limit. A cut result says so and names the flag that narrows it. Agents read what humans read, so the output stays small by default:
