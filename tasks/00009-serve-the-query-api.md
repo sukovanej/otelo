@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: in_review
 created: 2026-09-27T18:27:45Z
 parent: ./00001-collect-and-query-telemetry.md
 dependencies:
@@ -42,4 +42,4 @@ An OpenAPI spec comes out of the code, so the UI can generate its client later.
 
 ### 2026-09-28T08:23:29Z by Milan Suk via claude-code
 
-> siner metrics <name> buckets raw point values (count, min, avg, max, last). A cumulative sum shows its running total, not a rate, and ranges read raw points only; [[SIN-8]] should switch long ranges to the rollups and add rates.
+> siner metrics <name> buckets raw point values (count, min, avg, max, last). A cumulative sum shows its running total, not a rate, and ranges read raw points only; [[./00008-roll-up-metrics-to-1-minute-and-1.md]] should switch long ranges to the rollups and add rates.
