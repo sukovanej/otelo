@@ -1,0 +1,17 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/cursor.txt
+---
+> http.ro|ute = 1
+http.route                     field    string, 90   replaces "http.route" at 0..10
+
+> user.id = 7 AND ht|tp.route = 1
+http.route                     field    string, 90   replaces "http.route" at 16..26
+http.response.status_code      field    int, 80      replaces "http.route" at 16..26
+
+> město = 1 OR us|
+user.id                        field    mixed, 40    replaces "us" at 14..16
+
+> http.route = "/ma|tches"
+"/matches"                     value    50           replaces "\"/matches\"" at 13..23

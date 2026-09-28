@@ -1,0 +1,7 @@
+name = "GET /languages"
+duration > 500ms
+root = true
+error = false
+kind = server
+status != error
+body ~ x

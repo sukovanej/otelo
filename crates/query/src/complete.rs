@@ -116,10 +116,12 @@ pub fn complete(
         return Vec::new();
     };
     let replace = partial.map_or(cursor..cursor, |token| {
-        // Replace the whole word, also the part after the cursor.
-        let end = input[cursor..]
-            .find(|c: char| !crate::lexer::is_word_char(c))
-            .map_or(input.len(), |i| cursor + i);
+        // Replace the whole token, also the part after the cursor, such as
+        // the rest of a string and its closing quote.
+        let end = lex(input)
+            .into_iter()
+            .find(|full| full.span.start == token.span.start)
+            .map_or(cursor, |full| full.span.end);
         token.span.start..end.max(cursor)
     });
     let prefix = partial.map_or(String::new(), |token| match &token.tok {
@@ -145,6 +147,7 @@ pub fn complete(
             out.keyword(",");
             out.keyword(")");
         }
+        // has() takes an attribute, not a built-in field.
         Expect::HasField => out.fields(signal, catalog, false),
         Expect::HasClose => out.keyword(")"),
         Expect::After => {
@@ -308,15 +311,17 @@ impl Out {
         self.push(keyword.into(), SuggestionKind::Keyword, None);
     }
 
-    /// The built-in fields, the record attributes, and, when `resources`,
-    /// the resource attributes.
-    fn fields(&mut self, signal: Signal, catalog: &dyn Catalog, resources: bool) {
-        for builtin in signal.builtins() {
-            self.push(
-                builtin.name().into(),
-                SuggestionKind::Field,
-                Some("built-in".into()),
-            );
+    /// The built-in fields, when `builtins`, and the record and resource
+    /// attributes.
+    fn fields(&mut self, signal: Signal, catalog: &dyn Catalog, builtins: bool) {
+        if builtins {
+            for builtin in signal.builtins() {
+                self.push(
+                    builtin.name().into(),
+                    SuggestionKind::Field,
+                    Some("built-in".into()),
+                );
+            }
         }
         for key in catalog.keys(signal, false) {
             let text = Field::Attribute(key.key).to_string();
@@ -326,17 +331,15 @@ impl Out {
                 Some(detail(&key.kind, key.count)),
             );
         }
-        if resources {
-            // A resource key has no backtick form.
-            for key in catalog.keys(signal, true) {
-                if is_plain_key(&key.key) {
-                    let detail = detail(&key.kind, key.count);
-                    self.push(
-                        Field::Resource(key.key).to_string(),
-                        SuggestionKind::Field,
-                        Some(detail),
-                    );
-                }
+        // A resource key has no backtick form.
+        for key in catalog.keys(signal, true) {
+            if is_plain_key(&key.key) {
+                let detail = detail(&key.kind, key.count);
+                self.push(
+                    Field::Resource(key.key).to_string(),
+                    SuggestionKind::Field,
+                    Some(detail),
+                );
             }
         }
     }
@@ -392,134 +395,4 @@ impl Out {
 
 fn detail(kind: &str, count: u64) -> String {
     format!("{kind}, {count}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Fake;
-
-    impl Catalog for Fake {
-        fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo> {
-            let key = |key: &str, kind: &str, count| KeyInfo {
-                key: key.into(),
-                kind: kind.into(),
-                count,
-            };
-            match (signal, resource) {
-                (Signal::Spans, false) => vec![
-                    key("http.route", "string", 90),
-                    key("http.response.status_code", "int", 80),
-                    key("user.id", "int", 40),
-                    key("level", "string", 1),
-                ],
-                (_, true) => vec![key("host.name", "string", 3)],
-                _ => Vec::new(),
-            }
-        }
-
-        fn values(&self, _: Signal, field: &Field) -> Vec<ValueInfo> {
-            match field {
-                Field::Attribute(key) if key == "http.route" => vec![
-                    ValueInfo {
-                        value: Value::String("/matches".into()),
-                        count: 50,
-                    },
-                    ValueInfo {
-                        value: Value::String("/languages".into()),
-                        count: 40,
-                    },
-                ],
-                Field::Attribute(key) if key == "http.response.status_code" => vec![ValueInfo {
-                    value: Value::Int(200),
-                    count: 70,
-                }],
-                Field::Builtin(Builtin::Service) => vec![ValueInfo {
-                    value: Value::String("mudro".into()),
-                    count: 9,
-                }],
-                _ => Vec::new(),
-            }
-        }
-    }
-
-    /// The suggestions at the `|` in `input`.
-    fn at(input: &str) -> Vec<String> {
-        let cursor = input.find('|').unwrap();
-        let input = input.replace('|', "");
-        complete(&input, cursor, Signal::Spans, &Fake)
-            .into_iter()
-            .map(|s| s.text)
-            .collect()
-    }
-
-    #[test]
-    fn suggests_fields_at_the_start_and_by_prefix() {
-        let all = at("|");
-        assert!(
-            all.starts_with(&["service".into(), "name".into()]),
-            "{all:?}"
-        );
-        assert!(all.contains(&"http.route".into()));
-        assert!(all.contains(&"attr.level".into()));
-        assert!(all.contains(&"resource.host.name".into()));
-        assert!(all.contains(&"not".into()));
-        assert_eq!(at("http.r|"), ["http.route", "http.response.status_code"]);
-        assert_eq!(at("resource.h|"), ["resource.host.name"]);
-        assert_eq!(at("a = 1 AND (us|"), ["user.id"]);
-    }
-
-    #[test]
-    fn suggests_operators_by_the_type_of_the_field() {
-        assert_eq!(
-            at("http.route |"),
-            ["=", "!=", "<", "<=", ">", ">=", "~", "in"]
-        );
-        assert_eq!(at("error |"), ["=", "!=", "in"]);
-        assert_eq!(at("duration |"), ["=", "!=", "<", "<=", ">", ">=", "in"]);
-    }
-
-    #[test]
-    fn suggests_values_of_the_field() {
-        assert_eq!(at("http.route = |"), [r#""/matches""#, r#""/languages""#]);
-        assert_eq!(at(r#"http.route = "/l|"#), [r#""/languages""#]);
-        assert_eq!(at("http.route = /m|"), [r#""/matches""#]);
-        assert_eq!(at("http.response.status_code >= 2|"), ["200"]);
-        assert_eq!(at("service = |"), [r#""mudro""#]);
-        assert_eq!(at("kind = s|"), ["server"]);
-        assert_eq!(at("error = |"), ["true", "false"]);
-        assert_eq!(
-            at("http.route in (/matches, |"),
-            [r#""/matches""#, r#""/languages""#]
-        );
-    }
-
-    #[test]
-    fn suggests_keywords_after_a_term() {
-        assert_eq!(at("user.id = 7 |"), ["and", "or"]);
-        assert_eq!(at("(user.id = 7 |"), ["and", "or", ")"]);
-        assert_eq!(at("user.id = 7 o|"), ["or"]);
-        assert_eq!(at("user.id = 7 us|"), ["user.id"]);
-        let has = at("has(|");
-        assert!(has.contains(&"user.id".into()), "{has:?}");
-        assert!(!has.contains(&"resource.host.name".into()), "{has:?}");
-        assert_eq!(at("has(user.id |"), [")"]);
-    }
-
-    #[test]
-    fn replaces_the_whole_word_at_the_cursor() {
-        let input = "http.ro = 1";
-        let suggestions = complete(input, 4, Signal::Spans, &Fake);
-        assert_eq!(suggestions[0].text, "http.route");
-        assert_eq!(suggestions[0].replace, 0..7);
-        let suggestions = complete("user.id = 7 ", 12, Signal::Spans, &Fake);
-        assert_eq!(suggestions[0].replace, 12..12);
-    }
-
-    #[test]
-    fn suggests_nothing_after_a_broken_start() {
-        assert!(at(") |").is_empty());
-        assert!(at("a = = |").is_empty());
-    }
 }

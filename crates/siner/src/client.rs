@@ -34,6 +34,7 @@ pub struct Client {
 
 impl Client {
     /// Whether to print a table and not JSON.
+    #[must_use]
     pub fn wants_table(&self) -> bool {
         if self.json {
             false
@@ -43,6 +44,10 @@ impl Client {
     }
 
     /// GETs `path` with the query parameters that have a value.
+    ///
+    /// # Errors
+    ///
+    /// When the daemon cannot be reached, or answers with an error.
     pub fn get<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -59,6 +64,11 @@ impl Client {
         read(response)
     }
 
+    /// POSTs `body` to `path` as JSON.
+    ///
+    /// # Errors
+    ///
+    /// When the daemon cannot be reached, or answers with an error.
     pub fn post<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -71,6 +81,11 @@ impl Client {
         read(response)
     }
 
+    /// PUTs to `path` with no body.
+    ///
+    /// # Errors
+    ///
+    /// When the daemon cannot be reached, or answers with an error.
     pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let response = Self::agent()
             .put(self.url(path))
@@ -79,6 +94,11 @@ impl Client {
         read(response)
     }
 
+    /// DELETEs `path`.
+    ///
+    /// # Errors
+    ///
+    /// When the daemon cannot be reached, or answers with an error.
     pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let response = Self::agent()
             .delete(self.url(path))
@@ -112,6 +132,7 @@ fn read<T: DeserializeOwned>(mut response: ureq::http::Response<ureq::Body>) -> 
 }
 
 /// Escapes `segment` for a URL path.
+#[must_use]
 pub fn path_segment(segment: &str) -> String {
     segment
         .bytes()
@@ -126,6 +147,10 @@ pub fn path_segment(segment: &str) -> String {
 }
 
 /// Prints `value` as JSON on stdout.
+///
+/// # Errors
+///
+/// When stdout cannot be written.
 pub fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     let mut out = io::stdout().lock();
     serde_json::to_writer_pretty(&mut out, value)?;

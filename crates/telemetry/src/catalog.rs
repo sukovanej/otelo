@@ -201,29 +201,3 @@ fn static_type(kind: &str) -> &'static str {
         .find(|name| *name == kind)
         .unwrap_or("mixed")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn stops_keeping_values_of_a_key_with_many() {
-        let mut catalog = Catalog::default();
-        let mut delta = Delta::default();
-        for id in 0..=VALUES_PER_KEY {
-            catalog.value(&mut delta, Group::Logs, "user.id", &json!(id));
-        }
-        catalog.value(&mut delta, Group::Logs, "user.id", &json!(3));
-        catalog.value(&mut delta, Group::Logs, "user.id", &json!("x"));
-        let known = &catalog.keys[&(Group::Logs, "user.id".to_owned())];
-        assert!(known.many);
-        assert_eq!(known.kind, "mixed");
-        assert_eq!(known.values.len(), VALUES_PER_KEY);
-        assert_eq!(
-            delta.values[&(Group::Logs, "user.id".into(), "3".into())],
-            2
-        );
-        assert_eq!(delta.keys[&(Group::Logs, "user.id".into())].1, 203);
-    }
-}

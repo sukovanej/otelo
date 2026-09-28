@@ -1,0 +1,10 @@
+http.route = |
+http.route = "/l|
+http.route = /m|
+http.route in (/matches, |
+http.response.status_code >= 2|
+service = |
+level >= |
+level >= w|
+resource.host.name = |
+user.id = |

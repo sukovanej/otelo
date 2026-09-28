@@ -180,8 +180,13 @@ impl Api {
     }
 
     /// The range in unix nanoseconds, with `since` moved up to the oldest
-    /// day the retention keeps.
-    fn range(
+    /// day the retention keeps. `default_since` stands in for a missing
+    /// `since`, and one hour before now when it is `None` too.
+    ///
+    /// # Errors
+    ///
+    /// When a time does not parse, or `since` is not before `until`.
+    pub fn range(
         &self,
         since: Option<&str>,
         until: Option<&str>,
@@ -210,12 +215,18 @@ fn check_limit(limit: Option<usize>, default: usize) -> anyhow::Result<usize> {
     Ok(limit)
 }
 
-fn nanos(ts: Timestamp) -> i64 {
+/// A timestamp in unix nanoseconds, capped at the largest `i64`.
+#[must_use]
+pub fn nanos(ts: Timestamp) -> i64 {
     i64::try_from(ts.as_nanosecond()).unwrap_or(i64::MAX)
 }
 
 /// A duration before `now`, such as `1h`, or an RFC 3339 timestamp.
-fn parse_time(text: &str, now: i64) -> anyhow::Result<i64> {
+///
+/// # Errors
+///
+/// When `text` is neither.
+pub fn parse_time(text: &str, now: i64) -> anyhow::Result<i64> {
     if let Ok(ts) = text.parse::<Timestamp>() {
         return Ok(nanos(ts));
     }
@@ -226,7 +237,11 @@ fn parse_time(text: &str, now: i64) -> anyhow::Result<i64> {
 }
 
 /// A duration such as `500ms`, `1h`, or `2d`, in nanoseconds.
-fn parse_duration(text: &str) -> anyhow::Result<i64> {
+///
+/// # Errors
+///
+/// When `text` is not a duration, or is negative.
+pub fn parse_duration(text: &str) -> anyhow::Result<i64> {
     let span: jiff::Span = text
         .parse()
         .with_context(|| format!("{text:?} is not a duration such as 500ms, 1h, or 2d"))?;
@@ -242,38 +257,4 @@ fn parse_signal(text: &str) -> Result<Signal, ApiError> {
 /// Parses the query `q` over `signal`. A missing query keeps every record.
 fn parse_query(q: Option<&str>, signal: Signal) -> Result<siner_query::Query, ApiError> {
     siner_query::parse(q.unwrap_or_default(), signal).map_err(|e| ApiError::bad_request(&e))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const HOUR: i64 = 3600 * 1_000_000_000;
-
-    #[test]
-    fn parses_durations_and_timestamps() {
-        let now = nanos(Timestamp::now());
-        assert_eq!(parse_time("1h", now).unwrap(), now - HOUR);
-        assert_eq!(parse_time("2d", now).unwrap(), now - 48 * HOUR);
-        assert_eq!(parse_duration("500ms").unwrap(), 500_000_000);
-        assert_eq!(
-            parse_time("2026-09-28T00:00:00Z", now).unwrap(),
-            nanos("2026-09-28T00:00:00Z".parse().unwrap())
-        );
-        assert!(parse_time("yesterday", now).is_err());
-    }
-
-    #[test]
-    fn caps_the_range_at_the_retention() {
-        let dir = tempfile::tempdir().unwrap();
-        let api = Api {
-            dir: PathBuf::new(),
-            retention_days: 7,
-            indexes: Indexes::default(),
-            state: Arc::new(State::open(dir.path()).unwrap()),
-        };
-        let (since, _) = api.range(Some("30d"), None, None).unwrap();
-        assert_eq!(since, Day::today().plus(-6).start());
-        assert!(api.range(Some("1h"), Some("2h"), None).is_err());
-    }
 }

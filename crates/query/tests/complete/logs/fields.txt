@@ -1,0 +1,11 @@
+|
+se|
+http.r|
+resource.|
+resource.h|
+attr.|
+a = 1 AND (us|
+not |
+has(|
+has(user.id |
+http.ro| = 1

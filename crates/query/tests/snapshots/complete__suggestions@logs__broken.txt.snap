@@ -1,0 +1,13 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/broken.txt
+---
+> ) |
+(none)
+
+> a = = |
+(none)
+
+> a ! |
+(none)

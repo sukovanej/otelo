@@ -1,0 +1,29 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/tight.txt
+---
+> user.id=7|
+7                              value    30           replaces "7" at 8..9
+
+> user.id=7 |
+and                            keyword               replaces "" at 10..10
+or                             keyword               replaces "" at 10..10
+
+> level>=|
+trace                          value                 replaces "" at 7..7
+debug                          value                 replaces "" at 7..7
+info                           value                 replaces "" at 7..7
+warn                           value                 replaces "" at 7..7
+error                          value                 replaces "" at 7..7
+fatal                          value                 replaces "" at 7..7
+
+> level>=w|
+warn                           value                 replaces "w" at 7..8
+
+> http.route=/m|
+"/matches"                     value    50           replaces "/m" at 11..13
+
+> (user.id=7)|
+and                            keyword               replaces "" at 11..11
+or                             keyword               replaces "" at 11..11

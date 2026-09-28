@@ -102,6 +102,19 @@ fn filter(reader: &Reader, query: &Query) -> anyhow::Result<(Filter, Vec<String>
     Ok((filter, unindexed))
 }
 
+const LINE_COLUMNS: &str = "l.ts, r.service, l.severity, l.body, l.trace_id, l.span_id,
+    l.attributes, l.source, r.attributes AS resource";
+
+/// The plan of [`Reader::logs`] for `query`.
+pub(super) fn explain(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
+    let (where_, _) = filter(reader, query)?;
+    reader.plan(
+        ["", " ORDER BY ts DESC"],
+        select(LINE_COLUMNS, &where_),
+        &where_,
+    )
+}
+
 /// Each word of `text` as an FTS5 string, so that punctuation in it is
 /// matched and not read as query syntax. `None` when there are no words.
 pub(super) fn fts_query(text: &str) -> Option<String> {
@@ -131,10 +144,13 @@ impl Reader {
     /// runs past the time limit.
     pub fn logs(&self, query: &Query, limit: usize) -> anyhow::Result<Logs> {
         let (where_, unindexed) = filter(self, query)?;
-        let columns = "l.ts, r.service, l.severity, l.body, l.trace_id, l.span_id, l.attributes,
-                       l.source, r.attributes AS resource";
         let tail = format!(" ORDER BY ts DESC LIMIT {}", limit + 1);
-        let mut logs = self.collect(["", &tail], select(columns, &where_), &where_, log_line)?;
+        let mut logs = self.collect(
+            ["", &tail],
+            select(LINE_COLUMNS, &where_),
+            &where_,
+            log_line,
+        )?;
         let truncated = cut(&mut logs, limit);
         Ok(Logs {
             logs,

@@ -11,6 +11,7 @@ publish = false
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", features = ["derive", "env"] }
+insta = { version = "1.48", features = ["glob"] }
 jiff = "0.2.37"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }

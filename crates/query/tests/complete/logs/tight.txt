@@ -1,0 +1,6 @@
+user.id=7|
+user.id=7 |
+level>=|
+level>=w|
+http.route=/m|
+(user.id=7)|

@@ -1,0 +1,28 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/metrics/fields.txt
+---
+> |
+name                           field    built-in     replaces "" at 0..0
+service                        field    built-in     replaces "" at 0..0
+kind                           field    built-in     replaces "" at 0..0
+unit                           field    built-in     replaces "" at 0..0
+state                          field    string, 6    replaces "" at 0..0
+http.route                     field    string, 3    replaces "" at 0..0
+resource.service.name          field    string, 4    replaces "" at 0..0
+resource.host.name             field    string, 3    replaces "" at 0..0
+not                            keyword               replaces "" at 0..0
+has(                           keyword               replaces "" at 0..0
+(                              keyword               replaces "" at 0..0
+
+> name = |
+"http.server.request.duration" value    4            replaces "" at 7..7
+
+> kind = |
+gauge                          value                 replaces "" at 7..7
+sum                            value                 replaces "" at 7..7
+histogram                      value                 replaces "" at 7..7
+
+> st|
+state                          field    string, 6    replaces "st" at 0..2

@@ -394,23 +394,3 @@ fn variants(value: &Value) -> Vec<Sql> {
         Value::Bool(b) => vec![Sql::Integer(i64::from(*b))],
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compares_an_attribute_with_the_expression_of_its_index() {
-        let query = siner_query::parse("user.id = 7", Signal::Logs).unwrap();
-        let mut filter = Filter::new();
-        let aliases = Aliases {
-            record: "l",
-            resource: "r",
-        };
-        compile(&query, aliases, &BTreeSet::new(), "q", &mut filter).unwrap();
-        assert_eq!(
-            filter.sql("\"2026-09-28\""),
-            "json_extract(l.attributes, '$.\"user.id\"') IN (:q0, :q1)"
-        );
-    }
-}

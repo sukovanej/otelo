@@ -14,6 +14,7 @@ pub struct Table {
 }
 
 impl Table {
+    #[must_use]
     pub fn new(header: &[&str]) -> Self {
         Self {
             header: header.iter().map(|&h| h.to_owned()).collect(),
@@ -33,6 +34,11 @@ impl Table {
         }
     }
 
+    /// Prints the table on stdout.
+    ///
+    /// # Errors
+    ///
+    /// When stdout cannot be written.
     pub fn print(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
         let mut widths: Vec<usize> = self.header.iter().map(|h| h.chars().count()).collect();
@@ -71,6 +77,7 @@ fn one_line(text: &str) -> String {
 }
 
 /// A time in UTC to the millisecond.
+#[must_use]
 pub fn time(ts: Timestamp) -> String {
     ts.to_zoned(TimeZone::UTC)
         .strftime("%Y-%m-%d %H:%M:%S%.3f")
@@ -79,6 +86,7 @@ pub fn time(ts: Timestamp) -> String {
 
 /// A duration in the unit that suits it: `820µs`, `35ms`, `1.25s`, `3m05s`,
 /// `2h30m`.
+#[must_use]
 pub fn duration(nanos: i64) -> String {
     #[expect(clippy::cast_precision_loss, reason = "a display rounds anyway")]
     let n = nanos as f64;
@@ -106,6 +114,7 @@ pub fn duration(nanos: i64) -> String {
 }
 
 /// A number with at most three decimals, and none when it is whole.
+#[must_use]
 pub fn number(value: f64) -> String {
     round(value).to_string()
 }
@@ -116,6 +125,7 @@ fn round(value: f64) -> f64 {
 }
 
 /// JSON labels as `name=value` pairs.
+#[must_use]
 pub fn labels(labels: &serde_json::Map<String, serde_json::Value>) -> String {
     labels
         .iter()
@@ -125,28 +135,4 @@ pub fn labels(labels: &serde_json::Map<String, serde_json::Value>) -> String {
         })
         .collect::<Vec<_>>()
         .join(",")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn formats_durations() {
-        assert_eq!(duration(820), "820ns");
-        assert_eq!(duration(820_000), "820µs");
-        assert_eq!(duration(35_400_000), "35.4ms");
-        assert_eq!(duration(1_250_000_000), "1.25s");
-        assert_eq!(duration(0), "0s");
-        assert_eq!(duration(185_000_000_000), "3m05s");
-        assert_eq!(duration(1_800_000_000_000), "30m");
-        assert_eq!(duration(9_000_000_000_000), "2h30m");
-    }
-
-    #[test]
-    fn formats_numbers() {
-        assert_eq!(number(100.0), "100");
-        assert_eq!(number(0.123_456), "0.123");
-        assert_eq!(number(-0.000_1), "0");
-    }
 }

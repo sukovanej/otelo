@@ -1,0 +1,92 @@
+---
+source: crates/query/tests/parse.rs
+expression: out
+input_file: crates/query/tests/parse/logs/values.txt
+---
+> a = 1
+a = 1
+fields: "a" (attribute)
+
+> a == 1
+a = 1
+fields: "a" (attribute)
+
+> a != -2
+a != -2
+fields: "a" (attribute)
+
+> a < 1.5
+a < 1.5
+fields: "a" (attribute)
+
+> a <= "x y"
+a <= "x y"
+fields: "a" (attribute)
+
+> a > true
+a > true
+fields: "a" (attribute)
+
+> a >= false
+a >= false
+fields: "a" (attribute)
+
+> a = 'single \' quoted'
+a = "single ' quoted"
+fields: "a" (attribute)
+
+> a = "tab\tand\nnewline"
+a = "tab\tand\nnewline"
+fields: "a" (attribute)
+
+> a = /matches
+a = "/matches"
+fields: "a" (attribute)
+
+> a = 3f2b-9d4a
+a = "3f2b-9d4a"
+fields: "a" (attribute)
+
+> a = 2xx
+a = "2xx"
+fields: "a" (attribute)
+
+> a = 1.2.3
+a = "1.2.3"
+fields: "a" (attribute)
+
+> d = 1.5s
+d = 1500000000ns
+fields: "d" (attribute)
+
+> d = 250us
+d = 250000ns
+fields: "d" (attribute)
+
+> d = 3µs
+d = 3000ns
+fields: "d" (attribute)
+
+> d = 2d
+d = 172800000000000ns
+fields: "d" (attribute)
+
+> a in (1, "two", three)
+a in (1, "two", "three")
+fields: "a" (attribute)
+
+> has(a)
+has(a)
+fields: "a" (attribute)
+
+> has(resource.host.name)
+has(resource.host.name)
+fields: "host.name" (resource)
+
+> http.route="/matches" or user.id>=7
+http.route = "/matches" OR user.id >= 7
+fields: "http.route" (attribute), "user.id" (attribute)
+
+> a = -3 b = 3f2b-9d4a
+a = -3 AND b = "3f2b-9d4a"
+fields: "a" (attribute), "b" (attribute)

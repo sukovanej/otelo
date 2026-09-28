@@ -118,6 +118,29 @@ fn span(row: &Row) -> anyhow::Result<TraceSpan> {
     })
 }
 
+/// The conditions of a span query, and the attributes it compares that have
+/// no index.
+fn span_filter(reader: &Reader, query: &Query) -> anyhow::Result<(Filter, Vec<String>)> {
+    check(query)?;
+    let mut where_ = Filter::range(reader, "s.start_ts");
+    let aliases = Aliases {
+        record: "s",
+        resource: "r",
+    };
+    let unindexed = compile(query, aliases, reader.indexes(), "q", &mut where_)?;
+    Ok((where_, unindexed))
+}
+
+/// The plan of [`Reader::spans`] for `query`.
+pub(super) fn explain(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
+    let (where_, _) = span_filter(reader, query)?;
+    reader.plan(
+        ["", " ORDER BY start_ts DESC"],
+        select_spans(&where_),
+        &where_,
+    )
+}
+
 fn check(query: &Query) -> anyhow::Result<()> {
     ensure!(
         query.signal == Signal::Spans,
@@ -135,13 +158,7 @@ impl Reader {
     /// When the query is invalid for spans, or when it fails, such as when it
     /// runs past the time limit.
     pub fn spans(&self, query: &Query, limit: usize) -> anyhow::Result<Spans> {
-        check(query)?;
-        let mut where_ = Filter::range(self, "s.start_ts");
-        let aliases = Aliases {
-            record: "s",
-            resource: "r",
-        };
-        let unindexed = compile(query, aliases, self.indexes(), "q", &mut where_)?;
+        let (where_, unindexed) = span_filter(self, query)?;
         let tail = format!(" ORDER BY start_ts DESC LIMIT {}", limit + 1);
         let mut spans = self.collect(["", &tail], select_spans(&where_), &where_, span)?;
         let truncated = cut(&mut spans, limit);

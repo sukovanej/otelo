@@ -1,11 +1,5 @@
-mod api;
-mod client;
-mod query;
-mod serve;
-mod state;
-mod table;
-
 use clap::{Parser, Subcommand};
+use siner::{query, serve};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]

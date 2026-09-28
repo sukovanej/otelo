@@ -24,6 +24,10 @@ pub struct State {
 
 impl State {
     /// Opens the state file in `data`, and makes it when it is missing.
+    ///
+    /// # Errors
+    ///
+    /// When the state file cannot be read or written.
     pub fn open(data: &Path) -> anyhow::Result<Self> {
         let state = Self {
             path: data.join("state.sqlite"),
@@ -40,6 +44,10 @@ impl State {
     }
 
     /// The attributes to index.
+    ///
+    /// # Errors
+    ///
+    /// When the state file cannot be read or written.
     pub fn indexes(&self) -> anyhow::Result<BTreeSet<IndexedKey>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare("SELECT signal, key FROM telemetry_indexes")?;
@@ -55,6 +63,11 @@ impl State {
         Ok(keys)
     }
 
+    /// Adds `key` to the attributes to index.
+    ///
+    /// # Errors
+    ///
+    /// When the state file cannot be read or written.
     pub fn add_index(&self, key: &IndexedKey) -> anyhow::Result<()> {
         self.conn()?.execute(
             "INSERT INTO telemetry_indexes (signal, key) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
@@ -64,6 +77,10 @@ impl State {
     }
 
     /// Whether the key had an index.
+    ///
+    /// # Errors
+    ///
+    /// When the state file cannot be read or written.
     pub fn remove_index(&self, key: &IndexedKey) -> anyhow::Result<bool> {
         let removed = self.conn()?.execute(
             "DELETE FROM telemetry_indexes WHERE signal = ?1 AND key = ?2",

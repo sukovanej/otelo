@@ -1,0 +1,64 @@
+---
+source: crates/query/tests/parse.rs
+expression: out
+input_file: crates/query/tests/parse/logs/errors.txt
+---
+> user.id
+error: column 8: expected an operator after user.id, found the end of the query
+
+> user.id 7
+error: column 9: expected an operator after user.id: =, !=, <, <=, >, >=, ~, or in, found "7"
+
+> user.id =
+error: column 10: expected a value, found the end of the query
+
+> a = 1 or
+error: column 9: expected a field, found the end of the query
+
+> a = 1 and
+error: column 10: expected a field, found the end of the query
+
+> (a = 1
+error: column 7: expected ), found the end of the query
+
+> a = 1 )
+error: column 7: expected AND, OR, or the end of the query, found ")"
+
+> a = "open
+error: column 5: the string has no closing quote
+
+> a ! 1
+error: column 3: unexpected '!'
+
+> body ~ 5
+error: column 7: ~ takes a string
+
+> k in 1
+error: column 6: expected ( after in, found "1"
+
+> k in (1
+error: column 8: expected , or ), found the end of the query
+
+> k in (1,
+error: column 9: expected a value, found the end of the query
+
+> has(a
+error: column 6: expected ), found the end of the query
+
+> has()
+error: column 5: expected a field, found ")"
+
+> and = 1
+error: column 1: expected a field, found "and"
+
+> 7 = a
+error: column 1: expected a field, found "7"
+
+> = 1
+error: column 1: expected a field, found "="
+
+> a = = 1
+error: column 5: expected a value, found "="
+
+> body ~ "pay\"ment
+error: column 8: the string has no closing quote

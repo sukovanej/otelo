@@ -1,0 +1,24 @@
+---
+source: crates/query/tests/parse.rs
+expression: out
+input_file: crates/query/tests/parse/metrics/fields.txt
+---
+> name ~ http
+name ~ "http"
+fields: name (built-in)
+
+> unit = s
+unit = "s"
+fields: unit (built-in)
+
+> kind = histogram
+kind = "histogram"
+fields: kind (built-in)
+
+> state = used
+state = "used"
+fields: "state" (attribute)
+
+> level = warn
+attr.level = "warn"
+fields: "level" (attribute)

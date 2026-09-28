@@ -34,6 +34,12 @@ pub struct Args {
     data: PathBuf,
 }
 
+/// Runs the daemon until SIGTERM or Ctrl-C.
+///
+/// # Errors
+///
+/// When the data directory, the state file, the telemetry writer, or the
+/// listener cannot start, or the server fails.
 pub fn main(args: Args) -> anyhow::Result<()> {
     init_logging();
     tokio::runtime::Builder::new_multi_thread()

@@ -1,0 +1,46 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/values.txt
+---
+> http.route = |
+"/matches"                     value    50           replaces "" at 13..13
+"/languages"                   value    40           replaces "" at 13..13
+"/login"                       value    1            replaces "" at 13..13
+
+> http.route = "/l|
+"/languages"                   value    40           replaces "\"/l" at 13..16
+"/login"                       value    1            replaces "\"/l" at 13..16
+
+> http.route = /m|
+"/matches"                     value    50           replaces "/m" at 13..15
+
+> http.route in (/matches, |
+"/matches"                     value    50           replaces "" at 25..25
+"/languages"                   value    40           replaces "" at 25..25
+"/login"                       value    1            replaces "" at 25..25
+
+> http.response.status_code >= 2|
+200                            value    70           replaces "2" at 29..30
+
+> service = |
+"mudro"                        value    9            replaces "" at 10..10
+"caddy"                        value    2            replaces "" at 10..10
+
+> level >= |
+trace                          value                 replaces "" at 9..9
+debug                          value                 replaces "" at 9..9
+info                           value                 replaces "" at 9..9
+warn                           value                 replaces "" at 9..9
+error                          value                 replaces "" at 9..9
+fatal                          value                 replaces "" at 9..9
+
+> level >= w|
+warn                           value                 replaces "w" at 9..10
+
+> resource.host.name = |
+"droplet"                      value    3            replaces "" at 21..21
+
+> user.id = |
+7                              value    30           replaces "" at 10..10
+"8"                            value    10           replaces "" at 10..10

@@ -29,6 +29,7 @@ pub use template::template;
 pub use traces::{Spans, Trace, TraceSpan, TraceSummary, Traces};
 
 use crate::{Day, Reader};
+use siner_query::{Query, Signal};
 
 /// The OpenTelemetry status code of a failed span.
 pub const STATUS_ERROR: i32 = 2;
@@ -188,6 +189,42 @@ impl Reader {
         Ok(())
     }
 
+    /// The steps of `EXPLAIN QUERY PLAN` for the query that
+    /// [`Reader::scan`] runs with the same arguments.
+    pub(crate) fn plan(
+        &self,
+        [head, tail]: [&str; 2],
+        part: impl Fn(&str) -> String,
+        filter: &Filter,
+    ) -> anyhow::Result<Vec<String>> {
+        if self.days().is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "EXPLAIN QUERY PLAN {head}{}{tail}",
+            union(self.days(), part)
+        );
+        let mut stmt = self.conn().prepare(&sql)?;
+        let steps = stmt.query_map(filter.params().as_slice(), |row| row.get::<_, String>(3))?;
+        Ok(steps.collect::<Result<_, _>>()?)
+    }
+
+    /// How SQLite runs the query of [`Reader::logs`] or [`Reader::spans`]
+    /// for `query`: one line per step of `EXPLAIN QUERY PLAN`. A step that
+    /// names an `attr_` index reads an indexed attribute.
+    ///
+    /// # Errors
+    ///
+    /// When the query is over metrics or is invalid, or SQLite cannot plan
+    /// it.
+    pub fn explain(&self, query: &Query) -> anyhow::Result<Vec<String>> {
+        match query.signal {
+            Signal::Logs => logs::explain(self, query),
+            Signal::Spans => traces::explain(self, query),
+            Signal::Metrics => bail!("a plan shows how logs and spans use their indexes"),
+        }
+    }
+
     /// Like [`Reader::scan`], and collects the rows `map` makes.
     pub(crate) fn collect<T>(
         &self,
@@ -218,20 +255,4 @@ pub(crate) fn cut<T>(rows: &mut Vec<T>, limit: usize) -> bool {
     let truncated = rows.len() > limit;
     rows.truncate(limit);
     truncated
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_trace_ids_and_severities() {
-        let id = parse_trace_id("4bf92f3577b34da6a3ce929d0e0e4736").unwrap();
-        assert_eq!(hex(&id), "4bf92f3577b34da6a3ce929d0e0e4736");
-        assert!(parse_trace_id("4bf9").is_err());
-        assert_eq!(parse_severity("WARN").unwrap(), 13);
-        assert_eq!(parse_severity("17").unwrap(), 17);
-        assert!(parse_severity("loud").is_err());
-        assert_eq!(level(18), "ERROR");
-    }
 }

@@ -78,6 +78,11 @@ pub struct LogsArgs {
     client: Client,
 }
 
+/// Runs `siner logs`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("q", joined(&args.query)));
@@ -145,6 +150,11 @@ pub struct SpansArgs {
     client: Client,
 }
 
+/// Runs `siner spans`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn spans(args: &SpansArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("q", joined(&args.query)));
@@ -194,6 +204,11 @@ pub struct TracesArgs {
     client: Client,
 }
 
+/// Runs `siner traces`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn traces(args: &TracesArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("q", joined(&args.query)));
@@ -253,6 +268,11 @@ pub struct TraceArgs {
     client: Client,
 }
 
+/// Runs `siner trace`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn trace(args: &TraceArgs) -> anyhow::Result<()> {
     let params = [
         ("since", args.since.clone()),
@@ -349,6 +369,11 @@ pub struct MetricsArgs {
     client: Client,
 }
 
+/// Runs `siner metrics`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("q", joined(&args.query)));
@@ -396,6 +421,11 @@ pub struct MetricArgs {
     client: Client,
 }
 
+/// Runs `siner metric`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.extend([("q", joined(&args.query)), ("step", args.step.clone())]);
@@ -493,6 +523,11 @@ pub struct SqlArgs {
     client: Client,
 }
 
+/// Runs `siner sql`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
     let sql = if args.query == "-" {
         let mut text = String::new();
@@ -538,6 +573,11 @@ pub struct AttributesArgs {
     client: Client,
 }
 
+/// Runs `siner attributes`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn attributes(args: &AttributesArgs) -> anyhow::Result<()> {
     let attributes: Attributes = args.client.get(
         "/api/attributes",
@@ -588,6 +628,11 @@ pub struct CompleteArgs {
     client: Client,
 }
 
+/// Runs `siner complete`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn complete(args: &CompleteArgs) -> anyhow::Result<()> {
     let completions: Completions = args.client.get(
         "/api/complete",
@@ -642,6 +687,11 @@ enum IndexCommand {
     },
 }
 
+/// Runs `siner index`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
 pub fn index(args: &IndexArgs) -> anyhow::Result<()> {
     let path = |signal: &Signal, key: &str| format!("/api/indexes/{signal}/{}", path_segment(key));
     let list: IndexList = match &args.command {

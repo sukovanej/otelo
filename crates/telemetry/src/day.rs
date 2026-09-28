@@ -38,7 +38,8 @@ impl Day {
     }
 
     /// The day of a day file, or of its `-wal` or `-shm` file.
-    pub(crate) fn from_file_name(name: &str) -> Option<Self> {
+    #[must_use]
+    pub fn from_file_name(name: &str) -> Option<Self> {
         let stem = name
             .strip_suffix(".sqlite")
             .or_else(|| name.strip_suffix(".sqlite-wal"))
@@ -63,24 +64,4 @@ impl fmt::Display for Day {
 /// The current time in unix nanoseconds.
 pub fn now() -> i64 {
     i64::try_from(jiff::Timestamp::now().as_nanosecond()).expect("now fits an i64 until 2262")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn names_the_file_by_the_utc_date() {
-        let day = Day::of(1_790_000_000 * 1_000_000_000);
-        assert_eq!(day.file_name(), "2026-09-21.sqlite");
-        assert_eq!(Day::from_file_name("2026-09-21.sqlite"), Some(day));
-        assert_eq!(Day::from_file_name("2026-09-21.sqlite-wal"), Some(day));
-        assert_eq!(Day::from_file_name("state.sqlite"), None);
-    }
-
-    #[test]
-    fn puts_a_timestamp_before_1970_on_the_day_before() {
-        assert_eq!(Day::of(-1).to_string(), "1969-12-31");
-        assert_eq!(Day::of(0).to_string(), "1970-01-01");
-    }
 }

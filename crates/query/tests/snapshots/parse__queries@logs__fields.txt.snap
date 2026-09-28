@@ -1,0 +1,56 @@
+---
+source: crates/query/tests/parse.rs
+expression: out
+input_file: crates/query/tests/parse/logs/fields.txt
+---
+> service = api
+service = "api"
+fields: service (built-in)
+
+> level >= warn
+level >= "warn"
+fields: level (built-in)
+
+> body ~ "payment failed"
+body ~ "payment failed"
+fields: body (built-in)
+
+> trace_id = 4bf92f3577b34da6a3ce929d0e0e4736
+trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+fields: trace_id (built-in)
+
+> source = journald
+source = "journald"
+fields: source (built-in)
+
+> name = x
+attr.name = "x"
+fields: "name" (attribute)
+
+> duration > 1s
+attr.duration > 1000000000ns
+fields: "duration" (attribute)
+
+> resource.host.name = droplet
+resource.host.name = "droplet"
+fields: "host.name" (resource)
+
+> attr.level = 1
+attr.level = 1
+fields: "level" (attribute)
+
+> attr.resource.x = 1
+attr.resource.x = 1
+fields: "resource.x" (attribute)
+
+> `odd key` = 1
+`odd key` = 1
+fields: "odd key" (attribute)
+
+> http.route = "/matches"
+http.route = "/matches"
+fields: "http.route" (attribute)
+
+> město = "Brno"
+město = "Brno"
+fields: "město" (attribute)

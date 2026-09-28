@@ -15,7 +15,7 @@ mod writer;
 use serde_json::{Map, Value};
 
 pub use day::Day;
-pub use histogram::{Distribution, Histogram};
+pub use histogram::{Distribution, Histogram, Merger};
 pub use indexes::{IndexedKey, Indexes};
 pub use reader::{Reader, timed_out};
 pub use writer::{Config, Inbox, Sender, Writer, channel};

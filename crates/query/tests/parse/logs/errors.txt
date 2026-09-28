@@ -1,0 +1,20 @@
+user.id
+user.id 7
+user.id =
+a = 1 or
+a = 1 and
+(a = 1
+a = 1 )
+a = "open
+a ! 1
+body ~ 5
+k in 1
+k in (1
+k in (1,
+has(a
+has()
+and = 1
+7 = a
+= 1
+a = = 1
+body ~ "pay\"ment

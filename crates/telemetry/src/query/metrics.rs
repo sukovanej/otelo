@@ -317,16 +317,3 @@ fn finish(
             .collect(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn picks_a_step_that_fits_the_range() {
-        assert_eq!(default_step(0, 3600 * SECOND), 30 * SECOND);
-        assert_eq!(default_step(0, 60 * SECOND), SECOND);
-        assert_eq!(default_step(0, 7 * 86_400 * SECOND), 3 * 3600 * SECOND);
-        assert_eq!(default_step(0, 1000 * 86_400 * SECOND), 86_400 * SECOND);
-    }
-}

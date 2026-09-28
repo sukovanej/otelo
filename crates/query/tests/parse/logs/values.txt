@@ -1,0 +1,22 @@
+a = 1
+a == 1
+a != -2
+a < 1.5
+a <= "x y"
+a > true
+a >= false
+a = 'single \' quoted'
+a = "tab\tand\nnewline"
+a = /matches
+a = 3f2b-9d4a
+a = 2xx
+a = 1.2.3
+d = 1.5s
+d = 250us
+d = 3µs
+d = 2d
+a in (1, "two", three)
+has(a)
+has(resource.host.name)
+http.route="/matches" or user.id>=7
+a = -3 b = 3f2b-9d4a

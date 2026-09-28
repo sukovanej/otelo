@@ -1,0 +1,32 @@
+---
+source: crates/query/tests/parse.rs
+expression: out
+input_file: crates/query/tests/parse/spans/fields.txt
+---
+> name = "GET /languages"
+name = "GET /languages"
+fields: name (built-in)
+
+> duration > 500ms
+duration > 500000000ns
+fields: duration (built-in)
+
+> root = true
+root = true
+fields: root (built-in)
+
+> error = false
+error = false
+fields: error (built-in)
+
+> kind = server
+kind = "server"
+fields: kind (built-in)
+
+> status != error
+status != "error"
+fields: status (built-in)
+
+> body ~ x
+attr.body ~ "x"
+fields: "body" (attribute)

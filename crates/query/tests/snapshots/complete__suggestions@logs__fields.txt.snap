@@ -1,0 +1,75 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/fields.txt
+---
+> |
+service                        field    built-in     replaces "" at 0..0
+level                          field    built-in     replaces "" at 0..0
+body                           field    built-in     replaces "" at 0..0
+trace_id                       field    built-in     replaces "" at 0..0
+span_id                        field    built-in     replaces "" at 0..0
+source                         field    built-in     replaces "" at 0..0
+http.route                     field    string, 90   replaces "" at 0..0
+http.response.status_code      field    int, 80      replaces "" at 0..0
+user.id                        field    mixed, 40    replaces "" at 0..0
+attr.level                     field    string, 2    replaces "" at 0..0
+`odd key`                      field    string, 1    replaces "" at 0..0
+resource.service.name          field    string, 4    replaces "" at 0..0
+resource.host.name             field    string, 3    replaces "" at 0..0
+not                            keyword               replaces "" at 0..0
+has(                           keyword               replaces "" at 0..0
+(                              keyword               replaces "" at 0..0
+
+> se|
+service                        field    built-in     replaces "se" at 0..2
+
+> http.r|
+http.route                     field    string, 90   replaces "http.r" at 0..6
+http.response.status_code      field    int, 80      replaces "http.r" at 0..6
+
+> resource.|
+resource.service.name          field    string, 4    replaces "resource." at 0..9
+resource.host.name             field    string, 3    replaces "resource." at 0..9
+
+> resource.h|
+resource.host.name             field    string, 3    replaces "resource.h" at 0..10
+
+> attr.|
+attr.level                     field    string, 2    replaces "attr." at 0..5
+
+> a = 1 AND (us|
+user.id                        field    mixed, 40    replaces "us" at 11..13
+
+> not |
+service                        field    built-in     replaces "" at 4..4
+level                          field    built-in     replaces "" at 4..4
+body                           field    built-in     replaces "" at 4..4
+trace_id                       field    built-in     replaces "" at 4..4
+span_id                        field    built-in     replaces "" at 4..4
+source                         field    built-in     replaces "" at 4..4
+http.route                     field    string, 90   replaces "" at 4..4
+http.response.status_code      field    int, 80      replaces "" at 4..4
+user.id                        field    mixed, 40    replaces "" at 4..4
+attr.level                     field    string, 2    replaces "" at 4..4
+`odd key`                      field    string, 1    replaces "" at 4..4
+resource.service.name          field    string, 4    replaces "" at 4..4
+resource.host.name             field    string, 3    replaces "" at 4..4
+not                            keyword               replaces "" at 4..4
+has(                           keyword               replaces "" at 4..4
+(                              keyword               replaces "" at 4..4
+
+> has(|
+http.route                     field    string, 90   replaces "" at 4..4
+http.response.status_code      field    int, 80      replaces "" at 4..4
+user.id                        field    mixed, 40    replaces "" at 4..4
+attr.level                     field    string, 2    replaces "" at 4..4
+`odd key`                      field    string, 1    replaces "" at 4..4
+resource.service.name          field    string, 4    replaces "" at 4..4
+resource.host.name             field    string, 3    replaces "" at 4..4
+
+> has(user.id |
+)                              keyword               replaces "" at 12..12
+
+> http.ro| = 1
+http.route                     field    string, 90   replaces "http.ro" at 0..7

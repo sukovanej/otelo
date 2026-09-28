@@ -1,0 +1,8 @@
+http.route = "/matches" OR (user.id = 7 AND http.response.status_code = 200)
+a = 1 or b = 2 c = 3
+a = 1 AND b = 2 OR c = 3 AND d = 4
+not a = 1 and b = 2
+not (a = 1 or b = 2)
+NOT NOT a = 1
+((a = 1))
+(a = 1 or b = 2) (c = 3 or d = 4)

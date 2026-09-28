@@ -5,7 +5,9 @@ use std::time::Duration;
 use rusqlite::Connection;
 use serde_json::{Map, Value, json};
 use siner_query::{Signal, complete, parse};
-use siner_telemetry::query::{MetricFilter, ReaderCatalog};
+use siner_telemetry::query::{
+    MetricFilter, ReaderCatalog, default_step, level, parse_severity, parse_trace_id,
+};
 use siner_telemetry::{
     Batch, Config, Day, IndexedKey, Indexes, Log, Metric, MetricKind, Point, Reader, Records,
     Resource, Span, Writer, channel, timed_out,
@@ -526,21 +528,26 @@ fn an_indexed_attribute_has_an_index_in_every_day_file() {
     assert_eq!(names(today).len(), 1);
     assert_eq!(names(today.plus(-1)), names(today));
 
-    // SQLite reads the index for the expression the query compares.
-    let conn = Connection::open(fixture.dir.path().join(today.file_name())).unwrap();
-    let plan: Vec<String> = conn
-        .prepare(
-            "EXPLAIN QUERY PLAN SELECT l.body FROM logs l
-             WHERE l.ts >= 0 AND json_extract(l.attributes, '$.\"user.id\"') IN (7, '7')",
-        )
-        .unwrap()
-        .query_map([], |row| row.get(3))
-        .unwrap()
-        .collect::<Result<_, _>>()
+    // The query the reader runs reads the index, also for OR and NOT.
+    let reader = fixture.reader();
+    let index = &names(today)[0];
+    for query in ["user.id = 7", "user.id = 7 OR user.id in (8, 9)"] {
+        let plan = reader
+            .explain(&parse(query, Signal::Logs).unwrap())
+            .unwrap();
+        assert!(
+            plan.iter().any(|step| step.contains(index)),
+            "{query}: {plan:?}"
+        );
+    }
+    let plan = reader
+        .explain(&parse("http.route = x", Signal::Logs).unwrap())
         .unwrap();
+    assert!(!plan.iter().any(|step| step.contains("attr_")), "{plan:?}");
     assert!(
-        plan.iter().any(|step| step.contains(&names(today)[0])),
-        "{plan:?}"
+        reader
+            .explain(&parse("", Signal::Metrics).unwrap())
+            .is_err()
     );
 
     let mut reader = fixture.reader();
@@ -672,4 +679,62 @@ fn a_histogram_returns_the_bucket_counts_of_each_step() {
     assert_eq!(first.p99, Some(1.0));
     let second = buckets[1].histogram.as_ref().unwrap();
     assert_eq!(second.counts, [6, 0, 0]);
+}
+
+#[test]
+fn parses_trace_ids_and_severities() {
+    let id = parse_trace_id("4bf92f3577b34da6a3ce929d0e0e4736").unwrap();
+    assert_eq!(id[..3], [0x4b, 0xf9, 0x2f]);
+    assert_eq!(id[15], 0x36);
+    assert!(parse_trace_id("4bf9").is_err());
+    assert!(parse_trace_id("zzf92f3577b34da6a3ce929d0e0e4736").is_err());
+    assert_eq!(parse_severity("WARN").unwrap(), 13);
+    assert_eq!(parse_severity("17").unwrap(), 17);
+    assert!(parse_severity("loud").is_err());
+    assert_eq!(level(18), "ERROR");
+}
+
+#[test]
+fn picks_a_step_that_fits_the_range() {
+    assert_eq!(default_step(0, 3600 * SECOND), 30 * SECOND);
+    assert_eq!(default_step(0, 60 * SECOND), SECOND);
+    assert_eq!(default_step(0, 7 * 86_400 * SECOND), 3 * 3600 * SECOND);
+    assert_eq!(default_step(0, 1000 * 86_400 * SECOND), 86_400 * SECOND);
+}
+
+#[test]
+fn the_catalog_stops_keeping_values_of_a_key_with_many() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Day::today().start() + SECOND;
+    let mut api = records("api", &json!({"service.name": "api"}));
+    // 201 numbers, a repeat, and a string: more values than a key keeps.
+    api.logs = (0..=200)
+        .map(|id| log(t, 9, "signed in", &json!({ "user.id": id })))
+        .chain([
+            log(t, 9, "signed in", &json!({"user.id": 3})),
+            log(t, 9, "signed in", &json!({"user.id": "x"})),
+        ])
+        .collect();
+    write(dir.path(), vec![api], &Indexes::default());
+    let reader = Reader::open(dir.path(), t, t + SECOND).unwrap();
+
+    let attributes = reader.attributes(Signal::Logs).unwrap();
+    let user = &attributes.record[0];
+    assert_eq!(
+        (user.key.as_str(), user.kind.as_str(), user.count),
+        ("user.id", "mixed", 203)
+    );
+    let row = |sql: &str| reader.sql(sql, 10).unwrap().rows;
+    assert_eq!(
+        row("SELECT many_values FROM attribute_keys WHERE key = 'user.id'"),
+        [vec![json!(1)]]
+    );
+    assert_eq!(
+        row("SELECT count(*) FROM attribute_values WHERE key = 'user.id'"),
+        [vec![json!(200)]]
+    );
+    assert_eq!(
+        row("SELECT count FROM attribute_values WHERE key = 'user.id' AND value = '3'"),
+        [vec![json!(2)]]
+    );
 }

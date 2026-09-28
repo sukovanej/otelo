@@ -1,0 +1,72 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/spans/fields.txt
+---
+> |
+service                        field    built-in     replaces "" at 0..0
+name                           field    built-in     replaces "" at 0..0
+kind                           field    built-in     replaces "" at 0..0
+status                         field    built-in     replaces "" at 0..0
+error                          field    built-in     replaces "" at 0..0
+duration                       field    built-in     replaces "" at 0..0
+root                           field    built-in     replaces "" at 0..0
+trace_id                       field    built-in     replaces "" at 0..0
+span_id                        field    built-in     replaces "" at 0..0
+http.route                     field    string, 90   replaces "" at 0..0
+http.response.status_code      field    int, 80      replaces "" at 0..0
+user.id                        field    mixed, 40    replaces "" at 0..0
+attr.level                     field    string, 2    replaces "" at 0..0
+`odd key`                      field    string, 1    replaces "" at 0..0
+resource.service.name          field    string, 4    replaces "" at 0..0
+resource.host.name             field    string, 3    replaces "" at 0..0
+not                            keyword               replaces "" at 0..0
+has(                           keyword               replaces "" at 0..0
+(                              keyword               replaces "" at 0..0
+
+> name = |
+"GET /languages"               value    20           replaces "" at 7..7
+"POST /matches"                value    5            replaces "" at 7..7
+
+> kind = |
+internal                       value                 replaces "" at 7..7
+server                         value                 replaces "" at 7..7
+client                         value                 replaces "" at 7..7
+producer                       value                 replaces "" at 7..7
+consumer                       value                 replaces "" at 7..7
+
+> status = e|
+error                          value                 replaces "e" at 9..10
+
+> error = |
+true                           value                 replaces "" at 8..8
+false                          value                 replaces "" at 8..8
+
+> duration |
+=                              operator              replaces "" at 9..9
+!=                             operator              replaces "" at 9..9
+<                              operator              replaces "" at 9..9
+<=                             operator              replaces "" at 9..9
+>                              operator              replaces "" at 9..9
+>=                             operator              replaces "" at 9..9
+in                             operator              replaces "" at 9..9
+
+> root = t|
+true                           value                 replaces "t" at 7..8
+
+> kind = s|
+server                         value                 replaces "s" at 7..8
+
+> error |
+=                              operator              replaces "" at 6..6
+!=                             operator              replaces "" at 6..6
+in                             operator              replaces "" at 6..6
+
+> has(|
+http.route                     field    string, 90   replaces "" at 4..4
+http.response.status_code      field    int, 80      replaces "" at 4..4
+user.id                        field    mixed, 40    replaces "" at 4..4
+attr.level                     field    string, 2    replaces "" at 4..4
+`odd key`                      field    string, 1    replaces "" at 4..4
+resource.service.name          field    string, 4    replaces "" at 4..4
+resource.host.name             field    string, 3    replaces "" at 4..4

@@ -1,0 +1,36 @@
+---
+source: crates/query/tests/parse.rs
+expression: out
+input_file: crates/query/tests/parse/logs/precedence.txt
+---
+> http.route = "/matches" OR (user.id = 7 AND http.response.status_code = 200)
+http.route = "/matches" OR user.id = 7 AND http.response.status_code = 200
+fields: "http.route" (attribute), "user.id" (attribute), "http.response.status_code" (attribute)
+
+> a = 1 or b = 2 c = 3
+a = 1 OR b = 2 AND c = 3
+fields: "a" (attribute), "b" (attribute), "c" (attribute)
+
+> a = 1 AND b = 2 OR c = 3 AND d = 4
+a = 1 AND b = 2 OR c = 3 AND d = 4
+fields: "a" (attribute), "b" (attribute), "c" (attribute), "d" (attribute)
+
+> not a = 1 and b = 2
+NOT a = 1 AND b = 2
+fields: "a" (attribute), "b" (attribute)
+
+> not (a = 1 or b = 2)
+NOT (a = 1 OR b = 2)
+fields: "a" (attribute), "b" (attribute)
+
+> NOT NOT a = 1
+NOT NOT a = 1
+fields: "a" (attribute)
+
+> ((a = 1))
+a = 1
+fields: "a" (attribute)
+
+> (a = 1 or b = 2) (c = 3 or d = 4)
+(a = 1 OR b = 2) AND (c = 3 OR d = 4)
+fields: "a" (attribute), "b" (attribute), "c" (attribute), "d" (attribute)

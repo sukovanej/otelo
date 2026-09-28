@@ -1,0 +1,40 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/operators.txt
+---
+> http.route |
+=                              operator              replaces "" at 11..11
+!=                             operator              replaces "" at 11..11
+<                              operator              replaces "" at 11..11
+<=                             operator              replaces "" at 11..11
+>                              operator              replaces "" at 11..11
+>=                             operator              replaces "" at 11..11
+~                              operator              replaces "" at 11..11
+in                             operator              replaces "" at 11..11
+
+> level |
+=                              operator              replaces "" at 6..6
+!=                             operator              replaces "" at 6..6
+<                              operator              replaces "" at 6..6
+<=                             operator              replaces "" at 6..6
+>                              operator              replaces "" at 6..6
+>=                             operator              replaces "" at 6..6
+in                             operator              replaces "" at 6..6
+
+> body |
+=                              operator              replaces "" at 5..5
+!=                             operator              replaces "" at 5..5
+~                              operator              replaces "" at 5..5
+in                             operator              replaces "" at 5..5
+
+> service |
+=                              operator              replaces "" at 8..8
+!=                             operator              replaces "" at 8..8
+~                              operator              replaces "" at 8..8
+in                             operator              replaces "" at 8..8
+
+> trace_id |
+=                              operator              replaces "" at 9..9
+!=                             operator              replaces "" at 9..9
+in                             operator              replaces "" at 9..9
