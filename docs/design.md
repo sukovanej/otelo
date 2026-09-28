@@ -26,7 +26,7 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 - Host collector: CPU, memory, swap, load, disk, network, through the `sysinfo` crate on both platforms.
 - Health checks: HTTP, TCP, command, and heartbeats (a job POSTs to siner; a missing POST is a failure).
 - Timeline: deploys, restarts, OOM kills, health changes, and error logs in one stream.
-- UI: an SPA embedded in the binary.
+- UI: a SolidJS SPA in `ui/`, built with Vite. A release binary embeds `ui/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
 
 ## Storage
 
@@ -97,6 +97,5 @@ mudro changes: point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://127.0.0.1:4318`, a
 ## Open questions
 
 - Rust or Go.
-- The UI framework.
 - Retention: 7 days of raw logs and traces, 90 days of metric rollups?
 - Prior art to check first: OpenObserve (single Rust binary with OTLP; no deploys or secrets, and heavy for 1 GB).
