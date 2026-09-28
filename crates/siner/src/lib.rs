@@ -1,11 +1,8 @@
 //! The daemon and the CLI of siner. `main.rs` reads the command line and
-//! calls these modules.
+//! calls these modules. The HTTP API is `siner-api`, and the state file
+//! `siner-state`.
 
-pub mod api;
-pub mod client;
+pub mod cli;
 pub mod own;
-pub mod query;
 pub mod serve;
-pub mod state;
-pub mod table;
 pub mod ui;

@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use rust_embed::{Embed, EmbeddedFile};
 
-use crate::api::ErrorBody;
+use siner_api::ErrorBody;
 
 #[derive(Embed)]
 #[folder = "../../packages/app/dist/"]

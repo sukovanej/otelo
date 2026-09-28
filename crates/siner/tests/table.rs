@@ -1,4 +1,4 @@
-use siner::table::{duration, number};
+use siner::cli::table::{duration, number};
 
 #[test]
 fn formats_durations() {

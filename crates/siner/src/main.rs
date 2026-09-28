@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use siner::{api, query, serve};
+use siner::{cli, serve};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]
@@ -13,29 +13,29 @@ enum Command {
     /// Run the daemon
     Serve(serve::Args),
     /// Print log lines, grouped by message template unless --raw
-    Logs(query::LogsArgs),
+    Logs(cli::LogsArgs),
     /// List spans, newest first
-    Spans(query::SpansArgs),
+    Spans(cli::SpansArgs),
     /// List traces by their root span, newest first
-    Traces(query::TracesArgs),
+    Traces(cli::TracesArgs),
     /// Print the span tree and the logs of one trace
-    Trace(query::TraceArgs),
+    Trace(cli::TraceArgs),
     /// List the metric series
-    Metrics(query::MetricsArgs),
+    Metrics(cli::MetricsArgs),
     /// Print the series of one metric in buckets
-    Metric(query::MetricArgs),
+    Metric(cli::MetricArgs),
     /// List the services with their requests, errors, latency, and logs
-    Services(query::ServicesArgs),
+    Services(cli::ServicesArgs),
     /// Print the requests, errors, latency, and logs of one service, by operation
-    Service(query::ServiceArgs),
+    Service(cli::ServiceArgs),
     /// Run a read-only SQL query over the telemetry
-    Sql(query::SqlArgs),
+    Sql(cli::SqlArgs),
     /// List the attributes a query can read, with their types
-    Attributes(query::AttributesArgs),
+    Attributes(cli::AttributesArgs),
     /// Suggest what can go at the cursor of a query
-    Complete(query::CompleteArgs),
+    Complete(cli::CompleteArgs),
     /// List, add, or remove the indexed attributes
-    Index(query::IndexArgs),
+    Index(cli::IndexArgs),
     /// Print the spec of the query API that /api/openapi.json serves, without a daemon
     Openapi,
 }
@@ -43,18 +43,21 @@ enum Command {
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Serve(args) => serve::main(args),
-        Command::Logs(args) => query::logs(&args),
-        Command::Spans(args) => query::spans(&args),
-        Command::Traces(args) => query::traces(&args),
-        Command::Trace(args) => query::trace(&args),
-        Command::Metrics(args) => query::metrics(&args),
-        Command::Metric(args) => query::metric(&args),
-        Command::Services(args) => query::services(&args),
-        Command::Service(args) => query::service(&args),
-        Command::Sql(args) => query::sql(&args),
-        Command::Attributes(args) => query::attributes(&args),
-        Command::Complete(args) => query::complete(&args),
-        Command::Index(args) => query::index(&args),
-        Command::Openapi => api::print_spec(),
+        Command::Logs(args) => cli::logs(&args),
+        Command::Spans(args) => cli::spans(&args),
+        Command::Traces(args) => cli::traces(&args),
+        Command::Trace(args) => cli::trace(&args),
+        Command::Metrics(args) => cli::metrics(&args),
+        Command::Metric(args) => cli::metric(&args),
+        Command::Services(args) => cli::services(&args),
+        Command::Service(args) => cli::service(&args),
+        Command::Sql(args) => cli::sql(&args),
+        Command::Attributes(args) => cli::attributes(&args),
+        Command::Complete(args) => cli::complete(&args),
+        Command::Index(args) => cli::index(&args),
+        Command::Openapi => {
+            println!("{}", siner_api::spec().to_pretty_json()?);
+            Ok(())
+        }
     }
 }

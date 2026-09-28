@@ -1769,8 +1769,10 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "siner-api",
  "siner-otlp",
  "siner-query",
+ "siner-state",
  "siner-telemetry",
  "tempfile",
  "tokio",
@@ -1779,6 +1781,22 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "ureq",
+]
+
+[[package]]
+name = "siner-api"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "jiff",
+ "serde",
+ "siner-query",
+ "siner-state",
+ "siner-telemetry",
+ "tempfile",
+ "tokio",
+ "tracing",
  "utoipa",
  "utoipa-axum",
 ]
@@ -1813,6 +1831,17 @@ name = "siner-query"
 version = "0.0.1"
 dependencies = [
  "insta",
+]
+
+[[package]]
+name = "siner-state"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "siner-query",
+ "siner-telemetry",
+ "tempfile",
 ]
 
 [[package]]

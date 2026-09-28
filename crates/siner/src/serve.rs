@@ -10,10 +10,10 @@ use siner_telemetry::Indexes;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{self, Api};
 use crate::own::{self, Destination};
-use crate::state::State;
 use crate::ui;
+use siner_api::{self as api, Api};
+use siner_state::State;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
