@@ -122,9 +122,12 @@ fn the_cli_reads_what_the_api_serves() {
             "time": traces["traces"][0]["time"],
             "service": "api",
             "name": "GET /languages",
+            "kind": 2,
             "duration_ns": 20_000_000,
             "spans": 2,
             "error": true,
+            "attributes": {},
+            "resource": {},
         })
     );
     let (spans, _) = json(&addr, &["spans", "status = error"]);

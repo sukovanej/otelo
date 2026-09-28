@@ -11,9 +11,9 @@ export const plain = "border-line bg-surface";
 
 /** The height, padding, and text of a control of each size. */
 export const sizes = {
-  sm: "h-5.5 px-1.5 text-2xs",
-  md: "h-7.5 px-2.5",
-  lg: "h-9.5 px-3.5",
+  sm: "h-6 px-1.5 text-2xs",
+  md: "h-8 px-2.5",
+  lg: "h-10.5 px-3.5",
 } as const;
 
 export type Size = keyof typeof sizes;

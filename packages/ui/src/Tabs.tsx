@@ -16,7 +16,7 @@ export default function Tabs<T extends string>(props: {
             type="button"
             role="tab"
             aria-selected={props.value === option.value}
-            class={`${plain} -ml-px h-6.5 cursor-pointer border px-2.5 text-muted first:ml-0 first:rounded-l-md last:rounded-r-md hover:bg-hover aria-selected:bg-active aria-selected:text-ink`}
+            class={`${plain} -ml-px h-7 cursor-pointer border px-2.5 text-muted first:ml-0 first:rounded-l-md last:rounded-r-md hover:bg-hover aria-selected:bg-active aria-selected:text-ink`}
             onClick={() => props.onChange(option.value)}
           >
             {option.label}

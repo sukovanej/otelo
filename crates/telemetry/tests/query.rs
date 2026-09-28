@@ -373,6 +373,11 @@ fn traces_match_on_any_of_their_spans() {
             ("GET /health", 1, false),
         ]
     );
+    // A trace carries the attributes and the resource of its root span.
+    assert_eq!(all.traces[0].attributes["http.route"], "/matches");
+    assert_eq!(all.traces[0].attributes["user.id"], 7);
+    assert_eq!(all.traces[0].resource["service.name"], "api");
+    assert_eq!(all.traces[0].kind, 2);
     assert_eq!(traces(&reader, "error = true"), ["GET /languages"]);
     assert_eq!(traces(&reader, "db.system = sqlite"), ["GET /languages"]);
     assert_eq!(

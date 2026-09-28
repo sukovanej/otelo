@@ -1,7 +1,9 @@
 import { Button, Level } from "@siner/ui";
 import { createSignal, For, Show } from "solid-js";
 import type { LogGroup } from "../api";
+import Measure from "../Measure";
 import { templateTerm } from "../query";
+import { toggleRow } from "../row";
 import { ago, formatTime, parseTime } from "../time";
 import {
   body,
@@ -13,7 +15,7 @@ import {
   openRow,
   row,
   times,
-} from "./classes";
+} from "../classes";
 
 /** A template with its placeholders marked, so the fixed words stand out. */
 function Template(props: { text: string }) {
@@ -55,26 +57,10 @@ export default function LogGroupList(props: {
               <div class="border-b border-line" role="listitem">
                 <div
                   class={`${row} ${groupColumns} py-2 ${isOpen() ? openRow : closedRow}`}
-                  role="button"
-                  tabIndex={0}
                   aria-expanded={isOpen()}
-                  onClick={() => {
-                    if (window.getSelection()?.isCollapsed !== false) toggle();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      toggle();
-                    }
-                  }}
+                  {...toggleRow(toggle)}
                 >
-                  <span class="relative text-right">
-                    <span
-                      class="absolute inset-y-px left-0 rounded-sm bg-bar"
-                      style={{ width: `${(100 * group.count) / most()}%` }}
-                    />
-                    <span class="relative pr-1">{group.count.toLocaleString()}</span>
-                  </span>
+                  <Measure share={group.count / most()}>{group.count.toLocaleString()}</Measure>
                   <Level level={group.level} />
                   <span class="wrap-anywhere">
                     <Template text={group.template} />

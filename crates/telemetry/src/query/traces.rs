@@ -31,10 +31,30 @@ pub struct TraceSummary {
     pub service: String,
     /// The name of the root span.
     pub name: String,
+    /// The OpenTelemetry span kind of the root span.
+    pub kind: i32,
     pub duration_ns: i64,
     pub spans: u64,
     /// Whether a span of the trace failed.
     pub error: bool,
+    /// The attributes of the root span, such as `http.route`.
+    #[schema(value_type = Object)]
+    pub attributes: Map<String, Value>,
+    /// The attributes of the resource that sent the root span.
+    #[schema(value_type = Object)]
+    pub resource: Map<String, Value>,
+}
+
+/// The root span of a trace, before the counts of its spans.
+struct Root {
+    trace_id: Vec<u8>,
+    start: i64,
+    service: String,
+    name: String,
+    kind: i32,
+    duration_ns: i64,
+    attributes: Map<String, Value>,
+    resource: Map<String, Value>,
 }
 
 /// Spans, newest first.
@@ -205,7 +225,8 @@ impl Reader {
             ["", &tail],
             |day| {
                 format!(
-                    "SELECT s.trace_id, s.start_ts, r.service, s.name, s.duration_ns
+                    "SELECT s.trace_id, s.start_ts, r.service, s.name, s.kind, s.duration_ns,
+                        s.attributes, r.attributes AS resource
                      FROM {day}.spans s JOIN {day}.resources r ON r.id = s.resource_id
                      WHERE {}",
                     where_.sql(day)
@@ -213,29 +234,37 @@ impl Reader {
             },
             &where_,
             |row| {
-                Ok((
-                    row.get::<_, Vec<u8>>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                ))
+                let attributes: String = row.get(6)?;
+                let resource: String = row.get(7)?;
+                Ok(Root {
+                    trace_id: row.get(0)?,
+                    start: row.get(1)?,
+                    service: row.get(2)?,
+                    name: row.get(3)?,
+                    kind: row.get(4)?,
+                    duration_ns: row.get(5)?,
+                    attributes: serde_json::from_str(&attributes)?,
+                    resource: serde_json::from_str(&resource)?,
+                })
             },
         )?;
         let truncated = cut(&mut roots, limit);
-        let stats = self.span_stats(roots.iter().map(|root| root.0.as_slice()))?;
+        let stats = self.span_stats(roots.iter().map(|root| root.trace_id.as_slice()))?;
         let traces = roots
             .into_iter()
-            .map(|(id, start, service, name, duration_ns)| {
-                let (spans, error) = stats.get(&id).copied().unwrap_or((1, false));
+            .map(|root| {
+                let (spans, error) = stats.get(&root.trace_id).copied().unwrap_or((1, false));
                 TraceSummary {
-                    trace_id: hex(&id),
-                    time: time(start),
-                    service,
-                    name,
-                    duration_ns,
+                    trace_id: hex(&root.trace_id),
+                    time: time(root.start),
+                    service: root.service,
+                    name: root.name,
+                    kind: root.kind,
+                    duration_ns: root.duration_ns,
                     spans,
                     error,
+                    attributes: root.attributes,
+                    resource: root.resource,
                 }
             })
             .collect();

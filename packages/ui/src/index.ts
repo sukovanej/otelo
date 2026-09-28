@@ -2,6 +2,7 @@
 // `@siner/ui/theme.css` into its Tailwind CSS, adds `@source` for this
 // package's `src`, and imports `@siner/ui/fonts.css` once.
 
+export { default as Badge, type Tone } from "./Badge";
 export { default as Button } from "./Button";
 export { default as Callout } from "./Callout";
 export { default as Checkbox } from "./Checkbox";
@@ -13,3 +14,4 @@ export { listStep, move } from "./keys";
 export { default as RangePicker } from "./RangePicker";
 export { default as Select, type SelectOption } from "./Select";
 export { default as Tabs } from "./Tabs";
+export { default as Tooltip } from "./Tooltip";

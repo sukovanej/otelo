@@ -44,6 +44,77 @@ export interface LogGroups {
   unindexed: string[];
 }
 
+export interface SpanEvent {
+  /** Nanoseconds since the Unix epoch, to about a microsecond in a number. */
+  ts: number;
+  name: string;
+  attributes: Record<string, Json>;
+}
+
+export interface Span {
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  service: string;
+  name: string;
+  /** The OpenTelemetry span kind: 1 internal to 5 consumer, 0 unspecified. */
+  kind: number;
+  /** RFC 3339 with nanoseconds: the start of the span. */
+  time: string;
+  duration_ns: number;
+  /** The OpenTelemetry status code: 0 unset, 1 ok, 2 error. */
+  status: number;
+  error: boolean;
+  attributes: Record<string, Json>;
+  events: SpanEvent[];
+  resource: Record<string, Json>;
+}
+
+export interface Spans {
+  spans: Span[];
+  truncated: boolean;
+  unindexed: string[];
+}
+
+/** A trace by its root span. */
+export interface TraceSummary {
+  trace_id: string;
+  /** The start of the root span. */
+  time: string;
+  service: string;
+  /** The name of the root span. */
+  name: string;
+  /** The kind of the root span. */
+  kind: number;
+  duration_ns: number;
+  spans: number;
+  /** Whether a span of the trace failed. */
+  error: boolean;
+  /** The attributes of the root span. */
+  attributes: Record<string, Json>;
+  /** The resource that sent the root span. */
+  resource: Record<string, Json>;
+}
+
+export interface Traces {
+  traces: TraceSummary[];
+  truncated: boolean;
+  unindexed: string[];
+}
+
+/** One trace: its spans by start time, and its logs, newest first. */
+export interface Trace {
+  trace_id: string;
+  spans: Span[];
+  logs: LogLine[];
+  truncated: boolean;
+}
+
+/** The names of span kinds and statuses, as the query language writes them.
+ * The kinds count from 1. */
+export const SPAN_KINDS = ["unspecified", "internal", "server", "client", "producer", "consumer"];
+export const SPAN_STATUSES = ["unset", "ok", "error"];
+
 export interface Suggestion {
   text: string;
   /** Characters, not UTF-16 code units. */
@@ -118,6 +189,16 @@ export const getLogs = (params: ListParams, signal?: AbortSignal) =>
 
 export const getLogGroups = (params: ListParams, signal?: AbortSignal) =>
   request<LogGroups>("GET", `/api/logs/groups${listSearch(params)}`, signal);
+
+export const getSpans = (params: ListParams, signal?: AbortSignal) =>
+  request<Spans>("GET", `/api/spans${listSearch(params)}`, signal);
+
+export const getTraces = (params: ListParams, signal?: AbortSignal) =>
+  request<Traces>("GET", `/api/traces${listSearch(params)}`, signal);
+
+/** One trace from the whole retention. */
+export const getTrace = (id: string, signal?: AbortSignal) =>
+  request<Trace>("GET", `/api/traces/${encodeURIComponent(id)}`, signal);
 
 export const complete = (kind: Signal, q: string, cursor: number, signal?: AbortSignal) =>
   request<{ suggestions: Suggestion[] }>(
