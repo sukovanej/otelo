@@ -179,13 +179,18 @@ impl Reader {
             return Ok(());
         }
         let sql = format!("{head}{}{tail}", union(self.days(), part));
+        let span = statement_span(&sql);
+        let _entered = span.enter();
         let mut stmt = self.conn().prepare(&sql)?;
         let mut rows = stmt.query(filter.params().as_slice())?;
+        let mut read = 0_i64;
         while let Some(row) = rows.next()? {
+            read += 1;
             if !each(row)? {
                 break;
             }
         }
+        span.record("db.response.returned_rows", read);
         Ok(())
     }
 
@@ -240,6 +245,19 @@ impl Reader {
         })?;
         Ok(out)
     }
+}
+
+/// The span of one statement, as the OpenTelemetry database conventions name it.
+/// Record the rows it read in `db.response.returned_rows`, as an `i64`: the
+/// OpenTelemetry layer keeps a `u64` as text.
+pub(crate) fn statement_span(sql: &str) -> tracing::Span {
+    tracing::info_span!(
+        "SELECT",
+        otel.kind = "client",
+        db.system.name = "sqlite",
+        db.query.text = sql,
+        db.response.returned_rows = tracing::field::Empty,
+    )
 }
 
 /// The `SELECT` of each day, joined with `UNION ALL`.

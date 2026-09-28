@@ -22,8 +22,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["metrics", "grpc-tonic", "http-json", "gzip-tonic", "gzip-http"] }
+opentelemetry_sdk = { workspace = true, features = ["metrics"] }
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
 ureq = { workspace = true }
