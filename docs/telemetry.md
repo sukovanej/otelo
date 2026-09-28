@@ -86,6 +86,8 @@ erDiagram
   }
 ```
 
+The `attributes` and `labels` columns hold JSON objects. In Rust they are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. The JSON of the columns is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes.
+
 ## OTLP receiver
 
 The `siner-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JSON, gzip or not) and over gRPC on `127.0.0.1:4317`. `siner serve --otlp-http` and `--otlp-grpc` move them. Both transports call one mapping to the rows:
@@ -106,7 +108,7 @@ The `siner-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 
 ## Querying
 
-The CLI and the UI use the same HTTP query API. The Rust types of the daemon make its OpenAPI spec, which `siner openapi` prints. `packages/api` of the UI keeps it in `openapi.json` and generates its TypeScript types from it with `mise run api:generate`. A Rust test fails when `openapi.json` is behind the spec, and a test of `packages/api` fails when the types are behind `openapi.json`, so a change to the API reaches the UI's types. Every CLI command prints a table to a terminal and JSON otherwise, and `--json` and `--table` override that. Every query has a row limit. A cut result says so and names the flag that narrows it. Agents read what humans read, so the output stays small by default:
+The CLI and the UI use the same HTTP query API, which the `siner-api` crate serves. The Rust types of the daemon make its OpenAPI spec, which `siner openapi` prints. `packages/api` of the UI keeps it in `openapi.json` and generates its TypeScript types from it with `mise run api:generate`. A Rust test fails when `openapi.json` is behind the spec, and a test of `packages/api` fails when the types are behind `openapi.json`, so a change to the API reaches the UI's types. Every CLI command prints a table to a terminal and JSON otherwise, and `--json` and `--table` override that. Every query has a row limit. A cut result says so and names the flag that narrows it. Agents read what humans read, so the output stays small by default:
 
 - `siner logs` groups lines by message template first, with counts, and prints samples. `--raw` prints lines.
 - `siner spans` lists spans. `siner traces` lists the traces that have a matching span, by root span, duration, and error flag. `siner trace <id>` prints the span tree.
