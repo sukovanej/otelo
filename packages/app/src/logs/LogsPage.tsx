@@ -18,13 +18,15 @@ import {
   getLogs,
   type ListParams,
   type LogGroups,
+  type LogLine,
   type Logs,
 } from "../api";
 import { createFetch } from "../fetch";
 import { addTerm } from "../query";
 import { formatTime } from "../time";
 import LogGroupList from "./LogGroupList";
-import LogLines from "./LogLines";
+import LinePanel from "./LinePanel";
+import LogLines, { lineKey } from "./LogLines";
 
 type View = "lines" | "groups";
 
@@ -95,17 +97,30 @@ export default function LogsPage() {
     onCleanup(() => clearInterval(timer));
   });
 
+  // The line open in the panel. It stays open when a reload or another
+  // query no longer brings it.
+  const [selected, setSelected] = createSignal<LogLine>();
+  const selectedKey = () => {
+    const line = selected();
+    return line && lineKey(line);
+  };
+
   let queryInput: HTMLInputElement | undefined;
-  const onSlash = (e: KeyboardEvent) => {
+  // `/` goes to the query and Escape closes the panel, unless the focus is
+  // in a field, which takes the key.
+  const onKey = (e: KeyboardEvent) => {
     const typing =
       e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
-    if (e.key === "/" && !typing) {
+    if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "/") {
       e.preventDefault();
       queryInput?.focus();
+    } else if (e.key === "Escape" && selected()) {
+      setSelected(undefined);
     }
   };
-  document.addEventListener("keydown", onSlash);
-  onCleanup(() => document.removeEventListener("keydown", onSlash));
+  document.addEventListener("keydown", onKey);
+  onCleanup(() => document.removeEventListener("keydown", onKey));
 
   const run = () => {
     if (draft() === q()) fetched.reload();
@@ -125,9 +140,9 @@ export default function LogsPage() {
   const truncated = () => fetched.data()?.body.truncated ?? false;
 
   return (
-    <div class="px-4 pb-8">
+    <div class="flex min-h-0 flex-1 flex-col">
       {/* The query and the view stay under the top bar while the results scroll. */}
-      <div class="sticky top-11 z-20 -mx-4 border-b border-line bg-surface px-4 pt-3.5">
+      <div class="relative z-20 shrink-0 bg-surface px-4 pt-3.5 shadow-(--raised)">
         <form
           class="flex items-center gap-2"
           onSubmit={(e) => {
@@ -206,41 +221,58 @@ export default function LogsPage() {
         </div>
       </div>
 
-      <Show when={fetched.error()}>{(error) => <Callout tone="error">{error()}</Callout>}</Show>
+      <div class="flex min-h-0 flex-1">
+        <div class="min-w-0 flex-1 overflow-y-auto px-4 pb-8">
+          <Show when={fetched.error()}>
+            {(error) => (
+              <div class="mt-2">
+                <Callout tone="error">{error()}</Callout>
+              </div>
+            )}
+          </Show>
 
-      <Show when={unindexed().length > 0}>
-        <IndexHint keys={unindexed()} />
-      </Show>
+          <Show when={unindexed().length > 0}>
+            <div class="mt-2">
+              <IndexHint keys={unindexed()} />
+            </div>
+          </Show>
 
-      <Switch>
-        <Match when={lines()}>
-          {(body) => (
-            <Show when={body().logs.length > 0} fallback={<Empty />}>
-              <LogLines lines={body().logs} onFilter={filter} />
-            </Show>
+          <Switch>
+            <Match when={lines()}>
+              {(body) => (
+                <Show when={body().logs.length > 0} fallback={<Empty />}>
+                  <LogLines lines={body().logs} selected={selectedKey()} onSelect={setSelected} />
+                </Show>
+              )}
+            </Match>
+            <Match when={groups()}>
+              {(body) => (
+                <Show when={body().groups.length > 0} fallback={<Empty />}>
+                  <LogGroupList
+                    groups={body().groups}
+                    onShowLines={(term) => setParams({ q: addTerm(q(), term), view: undefined })}
+                  />
+                </Show>
+              )}
+            </Match>
+          </Switch>
+
+          <Show when={truncated() && limit() < MAX_LIMIT}>
+            <Button
+              class="mx-auto mt-3 block"
+              disabled={fetched.loading()}
+              onClick={() => setMore({ base: base(), limit: Math.min(MAX_LIMIT, limit() * 2) })}
+            >
+              Show more
+            </Button>
+          </Show>
+        </div>
+        <Show when={view() === "lines" && selected()}>
+          {(line) => (
+            <LinePanel line={line()} onFilter={filter} onClose={() => setSelected(undefined)} />
           )}
-        </Match>
-        <Match when={groups()}>
-          {(body) => (
-            <Show when={body().groups.length > 0} fallback={<Empty />}>
-              <LogGroupList
-                groups={body().groups}
-                onShowLines={(term) => setParams({ q: addTerm(q(), term), view: undefined })}
-              />
-            </Show>
-          )}
-        </Match>
-      </Switch>
-
-      <Show when={truncated() && limit() < MAX_LIMIT}>
-        <Button
-          class="mx-auto mt-3 block"
-          disabled={fetched.loading()}
-          onClick={() => setMore({ base: base(), limit: Math.min(MAX_LIMIT, limit() * 2) })}
-        >
-          Show more
-        </Button>
-      </Show>
+        </Show>
+      </div>
     </div>
   );
 }

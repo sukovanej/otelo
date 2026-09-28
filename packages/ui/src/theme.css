@@ -41,11 +41,24 @@
   --text-md--line-height: 1.45;
 
   --shadow-popup: 0 8px 28px rgb(0 0 0 / 0.16);
+
+  --animate-panel-in: panel-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(24px);
+    }
+  }
 }
 
 @layer base {
   :root {
     color-scheme: light dark;
+    /* Elevations, which dark mode deepens: a bar over the content, and a
+       panel over the content beside it. Use them as shadow-(--raised). */
+    --raised: 0 1px 0 var(--color-line), 0 6px 16px -10px rgb(0 0 0 / 0.18);
+    --floating: -18px 0 40px -20px rgb(0 0 0 / 0.28);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -70,6 +83,8 @@
       --color-error-soft: #3a1d20;
       --color-hint: #332b15;
       --color-bar: #253552;
+      --raised: 0 1px 0 var(--color-line), 0 8px 20px -10px rgb(0 0 0 / 0.6);
+      --floating: -18px 0 44px -18px rgb(0 0 0 / 0.75);
     }
   }
 
