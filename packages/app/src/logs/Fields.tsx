@@ -3,7 +3,7 @@ import { For, Show } from "solid-js";
 import type { Json, LogLine } from "../api";
 import { attributeField, literal, quote, resourceField } from "../query";
 import { formatDateTime, parseTime } from "../time";
-import { body, detail, heading, times } from "./classes";
+import { body, heading, times } from "./classes";
 
 interface Field {
   /** The name a query uses for the field, or `undefined` when it has none. */
@@ -63,7 +63,7 @@ const show = (value: Json) => (typeof value === "string" ? value : JSON.stringif
 /** The whole of one log line, with buttons that add a field to the query. */
 export default function Fields(props: { line: LogLine; onFilter: (term: string) => void }) {
   return (
-    <div class={detail}>
+    <div class="font-mono">
       <pre class={body}>{props.line.body}</pre>
       <div class={times}>
         {formatDateTime(parseTime(props.line.time))} local · {props.line.time}
@@ -80,7 +80,7 @@ export default function Fields(props: { line: LogLine; onFilter: (term: string) 
                       <th
                         scope="row"
                         title={field.name}
-                        class="w-[1%] min-w-[20ch] py-px pr-2 text-left align-top font-normal whitespace-nowrap text-muted"
+                        class="w-[1%] py-px pr-4 text-left align-top font-normal whitespace-nowrap text-muted"
                       >
                         {field.label}
                       </th>
