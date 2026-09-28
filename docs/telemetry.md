@@ -93,6 +93,7 @@ The CLI and the UI use the same HTTP query API. Every CLI command prints a table
 - `siner logs` groups lines by message template first, with counts, and prints samples. `--raw` prints lines.
 - `siner spans` lists spans. `siner traces` lists the traces that have a matching span, by root span, duration, and error flag. `siner trace <id>` prints the span tree.
 - `siner metrics` lists the series. `siner metric <name>` prints one metric at a step that fits the range.
+- A histogram point keeps its buckets in `points.histogram` as JSON: `bounds`, `counts` (one more than the bounds), `count`, `sum`, `min`, `max`, and `cumulative`. The writer skips a point whose counts do not fit its bounds. `siner metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point of a range only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
 - `siner sql` runs a read-only query against the day files.
 
 ## Query language
