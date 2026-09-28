@@ -46,7 +46,13 @@ fn header<'a>(response: &'a str, name: &str) -> Option<&'a str> {
 fn every_page_gets_the_index_of_the_ui() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path());
-    for path in ["/", "/logs", "/logs?q=level%20%3E%3D%20warn&view=groups"] {
+    for path in [
+        "/",
+        "/logs",
+        "/logs?q=level%20%3E%3D%20warn&view=groups",
+        "/traces?view=spans",
+        "/traces/0af7651916cd43dd8448eb211c80319c?span=b7ad6b7169203331",
+    ] {
         let response = get(&daemon.addr, path);
         if built() {
             assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");

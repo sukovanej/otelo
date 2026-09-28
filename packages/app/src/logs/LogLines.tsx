@@ -1,8 +1,10 @@
 import { Level } from "@siner/ui";
 import { For } from "solid-js";
 import type { LogLine } from "../api";
-import { formatTime, parseTime } from "../time";
-import { closedErrorRow, closedRow, header, lineColumns, openRow, row } from "./classes";
+import { toggleRow } from "../row";
+import Service from "../Service";
+import { formatTime, parseTime, timeWidth } from "../time";
+import { closedErrorRow, closedRow, header, lineColumns, openRow, row } from "../classes";
 
 /** What tells a line apart, so it stays selected when a reload brings it
  * again. */
@@ -20,16 +22,11 @@ export default function LogLines(props: {
   selected: string | undefined;
   onSelect: (line: LogLine | undefined) => void;
 }) {
-  // Lines from before today show the date too.
-  const timeWidth = () => {
-    const now = new Date();
-    return props.lines.some((line) => formatTime(parseTime(line.time), now).length > 12)
-      ? "18ch"
-      : "12ch";
-  };
-
   return (
-    <div class="font-mono text-sm" style={{ "--time-width": timeWidth() }}>
+    <div
+      class="font-mono text-sm"
+      style={{ "--time-width": timeWidth(props.lines.map((line) => line.time)) }}
+    >
       <div class={`${header} ${lineColumns}`} aria-hidden="true">
         <span>Time</span>
         <span>Level</span>
@@ -48,25 +45,16 @@ export default function LogLines(props: {
                   class={`${row} ${lineColumns} py-1.5 ${
                     isSelected() ? openRow : line.severity >= ERROR ? closedErrorRow : closedRow
                   }`}
-                  role="button"
-                  tabIndex={0}
                   aria-pressed={isSelected()}
-                  onClick={() => {
-                    // A click that ends a text selection is not a toggle.
-                    if (window.getSelection()?.isCollapsed !== false) toggle();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      toggle();
-                    }
-                  }}
+                  {...toggleRow(toggle)}
                 >
                   <time class="whitespace-nowrap text-muted" datetime={line.time}>
                     {formatTime(parseTime(line.time))}
                   </time>
                   <Level level={line.level} />
-                  <span class="truncate text-muted">{line.service}</span>
+                  <span class="text-muted">
+                    <Service name={line.service} resource={line.resource} />
+                  </span>
                   <span class="truncate">{line.body}</span>
                 </div>
               </div>

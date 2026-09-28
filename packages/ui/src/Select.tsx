@@ -1,3 +1,4 @@
+import { CheckIcon, ChevronIcon } from "@siner/icons";
 import { createSignal, createUniqueId, For, Show } from "solid-js";
 import {
   activeOption,
@@ -138,21 +139,7 @@ export default function Select<T extends string>(props: {
         onBlur={() => setOpen(false)}
       >
         <span class="flex-1 whitespace-nowrap">{current()?.label}</span>
-        <svg
-          class="text-muted group-aria-expanded:rotate-180"
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          aria-hidden="true"
-        >
-          <path
-            d="M3 4.5 6 7.5 9 4.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-          />
-        </svg>
+        <ChevronIcon size={13} class="text-muted group-aria-expanded:rotate-180" />
       </button>
       <Show when={open()}>
         <ul
@@ -179,21 +166,10 @@ export default function Select<T extends string>(props: {
                 onClick={() => choose(i())}
                 onMouseEnter={() => setActive(i())}
               >
-                <svg
-                  class={cx("flex-none text-accent", option.value !== props.value && "invisible")}
-                  width="12"
-                  height="12"
-                  viewBox="0 0 12 12"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M2.5 6.5 5 9 9.5 3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                  />
-                </svg>
+                <CheckIcon
+                  size={13}
+                  class={cx("text-accent", option.value !== props.value && "invisible")}
+                />
                 {option.label}
               </li>
             )}
