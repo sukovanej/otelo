@@ -18,3 +18,9 @@ The OTLP receiver takes logs, traces, and metrics over both transports the OTel 
 - `service` comes from the `service.name` resource attribute.
 - A dropped batch answers with `partial_success` and the count of rejected items, as the OTLP spec says.
 - Test: send each signal with the Rust OTel SDK exporter over each transport and read the rows back.
+
+## Comments
+
+### 2026-09-28T17:39:37Z by Milan Suk via claude-code
+
+> partial_success does not count records the writer later skips for falling outside the retention window; the skip happens after the response.
