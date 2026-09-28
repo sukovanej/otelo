@@ -7,7 +7,15 @@
 //! 3339 timestamp. The range is capped at the retention.
 
 mod catalog;
-mod queries;
+mod error;
+mod indexes;
+mod logs;
+mod metrics;
+mod params;
+mod services;
+mod sql;
+mod time;
+mod traces;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,32 +23,33 @@ use std::time::Duration;
 
 use anyhow::{Context, ensure};
 use axum::extract::{MatchedPath, Request as HttpRequest};
-use axum::http::StatusCode;
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
-use jiff::{SpanRelativeTo, Timestamp};
-use serde::{Deserialize, Serialize};
-use siner_query::Signal;
-use siner_telemetry::query::InvalidQuery;
+use jiff::Timestamp;
+use siner_state::State;
 use siner_telemetry::{Day, Indexes, Reader};
 use tracing::Instrument;
 use tracing::field::Empty;
-use utoipa::{OpenApi, ToSchema};
+use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-pub use catalog::{CompletionKind, Completions, IndexBody, IndexList, SignalName, SuggestionBody};
-pub use queries::SqlRequest;
+use crate::error::{ApiError, ApiResult};
+use crate::time::check_limit;
 
-use crate::state::State;
+pub use catalog::{CompletionKind, Completions, SignalName, SuggestionBody};
+pub use error::ErrorBody;
+pub use indexes::{IndexBody, IndexList};
+pub use sql::SqlRequest;
+pub use time::{nanos, parse_duration, parse_time};
 
 /// The most rows any query returns.
-const MAX_LIMIT: usize = 10_000;
+pub(crate) const MAX_LIMIT: usize = 10_000;
 
 /// How long one query can run.
-const TIME_LIMIT: Duration = Duration::from_secs(10);
+pub(crate) const TIME_LIMIT: Duration = Duration::from_secs(10);
 
 /// The range of a query that names no `since`.
 const DEFAULT_RANGE: &str = "1h";
@@ -65,21 +74,21 @@ pub struct Api {
 /// The query routes, and the spec that their annotations make.
 fn routes() -> OpenApiRouter<Api> {
     OpenApiRouter::with_openapi(Spec::openapi())
-        .routes(routes!(queries::logs))
-        .routes(routes!(queries::log_groups))
-        .routes(routes!(queries::spans))
-        .routes(routes!(queries::traces))
-        .routes(routes!(queries::trace))
-        .routes(routes!(queries::metrics))
-        .routes(routes!(queries::metric))
-        .routes(routes!(queries::services))
-        .routes(routes!(queries::service))
-        .routes(routes!(queries::operation))
-        .routes(routes!(queries::sql))
+        .routes(routes!(logs::logs))
+        .routes(routes!(logs::log_groups))
+        .routes(routes!(traces::spans))
+        .routes(routes!(traces::traces))
+        .routes(routes!(traces::trace))
+        .routes(routes!(metrics::metrics))
+        .routes(routes!(metrics::metric))
+        .routes(routes!(services::services))
+        .routes(routes!(services::service))
+        .routes(routes!(services::operation))
+        .routes(routes!(sql::sql))
         .routes(routes!(catalog::attributes))
         .routes(routes!(catalog::complete))
-        .routes(routes!(catalog::list_indexes))
-        .routes(routes!(catalog::add_index, catalog::remove_index))
+        .routes(routes!(indexes::list_indexes))
+        .routes(routes!(indexes::add_index, indexes::remove_index))
 }
 
 /// The spec of the query API, which `/api/openapi.json` serves and
@@ -87,16 +96,6 @@ fn routes() -> OpenApiRouter<Api> {
 #[must_use]
 pub fn spec() -> utoipa::openapi::OpenApi {
     routes().into_openapi()
-}
-
-/// Prints the spec as pretty JSON, the form of `packages/api/openapi.json`.
-///
-/// # Errors
-///
-/// When stdout is closed.
-pub fn print_spec() -> anyhow::Result<()> {
-    println!("{}", spec().to_pretty_json()?);
-    Ok(())
 }
 
 /// The query routes and `/api/openapi.json`, with a span for each request.
@@ -138,80 +137,14 @@ async fn trace(request: HttpRequest, next: Next) -> Response {
     response
 }
 
-/// The body of every error response.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct ErrorBody {
-    pub error: String,
-}
-
-struct ApiError {
-    status: StatusCode,
-    message: String,
-}
-
-impl ApiError {
-    fn bad_request(error: &impl std::fmt::Display) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message: format!("{error:#}"),
-        }
-    }
-
-    const fn not_found(message: String) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            message,
-        }
-    }
-}
-
-impl From<anyhow::Error> for ApiError {
-    fn from(error: anyhow::Error) -> Self {
-        if siner_telemetry::timed_out(&error) {
-            return Self {
-                status: StatusCode::BAD_REQUEST,
-                message: format!(
-                    "the query ran longer than {} s; narrow the range or the query",
-                    TIME_LIMIT.as_secs()
-                ),
-            };
-        }
-        if let Some(invalid) = error.downcast_ref::<InvalidQuery>() {
-            return Self::bad_request(invalid);
-        }
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("{error:#}"),
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        // In the request's span, this marks the span as failed.
-        if self.status.is_server_error() {
-            tracing::error!("{}", self.message);
-        }
-        (
-            self.status,
-            Json(ErrorBody {
-                error: self.message,
-            }),
-        )
-            .into_response()
-    }
-}
-
-type ApiResult<T> = Result<Json<T>, ApiError>;
-
 /// The reader and the limit a handler runs its query with.
-struct Request {
+pub(crate) struct Request {
     reader: Reader,
     limit: usize,
 }
 
 /// The range of the whole retention, for queries that look a thing up.
-const WHOLE_RETENTION: Option<i64> = Some(i64::MIN);
+pub(crate) const WHOLE_RETENTION: Option<i64> = Some(i64::MIN);
 
 impl Api {
     /// Checks the range and the limit, opens a reader, and runs `query` with
@@ -267,57 +200,4 @@ impl Api {
         ensure!(since < until, "since has to be before until");
         Ok((since.max(oldest), until))
     }
-}
-
-fn check_limit(limit: Option<usize>, default: usize) -> anyhow::Result<usize> {
-    let limit = limit.unwrap_or(default);
-    ensure!(
-        (1..=MAX_LIMIT).contains(&limit),
-        "the limit is {limit}, and it has to be from 1 to {MAX_LIMIT}"
-    );
-    Ok(limit)
-}
-
-/// A timestamp in unix nanoseconds, capped at the largest `i64`.
-#[must_use]
-pub fn nanos(ts: Timestamp) -> i64 {
-    i64::try_from(ts.as_nanosecond()).unwrap_or(i64::MAX)
-}
-
-/// A duration before `now`, such as `1h`, or an RFC 3339 timestamp.
-///
-/// # Errors
-///
-/// When `text` is neither.
-pub fn parse_time(text: &str, now: i64) -> anyhow::Result<i64> {
-    if let Ok(ts) = text.parse::<Timestamp>() {
-        return Ok(nanos(ts));
-    }
-    let ago = parse_duration(text).with_context(|| {
-        format!("{text:?} is neither a duration such as 1h nor an RFC 3339 timestamp")
-    })?;
-    Ok(now.saturating_sub(ago))
-}
-
-/// A duration such as `500ms`, `1h`, or `2d`, in nanoseconds.
-///
-/// # Errors
-///
-/// When `text` is not a duration, or is negative.
-pub fn parse_duration(text: &str) -> anyhow::Result<i64> {
-    let span: jiff::Span = text
-        .parse()
-        .with_context(|| format!("{text:?} is not a duration such as 500ms, 1h, or 2d"))?;
-    let duration = span.to_duration(SpanRelativeTo::days_are_24_hours())?;
-    ensure!(!duration.is_negative(), "{text:?} is negative");
-    Ok(i64::try_from(duration.as_nanos()).unwrap_or(i64::MAX))
-}
-
-fn parse_signal(text: &str) -> Result<Signal, ApiError> {
-    text.parse().map_err(|e: String| ApiError::bad_request(&e))
-}
-
-/// Parses the query `q` over `signal`. A missing query keeps every record.
-fn parse_query(q: Option<&str>, signal: Signal) -> Result<siner_query::Query, ApiError> {
-    siner_query::parse(q.unwrap_or_default(), signal).map_err(|e| ApiError::bad_request(&e))
 }

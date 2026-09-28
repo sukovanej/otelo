@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::api::ErrorBody;
+use siner_api::ErrorBody;
 
 /// The largest response the CLI reads.
 const MAX_RESPONSE: u64 = 256 * 1024 * 1024;

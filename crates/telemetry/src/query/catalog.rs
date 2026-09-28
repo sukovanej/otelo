@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use siner_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo};
 use utoipa::ToSchema;
 
-use crate::Reader;
+use crate::{AttributeValue, Reader};
 
 /// The most keys or values one catalog read returns.
 const MAX_ROWS: usize = 500;
@@ -92,12 +92,12 @@ impl Reader {
         let mut values = Vec::new();
         for row in rows {
             let (json, count) = row?;
+            // The catalog keeps each value as the JSON of the attribute.
             let value = match serde_json::from_str(&json)? {
-                serde_json::Value::String(text) => Value::String(text),
-                serde_json::Value::Bool(b) => Value::Bool(b),
-                serde_json::Value::Number(n) => n
-                    .as_i64()
-                    .map_or_else(|| Value::Float(n.as_f64().unwrap_or_default()), Value::Int),
+                AttributeValue::String(text) => Value::String(text),
+                AttributeValue::Bool(b) => Value::Bool(b),
+                AttributeValue::Int(n) => Value::Int(n),
+                AttributeValue::Double(x) => Value::Float(x),
                 _ => continue,
             };
             values.push(ValueInfo {
