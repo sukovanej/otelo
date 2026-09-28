@@ -39,3 +39,7 @@ An OpenAPI spec comes out of the code, so the UI can generate its client later.
 ### 2026-09-27T20:22:56Z by Milan Suk via claude-code
 
 > The reader's views (logs, spans, …) union the day files, but FTS5 does not: search each "<day>".logs_fts and join on that file's rowid. Ids count per file, so every join on resource_id or series_id also matches day.
+
+### 2026-09-28T08:23:29Z by Milan Suk via claude-code
+
+> siner metrics <name> buckets raw point values (count, min, avg, max, last). A cumulative sum shows its running total, not a rate, and ranges read raw points only; [[SIN-8]] should switch long ranges to the rollups and add rates.
