@@ -78,7 +78,7 @@ fn logs(ts: i64, body: &str) -> Batch {
 fn write(dir: &Path, batches: Vec<Batch>) {
     let (sender, inbox) = channel(batches.len().max(1));
     for batch in batches {
-        sender.send(batch);
+        assert!(sender.send(batch));
     }
     finish(dir, sender, inbox);
 }
@@ -165,8 +165,8 @@ fn a_full_channel_drops_the_batch_and_the_writer_reports_it() {
     let dir = tempfile::tempdir().unwrap();
     let now = Day::today().start();
     let (sender, inbox) = channel(1);
-    sender.send(logs(now, "kept"));
-    sender.send(logs(now, "dropped"));
+    assert!(sender.send(logs(now, "kept")));
+    assert!(!sender.send(logs(now, "dropped")));
     assert_eq!(sender.dropped(), 1);
     finish(dir.path(), sender, inbox);
 

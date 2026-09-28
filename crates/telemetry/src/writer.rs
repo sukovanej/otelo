@@ -72,13 +72,16 @@ pub struct Sender {
 }
 
 impl Sender {
-    /// Queues `batch` for the writer. When the channel is full, drops the
-    /// batch and counts the drop, so a burst never waits or grows memory.
-    pub fn send(&self, batch: Batch) {
+    /// Queues `batch` for the writer and returns whether it did. When the
+    /// channel is full, drops the batch and counts the drop, so a burst never
+    /// waits or grows memory.
+    #[must_use = "a dropped batch is lost, and its source can tell its sender"]
+    pub fn send(&self, batch: Batch) -> bool {
         match self.tx.try_send(batch) {
-            Ok(()) => {}
+            Ok(()) => true,
             Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
+                false
             }
         }
     }

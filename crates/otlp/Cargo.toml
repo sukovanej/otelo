@@ -1,0 +1,32 @@
+[package]
+name = "siner-otlp"
+description = "Receives OTLP logs, traces, and metrics over HTTP and gRPC and hands them to siner's telemetry writer"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+flate2 = { workspace = true }
+opentelemetry-proto = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+siner-telemetry = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+rusqlite = { workspace = true }
+tempfile = { workspace = true }
+ureq = { workspace = true }
+
+[lints]
+workspace = true
