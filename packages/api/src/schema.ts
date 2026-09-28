@@ -329,7 +329,7 @@ export interface components {
          *     back as a string. A double that JSON cannot hold, such as NaN, is a string
          *     too.
          */
-        AttributeValue: null | boolean | number | string | unknown[] | components["schemas"]["Attributes"];
+        AttributeValue: null | boolean | number | string | ArrayOfAttributeValue | components["schemas"]["Attributes"];
         /** @description Attributes by key, in the order of their keys. */
         Attributes: {
             [key: string]: components["schemas"]["AttributeValue"];
@@ -1443,3 +1443,4 @@ export interface operations {
         };
     };
 }
+type ArrayOfAttributeValue = components["schemas"]["AttributeValue"][];

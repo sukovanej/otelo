@@ -18,7 +18,7 @@ export default function RangePicker(props: {
   since: string;
   until: string;
   onChange: (since: string, until: string) => void;
-  size?: Size;
+  size?: Size | undefined;
 }) {
   const presets = () => props.presets ?? PRESETS;
   const inputClass = () =>

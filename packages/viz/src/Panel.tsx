@@ -8,11 +8,11 @@ import { type JSX, Show } from "solid-js";
  * The panel is a step off the color of the page, so it stands apart from it.
  */
 export default function Panel(props: {
-  title?: string;
-  description?: JSX.Element;
-  actions?: JSX.Element;
-  flush?: boolean;
-  class?: string;
+  title?: string | undefined;
+  description?: JSX.Element | undefined;
+  actions?: JSX.Element | undefined;
+  flush?: boolean | undefined;
+  class?: string | undefined;
   children: JSX.Element;
 }) {
   return (

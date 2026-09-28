@@ -14,7 +14,7 @@ import TraceView, { closePanel, createTraceState, type TraceTab, tracePath } fro
 export default function TraceModal(props: {
   id: string;
   /** The span to select first. */
-  span?: string;
+  span?: string | undefined;
   onFilterSpans: (term: string) => void;
   onFilterLogs: (term: string) => void;
   onClose: () => void;

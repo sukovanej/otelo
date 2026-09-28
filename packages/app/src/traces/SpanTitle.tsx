@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch } from "solid-js";
 
+import type { Attributes } from "@siner/api";
 import { databaseName, DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@siner/icons";
 import { Badge, Level, type Tone, Tooltip } from "@siner/ui";
 
@@ -108,7 +109,7 @@ function Db(props: { meaning: DbSpan; rest: string }) {
  */
 export default function SpanTitle(props: {
   name: string;
-  attributes: Record<string, unknown>;
+  attributes: Attributes;
   error: boolean;
   /** The badge of the status code of an HTTP request, unless this is false,
    * such as for a name that stands for many requests. */

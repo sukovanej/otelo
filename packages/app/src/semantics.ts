@@ -2,13 +2,15 @@
 // attributes and its resource: an HTTP request, a database call, and the
 // language of the service. The older names of each attribute count too.
 
+import type { Attributes } from "@siner/api";
+
 export interface HttpSpan {
   type: "http";
   /** Such as `GET`, upper case. */
-  method?: string;
+  method: string | undefined;
   /** The route, or the path when there is no route. */
-  route?: string;
-  status?: number;
+  route: string | undefined;
+  status: number | undefined;
 }
 
 export interface DbSpan {
@@ -16,14 +18,12 @@ export interface DbSpan {
   /** Such as `postgresql` or `sqlite`. */
   system: string;
   /** Such as `SELECT`, upper case. */
-  operation?: string;
+  operation: string | undefined;
   /** The query, with its whitespace folded. */
-  query?: string;
+  query: string | undefined;
 }
 
 export type SpanMeaning = HttpSpan | DbSpan | { type: "other" };
-
-type Attributes = Record<string, unknown>;
 
 /** The first of `keys` that holds a string or a number, as a string. */
 function text(attributes: Attributes, ...keys: string[]): string | undefined {

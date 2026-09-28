@@ -78,7 +78,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { method, signal, headers: { accept: "application/json" } });
+  const response = await fetch(path, {
+    method,
+    signal: signal ?? null,
+    headers: { accept: "application/json" },
+  });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     try {

@@ -2,13 +2,13 @@ import type { JSX } from "solid-js";
 
 export interface IconProps {
   /** The width and the height, in pixels. 16 when missing. */
-  size?: number;
+  size?: number | undefined;
   /** Classes for the `<svg>`, such as a color for `currentColor`. */
-  class?: string;
+  class?: string | undefined;
   /** What the icon means, for a reader that cannot see it. An icon without
    * a title is decoration, and hidden from them. To show it on hover, put the
    * icon in the `Tooltip` of `@siner/ui`; the icon draws no tooltip itself. */
-  title?: string;
+  title?: string | undefined;
 }
 
 /** The frame of every icon: a square `<svg>` on a 16 by 16 grid. In a row

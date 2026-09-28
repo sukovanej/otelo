@@ -82,19 +82,19 @@ export default function TimeSeriesChart(props: {
   kind: ChartKind;
   unit: Unit;
   /** The height of the plot, without the axis under it. 150 when missing. */
-  height?: number;
-  loading?: boolean;
+  height?: number | undefined;
+  loading?: boolean | undefined;
   /** What the chart says when no series has a value. */
-  empty?: string;
-  onZoom?: (start: number, end: number) => void;
-  label?: string;
+  empty?: string | undefined;
+  onZoom?: ((start: number, end: number) => void) | undefined;
+  label?: string | undefined;
   /** A legend over the plot when there are two series or more, unless this
    * is false, such as when `ChartPanel` shows it beside the title. */
-  legend?: boolean;
+  legend?: boolean | undefined;
   /** The series the legend shows alone, when the legend is outside the
    * chart and holds it with `onIsolate`. */
-  isolated?: number;
-  onIsolate?: (index: number | undefined) => void;
+  isolated?: number | undefined;
+  onIsolate?: ((index: number | undefined) => void) | undefined;
 }) {
   let box!: HTMLDivElement;
   const [width, setWidth] = createSignal(0);

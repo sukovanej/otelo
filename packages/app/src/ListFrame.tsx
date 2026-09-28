@@ -148,7 +148,7 @@ function IndexHint(props: { signal: Signal; noun: string; keys: string[] }) {
             when={!done().has(key)}
             fallback={<span>{key} is indexed; the writer builds it within seconds.</span>}
           >
-            <Button size="sm" class="font-mono" onClick={() => index(key)}>
+            <Button size="sm" class="font-mono" onClick={() => void index(key)}>
               Index {key}
             </Button>
           </Show>
