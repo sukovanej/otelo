@@ -1,5 +1,6 @@
 import { A } from "@solidjs/router";
 import { createSignal, onMount } from "solid-js";
+
 import { link } from "../classes";
 import { CloseButton } from "../Panel";
 import TraceView, { closePanel, createTraceState, type TraceTab, tracePath } from "./TraceView";

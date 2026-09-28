@@ -1,5 +1,6 @@
-import { LogoIcon } from "@siner/icons";
 import { A, type RouteSectionProps } from "@solidjs/router";
+
+import { LogoIcon } from "@siner/icons";
 
 /** The frame of every page: the name and the sections above, and the page
  * filling the rest of the window. A page scrolls its own parts. */

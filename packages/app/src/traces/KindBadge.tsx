@@ -1,4 +1,5 @@
 import { Badge, type Tone } from "@siner/ui";
+
 import { kindName } from "./span";
 
 const tones: Record<string, Tone> = {

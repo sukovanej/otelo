@@ -1,9 +1,11 @@
 import { Navigate, Route, Router } from "@solidjs/router";
 import { render } from "solid-js/web";
+
 import App from "./App";
 import LogsPage from "./logs/LogsPage";
 import TracePage from "./traces/TracePage";
 import TracesPage from "./traces/TracesPage";
+
 import "@siner/ui/fonts.css";
 import "./app.css";
 

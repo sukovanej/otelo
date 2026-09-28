@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+
 import { listStep, move } from "../src/keys";
 
 const key = (

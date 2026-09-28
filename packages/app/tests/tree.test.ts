@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
+
 import type { TraceSpan } from "@siner/api";
+
 import { spanTree, traceLength, visibleRows } from "../src/traces/tree";
 
 /** A span that starts `ms` milliseconds into the trace. */

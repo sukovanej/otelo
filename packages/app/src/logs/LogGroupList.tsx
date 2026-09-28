@@ -1,10 +1,8 @@
-import { Button, Level } from "@siner/ui";
 import { createSignal, For, Show } from "solid-js";
+
 import type { LogGroup } from "@siner/api";
-import Measure from "../Measure";
-import { templateTerm } from "../query";
-import { toggleRow } from "../row";
-import { ago, formatTime, parseTime } from "../time";
+import { Button, Level } from "@siner/ui";
+
 import {
   body,
   closedRow,
@@ -16,6 +14,10 @@ import {
   row,
   times,
 } from "../classes";
+import Measure from "../Measure";
+import { templateTerm } from "../query";
+import { toggleRow } from "../row";
+import { ago, formatTime, parseTime } from "../time";
 
 /** A template with its placeholders marked, so the fixed words stand out. */
 function Template(props: { text: string }) {

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+
 import { generate, written } from "../generate";
 
 test("src/schema.ts is the types of openapi.json", async () => {

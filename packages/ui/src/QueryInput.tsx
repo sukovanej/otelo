@@ -1,4 +1,5 @@
 import { createSignal, For, onCleanup, Show } from "solid-js";
+
 import { textX } from "./caret";
 import {
   activeOption,

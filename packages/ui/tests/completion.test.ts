@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+
 import { applySuggestion, toChars, toUtf16 } from "../src/completion";
 
 test("toChars and toUtf16 count a character outside the BMP once", () => {

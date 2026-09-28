@@ -4,6 +4,7 @@
 // behind.
 
 import { readFileSync, writeFileSync } from "node:fs";
+
 import openapiTS, { astToString } from "openapi-typescript";
 
 const HEADER = `// Generated from openapi.json by generate.ts; \`mise run api:generate\`

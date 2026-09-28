@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+
 import { databaseId, language, nameRest, spanMeaning } from "../src/semantics";
 
 test("an HTTP server span has its method, route, and status", () => {

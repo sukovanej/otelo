@@ -1,5 +1,7 @@
-import { CheckIcon, ChevronIcon } from "@siner/icons";
 import { createSignal, createUniqueId, For, Show } from "solid-js";
+
+import { CheckIcon, ChevronIcon } from "@siner/icons";
+
 import {
   activeOption,
   control,
