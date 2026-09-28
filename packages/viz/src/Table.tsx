@@ -48,7 +48,7 @@ export interface SortOrder {
 export interface TreeLevel {
   depth: number;
   /** `undefined` for a row without children. */
-  expanded?: boolean;
+  expanded?: boolean | undefined;
 }
 
 const cellTones: Record<Tone, string> = {
@@ -175,7 +175,7 @@ export default function Table<R>(props: {
     const aria = () => {
       const level = props.level?.(row);
       return {
-        "aria-selected": props.selected ? (props.selected(row) ?? false) : undefined,
+        "aria-selected": props.selected?.(row),
         "aria-level": level ? level.depth + 1 : undefined,
         "aria-expanded": level?.expanded,
       };

@@ -34,7 +34,7 @@ export default function Select<T extends string>(props: {
   onChange: (value: T) => void;
   /** The name of the choice, for screen readers. */
   label: string;
-  size?: Size;
+  size?: Size | undefined;
 }) {
   const id = createUniqueId();
   let list: HTMLUListElement | undefined;

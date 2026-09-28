@@ -15,7 +15,7 @@ const variants = {
 export default function Button(
   props: JSX.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: keyof typeof variants;
-    size?: Size;
+    size?: Size | undefined;
   },
 ) {
   const [own, rest] = splitProps(props, ["variant", "size", "class", "type"]);

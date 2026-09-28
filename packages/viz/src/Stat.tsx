@@ -26,11 +26,11 @@ export default function Stat(props: {
   value: number | null | undefined;
   unit: Unit;
   /** A line under the value, such as a rate or a count it comes from. */
-  detail?: JSX.Element;
-  tone?: StatTone;
+  detail?: JSX.Element | undefined;
+  tone?: StatTone | undefined;
   /** The value in each step of the range, for a line under the number. */
-  trend?: (number | null)[];
-  trendColor?: SeriesColor;
+  trend?: (number | null)[] | undefined;
+  trendColor?: SeriesColor | undefined;
 }) {
   return (
     <div class="flex min-w-0 flex-col rounded-lg border border-line bg-panel px-4 pt-3 pb-3">

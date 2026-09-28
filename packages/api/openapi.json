@@ -1066,8 +1066,9 @@
           },
           {
             "type": "array",
-            "items": {},
-            "description": "Its items are any JSON in the spec: TypeScript cannot name a union\nthat holds an array of itself."
+            "items": {
+              "$ref": "#/components/schemas/AttributeValue"
+            }
           },
           {
             "$ref": "#/components/schemas/Attributes"

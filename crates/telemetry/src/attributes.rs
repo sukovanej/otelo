@@ -26,9 +26,6 @@ pub enum AttributeValue {
     Int(i64),
     Double(f64),
     String(String),
-    /// Its items are any JSON in the spec: TypeScript cannot name a union
-    /// that holds an array of itself.
-    #[schema(value_type = Vec<serde_json::Value>)]
     Array(Vec<Self>),
     Map(Attributes),
 }

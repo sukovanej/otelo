@@ -2,6 +2,8 @@
 // literals, and edits of a query as typed. The rules follow `Display for
 // Field` and `quote` in crates/query/src/lib.rs.
 
+import type { AttributeValue } from "@siner/api";
+
 /** The built-in fields of every signal. An attribute with one of these names
  * is written as `attr.<key>`. */
 const BUILTINS = new Set([
@@ -61,17 +63,11 @@ export function quote(text: string): string {
 
 /** The literal of an attribute value, or `undefined` for arrays, objects,
  * and null, which a comparison cannot match. */
-export function literal(value: unknown): string | undefined {
-  switch (typeof value) {
-    case "string":
-      return quote(value);
-    case "number":
-      return Number.isFinite(value) ? String(value) : undefined;
-    case "boolean":
-      return String(value);
-    default:
-      return undefined;
-  }
+export function literal(value: AttributeValue): string | undefined {
+  if (typeof value === "string") return quote(value);
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : undefined;
+  if (typeof value === "boolean") return String(value);
+  return undefined;
 }
 
 /** Whether the query has an `OR` outside of parentheses and strings, so a

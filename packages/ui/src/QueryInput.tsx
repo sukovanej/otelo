@@ -42,7 +42,7 @@ export default function QueryInput(props: {
   onInput: (q: string) => void;
   onSubmit: () => void;
   placeholder?: string;
-  size?: Size;
+  size?: Size | undefined;
   ref?: (input: HTMLInputElement) => void;
 }) {
   let input!: HTMLInputElement;
