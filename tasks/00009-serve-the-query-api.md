@@ -43,3 +43,7 @@ An OpenAPI spec comes out of the code, so the UI can generate its client later.
 ### 2026-09-28T08:23:29Z by Milan Suk via claude-code
 
 > siner metrics <name> buckets raw point values (count, min, avg, max, last). A cumulative sum shows its running total, not a rate, and ranges read raw points only; [[./00008-roll-up-metrics-to-1-minute-and-1.md]] should switch long ranges to the rollups and add rates.
+
+### 2026-09-28T16:51:17Z by Milan Suk via claude-code
+
+> The CLI departs from the task text: one query (siner logs 'level >= warn') replaced the --service/--severity/--search/--trace filters, and siner metrics [name] became siner metrics [query] plus siner metric <name>, to match the unified query language.
