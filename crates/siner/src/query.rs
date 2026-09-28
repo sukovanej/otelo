@@ -7,8 +7,8 @@ use std::io::{self, Read};
 
 use siner_query::Signal;
 use siner_telemetry::query::{
-    Attributes, Bucket, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Requests,
-    Service, ServiceBucket, Services, Spans, SqlResult, Trace, TraceSpan, Traces,
+    AttributeKeys, Bucket, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Requests,
+    Service, ServiceBucket, Services, Spans, SqlResult, SqlValue, Trace, TraceSpan, Traces,
 };
 
 use crate::api::{Completions, IndexList, SqlRequest};
@@ -744,8 +744,7 @@ pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
         let mut table = Table::new(&columns);
         for row in &result.rows {
             table.row(row.iter().map(|value| match value {
-                serde_json::Value::Null => String::new(),
-                serde_json::Value::String(text) => text.clone(),
+                SqlValue::Null => String::new(),
                 other => other.to_string(),
             }));
         }
@@ -775,7 +774,7 @@ pub struct AttributesArgs {
 ///
 /// When the daemon cannot be reached, or answers with an error.
 pub fn attributes(args: &AttributesArgs) -> anyhow::Result<()> {
-    let attributes: Attributes = args.client.get(
+    let attributes: AttributeKeys = args.client.get(
         "/api/attributes",
         &[("signal", Some(args.signal.to_string()))],
     )?;

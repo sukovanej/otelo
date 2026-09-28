@@ -2,22 +2,23 @@ use std::fs;
 use std::path::Path;
 
 use rusqlite::Connection;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use siner_telemetry::{
-    Batch, Config, Day, Log, Metric, MetricKind, Point, Reader, Records, Resource, Sender, Span,
-    Writer, channel,
+    Attributes, Batch, Config, Day, Log, Metric, MetricKind, Point, Reader, Records, Resource,
+    Sender, Span, SpanEvent, Writer, channel,
 };
 
-const SECOND: i64 = 1_000_000_000;
-
-fn object(value: &Value) -> Map<String, Value> {
-    value.as_object().unwrap().clone()
+/// Attributes from a JSON object, as the day files keep them.
+fn attrs(value: Value) -> Attributes {
+    serde_json::from_value(value).unwrap()
 }
+
+const SECOND: i64 = 1_000_000_000;
 
 fn api() -> Resource {
     Resource {
         service: "api".into(),
-        attributes: object(&json!({"service.name": "api", "host.name": "droplet"})),
+        attributes: attrs(json!({"service.name": "api", "host.name": "droplet"})),
     }
 }
 
@@ -28,7 +29,7 @@ fn log(ts: i64, body: &str) -> Log {
         body: body.into(),
         trace_id: Some([1; 16]),
         span_id: Some([2; 8]),
-        attributes: object(&json!({"user": 7})),
+        attributes: attrs(json!({"user": 7})),
         source: "otlp",
     }
 }
@@ -43,8 +44,12 @@ fn span(ts: i64, name: &str) -> Span {
         start_ts: ts,
         duration_ns: 5_000_000,
         status: 0,
-        attributes: Map::new(),
-        events: vec![json!({"name": "retry"})],
+        attributes: Attributes::new(),
+        events: vec![SpanEvent {
+            ts,
+            name: "retry".into(),
+            attributes: Attributes::new(),
+        }],
     }
 }
 
@@ -53,7 +58,7 @@ fn memory(points: &[(i64, f64)]) -> Metric {
         name: "process.memory.usage".into(),
         kind: MetricKind::Gauge,
         unit: "By".into(),
-        labels: object(&json!({"state": "used"})),
+        labels: attrs(json!({"state": "used"})),
         points: points
             .iter()
             .map(|&(ts, value)| Point {

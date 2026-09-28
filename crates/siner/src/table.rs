@@ -5,6 +5,7 @@ use std::io::{self, Write};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
+use siner_telemetry::{AttributeValue, Attributes};
 
 /// Rows under a header, each column as wide as its widest cell. A row can
 /// have lines under it that the columns do not align.
@@ -126,11 +127,11 @@ fn round(value: f64) -> f64 {
 
 /// JSON labels as `name=value` pairs.
 #[must_use]
-pub fn labels(labels: &serde_json::Map<String, serde_json::Value>) -> String {
+pub fn labels(labels: &Attributes) -> String {
     labels
         .iter()
         .map(|(name, value)| match value {
-            serde_json::Value::String(text) => format!("{name}={text}"),
+            AttributeValue::String(text) => format!("{name}={text}"),
             other => format!("{name}={other}"),
         })
         .collect::<Vec<_>>()

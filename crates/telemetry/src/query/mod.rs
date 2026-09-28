@@ -19,7 +19,7 @@ use jiff::Timestamp;
 use rusqlite::types::Value;
 use rusqlite::{Row, ToSql};
 
-pub use catalog::{Attribute, Attributes, ReaderCatalog};
+pub use catalog::{Attribute, AttributeKeys, ReaderCatalog};
 pub use compile::InvalidQuery;
 pub use logs::{GROUP_SCAN_LIMIT, LogGroup, LogGroups, LogLine, Logs};
 pub use metrics::{
@@ -30,9 +30,9 @@ pub use services::{
     Latency, Operation, OperationDetail, RequestBucket, Requests, Service, ServiceBucket,
     ServiceStats, ServiceSummary, Services,
 };
-pub use sql::SqlResult;
+pub use sql::{SqlResult, SqlValue};
 pub use template::template;
-pub use traces::{SpanEvent, Spans, Trace, TraceSpan, TraceSummary, Traces};
+pub use traces::{Spans, Trace, TraceSpan, TraceSummary, Traces};
 
 use crate::{Day, Reader};
 use siner_query::{Query, Signal};

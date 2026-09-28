@@ -6,8 +6,13 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use common::{get, start, stop};
-use serde_json::{Map, Value, json};
-use siner_telemetry::{Config, Log, Records, Resource, Span, Writer, channel};
+use serde_json::{Value, json};
+use siner_telemetry::{Attributes, Config, Log, Records, Resource, Span, Writer, channel};
+
+/// Attributes from a JSON object, as the day files keep them.
+fn attrs(value: Value) -> Attributes {
+    serde_json::from_value(value).unwrap()
+}
 
 const SECOND: i64 = 1_000_000_000;
 const TRACE: &str = "abababababababababababababababab";
@@ -25,7 +30,7 @@ fn write_telemetry(data: &Path) {
         start_ts: now + i64::from(id) * SECOND,
         duration_ns: 20_000_000,
         status,
-        attributes: Map::new(),
+        attributes: Attributes::new(),
         events: Vec::new(),
     };
     let log = |offset: i64, severity: i32, body: &str, user: Option<i64>| Log {
@@ -34,18 +39,15 @@ fn write_telemetry(data: &Path) {
         body: body.into(),
         trace_id: user.is_none().then_some([0xab; 16]),
         span_id: user.is_none().then_some([2; 8]),
-        attributes: user.map_or_else(Map::new, |id| {
-            json!({"user.id": id, "http.route": "/login"})
-                .as_object()
-                .unwrap()
-                .clone()
+        attributes: user.map_or_else(Attributes::new, |id| {
+            attrs(json!({"user.id": id, "http.route": "/login"}))
         }),
         source: "otlp",
     };
     let records = Records {
         resource: Resource {
             service: "api".into(),
-            attributes: Map::new(),
+            attributes: Attributes::new(),
         },
         logs: vec![
             log(1, 9, "user 7 signed in", Some(7)),

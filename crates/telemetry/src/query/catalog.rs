@@ -9,7 +9,7 @@ const MAX_ROWS: usize = 500;
 
 /// The attribute keys of a signal, over the attached days.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct Attributes {
+pub struct AttributeKeys {
     /// The attributes of the records: of the logs, the spans, or the labels
     /// of the series.
     pub record: Vec<Attribute>,
@@ -38,7 +38,7 @@ impl Reader {
     /// # Errors
     ///
     /// When the catalog cannot be read.
-    pub fn attributes(&self, signal: Signal) -> anyhow::Result<Attributes> {
+    pub fn attributes(&self, signal: Signal) -> anyhow::Result<AttributeKeys> {
         let indexed = |key: &str| {
             self.indexes()
                 .iter()
@@ -54,7 +54,7 @@ impl Reader {
                 })
                 .collect()
         };
-        Ok(Attributes {
+        Ok(AttributeKeys {
             record: to_attributes(self.catalog_keys(signal.as_str())?, true),
             resource: to_attributes(self.catalog_keys("resource")?, false),
         })

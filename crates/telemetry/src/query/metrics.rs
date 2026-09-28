@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use anyhow::ensure;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use utoipa::ToSchema;
 
 use siner_query::{Query, Signal};
@@ -11,7 +10,7 @@ use siner_query::{Query, Signal};
 use super::compile::{Aliases, compile};
 use super::{Filter, cut, time};
 use crate::histogram::Merger;
-use crate::{Distribution, Histogram, Reader};
+use crate::{Attributes, Distribution, Histogram, Reader};
 
 /// The service, kind, unit, labels, and resource attributes of a series.
 /// Series from different day files are one series when these match.
@@ -79,11 +78,9 @@ pub struct SeriesInfo {
     pub kind: String,
     pub unit: String,
     pub service: String,
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub labels: Map<String, Value>,
+    pub labels: Attributes,
     /// The attributes of the resource that sends the series.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
+    pub resource: Attributes,
 }
 
 #[derive(Clone, Debug)]
@@ -110,10 +107,8 @@ pub struct Series {
     pub service: String,
     pub kind: String,
     pub unit: String,
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub labels: Map<String, Value>,
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
+    pub labels: Attributes,
+    pub resource: Attributes,
     /// The buckets that have points, oldest first.
     pub buckets: Vec<Bucket>,
 }

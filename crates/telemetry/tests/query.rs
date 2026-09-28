@@ -3,23 +3,24 @@ use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::Connection;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use siner_query::{Signal, complete, parse};
 use siner_telemetry::query::{
-    MetricFilter, ReaderCatalog, default_step, level, parse_severity, parse_trace_id,
+    MetricFilter, ReaderCatalog, SqlValue, default_step, level, parse_severity, parse_trace_id,
 };
 use siner_telemetry::{
-    Batch, Config, Day, IndexedKey, Indexes, Log, Metric, MetricKind, Point, Reader, Records,
-    Resource, Span, Writer, channel, timed_out,
+    AttributeValue, Attributes, Batch, Config, Day, IndexedKey, Indexes, Log, Metric, MetricKind,
+    Point, Reader, Records, Resource, Span, Writer, channel, timed_out,
 };
+
+/// Attributes from a JSON object, as the day files keep them.
+fn attrs(value: Value) -> Attributes {
+    serde_json::from_value(value).unwrap()
+}
 
 const SECOND: i64 = 1_000_000_000;
 const TRACE: [u8; 16] = [0xab; 16];
 const TRACE_HEX: &str = "abababababababababababababababab";
-
-fn object(value: &Value) -> Map<String, Value> {
-    value.as_object().unwrap().clone()
-}
 
 fn log(ts: i64, severity: i32, body: &str, attributes: &Value) -> Log {
     Log {
@@ -28,7 +29,7 @@ fn log(ts: i64, severity: i32, body: &str, attributes: &Value) -> Log {
         body: body.into(),
         trace_id: None,
         span_id: None,
-        attributes: object(attributes),
+        attributes: attrs(attributes.clone()),
         source: "otlp",
     }
 }
@@ -43,7 +44,7 @@ fn span(trace: [u8; 16], id: u8, parent: Option<u8>, start: i64, name: &str) -> 
         start_ts: start,
         duration_ns: 10_000_000,
         status: 0,
-        attributes: Map::new(),
+        attributes: Attributes::new(),
         events: Vec::new(),
     }
 }
@@ -52,7 +53,7 @@ fn records(service: &str, attributes: &Value) -> Records {
     Records {
         resource: Resource {
             service: service.into(),
-            attributes: object(attributes),
+            attributes: attrs(attributes.clone()),
         },
         logs: Vec::new(),
         spans: Vec::new(),
@@ -132,13 +133,13 @@ impl Fixture {
         ];
         let mut root = span(TRACE, 1, None, t, "GET /languages");
         root.duration_ns = 900_000_000;
-        root.attributes = object(&json!({"http.route": "/languages"}));
+        root.attributes = attrs(json!({"http.route": "/languages"}));
         let mut failed = span(TRACE, 2, Some(1), t + 2 * SECOND, "SELECT languages");
         failed.status = 2;
         failed.kind = 3;
-        failed.attributes = object(&json!({"db.system": "sqlite"}));
+        failed.attributes = attrs(json!({"db.system": "sqlite"}));
         let mut matches = span([0xef; 16], 1, None, t + SECOND, "POST /matches");
-        matches.attributes = object(&json!({"http.route": "/matches", "user.id": 7}));
+        matches.attributes = attrs(json!({"http.route": "/matches", "user.id": 7}));
         api.spans = vec![
             root,
             failed,
@@ -149,7 +150,7 @@ impl Fixture {
             name: "process.memory.usage".into(),
             kind: MetricKind::Gauge,
             unit: "By".into(),
-            labels: object(&json!({"state": "used"})),
+            labels: attrs(json!({"state": "used"})),
             points: [
                 (t, 100.0),
                 (t + 10 * SECOND, 300.0),
@@ -375,7 +376,7 @@ fn traces_match_on_any_of_their_spans() {
     );
     // A trace carries the attributes and the resource of its root span.
     assert_eq!(all.traces[0].attributes["http.route"], "/matches");
-    assert_eq!(all.traces[0].attributes["user.id"], 7);
+    assert_eq!(all.traces[0].attributes["user.id"], AttributeValue::Int(7));
     assert_eq!(all.traces[0].resource["service.name"], "api");
     assert_eq!(all.traces[0].kind, 2);
     assert_eq!(traces(&reader, "error = true"), ["GET /languages"]);
@@ -582,7 +583,10 @@ fn sql_reads_and_cannot_do_more() {
         )
         .unwrap();
     assert_eq!(result.columns, ["service", "n"]);
-    assert_eq!(result.rows, [vec![json!("api"), json!(2)]]);
+    assert_eq!(
+        result.rows,
+        [vec![SqlValue::Text("api".into()), SqlValue::Integer(2)]]
+    );
     assert!(result.truncated);
     assert!(reader.sql("PRAGMA table_info(logs)", 100).is_ok());
     assert!(reader.sql("SELECT * FROM attribute_keys", 100).is_ok());
@@ -656,7 +660,7 @@ fn a_histogram_returns_the_bucket_counts_of_each_step() {
         name: "http.server.request.duration".into(),
         kind: MetricKind::Histogram,
         unit: "s".into(),
-        labels: object(&json!({"http.route": "/matches"})),
+        labels: attrs(json!({"http.route": "/matches"})),
         points: vec![
             point(1, histogram([10, 2, 0], 3.0)),
             point(30, histogram([14, 5, 1], 7.5)),
@@ -732,14 +736,14 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
     let row = |sql: &str| reader.sql(sql, 10).unwrap().rows;
     assert_eq!(
         row("SELECT many_values FROM attribute_keys WHERE key = 'user.id'"),
-        [vec![json!(1)]]
+        [vec![SqlValue::Integer(1)]]
     );
     assert_eq!(
         row("SELECT count(*) FROM attribute_values WHERE key = 'user.id'"),
-        [vec![json!(200)]]
+        [vec![SqlValue::Integer(200)]]
     );
     assert_eq!(
         row("SELECT count FROM attribute_values WHERE key = 'user.id' AND value = '3'"),
-        [vec![json!(2)]]
+        [vec![SqlValue::Integer(2)]]
     );
 }

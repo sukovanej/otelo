@@ -4,6 +4,7 @@
 //! [`Sender`], and a [`Reader`] attaches the day files that a time range covers.
 //! Every timestamp is in unix nanoseconds.
 
+mod attributes;
 mod catalog;
 mod day;
 mod histogram;
@@ -12,8 +13,7 @@ pub mod query;
 mod reader;
 mod writer;
 
-use serde_json::{Map, Value};
-
+pub use attributes::{AttributeValue, Attributes, SpanEvent};
 pub use day::{Day, now};
 pub use histogram::{Distribution, Histogram, Merger};
 pub use indexes::{IndexedKey, Indexes};
@@ -33,11 +33,11 @@ pub struct Records {
 }
 
 /// What emitted the telemetry: the OpenTelemetry resource.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Resource {
     /// The `service.name` attribute, or the app name for a service log.
     pub service: String,
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
 }
 
 #[derive(Clone, Debug)]
@@ -48,7 +48,7 @@ pub struct Log {
     pub body: String,
     pub trace_id: Option<[u8; 16]>,
     pub span_id: Option<[u8; 8]>,
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
     /// `otlp`, or the service log source that read the line.
     pub source: &'static str,
 }
@@ -65,8 +65,8 @@ pub struct Span {
     pub duration_ns: i64,
     /// The OpenTelemetry status code.
     pub status: i32,
-    pub attributes: Map<String, Value>,
-    pub events: Vec<Value>,
+    pub attributes: Attributes,
+    pub events: Vec<SpanEvent>,
 }
 
 /// The points of one series.
@@ -75,7 +75,7 @@ pub struct Metric {
     pub name: String,
     pub kind: MetricKind,
     pub unit: String,
-    pub labels: Map<String, Value>,
+    pub labels: Attributes,
     pub points: Vec<Point>,
 }
 

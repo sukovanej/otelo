@@ -1,8 +1,15 @@
 use std::path::Path;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use siner_telemetry::query::Latency;
-use siner_telemetry::{Batch, Config, Day, Log, Reader, Records, Resource, Span, Writer, channel};
+use siner_telemetry::{
+    Attributes, Batch, Config, Day, Log, Reader, Records, Resource, Span, Writer, channel,
+};
+
+/// Attributes from a JSON object, as the day files keep them.
+fn attrs(value: Value) -> Attributes {
+    serde_json::from_value(value).unwrap()
+}
 
 const SECOND: i64 = 1_000_000_000;
 const MS: i64 = 1_000_000;
@@ -12,7 +19,7 @@ fn records(service: &str, attributes: &Value) -> Records {
     Records {
         resource: Resource {
             service: service.into(),
-            attributes: attributes.as_object().unwrap().clone(),
+            attributes: attrs(attributes.clone()),
         },
         logs: Vec::new(),
         spans: Vec::new(),
@@ -31,7 +38,7 @@ fn span(trace: u8, id: u8, parent: Option<u8>, kind: i32, name: &str, start: i64
         start_ts: start,
         duration_ns: 10 * MS,
         status: 0,
-        attributes: Map::new(),
+        attributes: Attributes::new(),
         events: Vec::new(),
     }
 }
@@ -43,7 +50,7 @@ fn log(ts: i64, severity: i32) -> Log {
         body: "a line".into(),
         trace_id: None,
         span_id: None,
-        attributes: Map::new(),
+        attributes: Attributes::new(),
         source: "otlp",
     }
 }
@@ -71,10 +78,9 @@ impl Fixture {
 
         let mut old_api = records("api", &json!({"telemetry.sdk.language": "go"}));
         old_api.spans = vec![Span {
-            attributes: json!({"http.route": "/users", "http.request.method": "GET", "old": true})
-                .as_object()
-                .unwrap()
-                .clone(),
+            attributes: attrs(
+                json!({"http.route": "/users", "http.request.method": "GET", "old": true}),
+            ),
             ..span(1, 1, None, 2, "GET /users", y)
         }];
         old_api.logs = vec![log(y, 17)];
@@ -85,10 +91,7 @@ impl Fixture {
             Span {
                 duration_ns: 30 * MS,
                 status: 2,
-                attributes: json!({"http.route": "/users", "http.request.method": "GET"})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
+                attributes: attrs(json!({"http.route": "/users", "http.request.method": "GET"})),
                 ..span(2, 1, None, 2, "GET /users", start + SECOND)
             },
             span(2, 2, Some(1), 3, "SELECT users", start + SECOND),
@@ -142,9 +145,7 @@ fn services_count_the_spans_that_enter_them_and_their_logs() {
     // The newest resource of the service.
     assert_eq!(
         api.resource,
-        *json!({"telemetry.sdk.language": "rust"})
-            .as_object()
-            .unwrap()
+        attrs(json!({"telemetry.sdk.language": "rust"}))
     );
     let requests = &api.stats.requests;
     assert_eq!((requests.count, requests.errors), (3, 1));
@@ -194,9 +195,7 @@ fn a_service_has_its_requests_by_operation() {
     // The attributes of the newest request, from today's file.
     assert_eq!(
         api.operations[0].attributes,
-        *json!({"http.route": "/users", "http.request.method": "GET"})
-            .as_object()
-            .unwrap()
+        attrs(json!({"http.route": "/users", "http.request.method": "GET"}))
     );
     assert!(api.operations[1].attributes.is_empty());
 

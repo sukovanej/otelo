@@ -3,7 +3,6 @@ use std::collections::{BTreeSet, HashMap};
 use jiff::Timestamp;
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use utoipa::ToSchema;
 
 use anyhow::ensure;
@@ -11,7 +10,7 @@ use siner_query::{Query, Signal};
 
 use super::compile::{Aliases, compile};
 use super::{Filter, cut, hex, level, template, time};
-use crate::Reader;
+use crate::{Attributes, Reader};
 
 /// The most lines [`Reader::log_groups`] reads, newest first. A range with
 /// more lines groups only these.
@@ -45,11 +44,9 @@ pub struct LogLine {
     pub trace_id: Option<String>,
     #[schema(required = true)]
     pub span_id: Option<String>,
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub attributes: Map<String, Value>,
+    pub attributes: Attributes,
     /// The attributes of the resource that sent the line.
-    #[schema(value_type = HashMap<String, serde_json::Value>)]
-    pub resource: Map<String, Value>,
+    pub resource: Attributes,
     /// `otlp`, or the service log source that read the line.
     pub source: String,
 }

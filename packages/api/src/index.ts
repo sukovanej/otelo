@@ -7,6 +7,8 @@ import type { components, paths } from "./schema";
 type Schemas = components["schemas"];
 
 export type Attribute = Schemas["Attribute"];
+export type AttributeKeys = Schemas["AttributeKeys"];
+export type AttributeValue = Schemas["AttributeValue"];
 export type Attributes = Schemas["Attributes"];
 export type Bucket = Schemas["Bucket"];
 export type CompletionKind = Schemas["CompletionKind"];
@@ -38,6 +40,7 @@ export type SpanEvent = Schemas["SpanEvent"];
 export type Spans = Schemas["Spans"];
 export type SqlRequest = Schemas["SqlRequest"];
 export type SqlResult = Schemas["SqlResult"];
+export type SqlValue = Schemas["SqlValue"];
 export type SuggestionBody = Schemas["SuggestionBody"];
 export type Trace = Schemas["Trace"];
 export type TraceSpan = Schemas["TraceSpan"];

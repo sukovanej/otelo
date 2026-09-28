@@ -10,13 +10,14 @@ use std::{fs, io, ptr, thread};
 
 use anyhow::Context;
 use rusqlite::{Connection, Transaction, params};
-use serde_json::Map;
 use twox_hash::XxHash3_64;
 
 use crate::catalog::{Catalog, Delta, Group};
 use crate::day::{self, Day};
 use crate::indexes::{self, IndexedKey, Indexes};
-use crate::{Batch, Log, Metric, MetricKind, Point, Records, Resource, Span};
+use crate::{
+    AttributeValue, Attributes, Batch, Log, Metric, MetricKind, Point, Records, Resource, Span,
+};
 
 pub const SCHEMA: &str = include_str!("schema.sql");
 
@@ -302,12 +303,12 @@ impl State {
             name: "siner.telemetry.dropped_batches".into(),
             kind: MetricKind::Sum,
             unit: "{batch}".into(),
-            labels: Map::new(),
+            labels: Attributes::new(),
             points: Vec::new(),
         };
         let siner = Resource {
             service: "siner".into(),
-            attributes: Map::new(),
+            attributes: Attributes::new(),
         };
         let mut part = Part::default();
         part.push_point(&metric, &point);
@@ -425,7 +426,7 @@ impl DayFile {
                     log.body,
                     log.trace_id,
                     log.span_id,
-                    serde_json::to_string(&log.attributes)?,
+                    log.attributes.to_json(),
                     log.source,
                 ])?;
             }
@@ -440,7 +441,7 @@ impl DayFile {
                     &mut delta,
                     Group::SpanNames,
                     "name",
-                    &serde_json::Value::String(span.name.clone()),
+                    &AttributeValue::String(span.name.clone()),
                 );
                 insert.execute(params![
                     span.trace_id,
@@ -452,7 +453,7 @@ impl DayFile {
                     span.start_ts,
                     span.duration_ns,
                     span.status,
-                    serde_json::to_string(&span.attributes)?,
+                    span.attributes.to_json(),
                     serde_json::to_string(&span.events)?,
                 ])?;
             }
@@ -490,9 +491,9 @@ fn resource_id(
     tx: &Transaction,
     cache: &mut HashMap<i64, i64>,
     resource: &Resource,
-    new: impl FnOnce(&Map<String, serde_json::Value>),
+    new: impl FnOnce(&Attributes),
 ) -> anyhow::Result<i64> {
-    let attributes = serde_json::to_string(&resource.attributes)?;
+    let attributes = resource.attributes.to_json();
     let hash = hash(&[&resource.service, &attributes]);
     if let Some(&id) = cache.get(&hash) {
         return Ok(id);
@@ -520,9 +521,9 @@ fn series_id(
     cache: &mut HashMap<i64, i64>,
     resource_id: i64,
     metric: &Metric,
-    new: impl FnOnce(&Map<String, serde_json::Value>),
+    new: impl FnOnce(&Attributes),
 ) -> anyhow::Result<i64> {
-    let labels = serde_json::to_string(&metric.labels)?;
+    let labels = metric.labels.to_json();
     let kind = metric.kind.as_str();
     let hash = hash(&[
         &resource_id.to_string(),

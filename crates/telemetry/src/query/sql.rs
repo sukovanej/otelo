@@ -2,7 +2,6 @@ use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::limits::Limit;
 use rusqlite::types::ValueRef;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use utoipa::ToSchema;
 
 use super::{cut, hex, statement_span};
@@ -25,11 +24,32 @@ const PRAGMAS: [&str; 6] = [
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct SqlResult {
     pub columns: Vec<String>,
-    /// Each row has one value per column. A blob is its hex digits.
-    #[schema(value_type = Vec<Vec<serde_json::Value>>)]
-    pub rows: Vec<Vec<Value>>,
+    /// Each row has one value per column.
+    pub rows: Vec<Vec<SqlValue>>,
     /// The query returned more rows than the limit let through.
     pub truncated: bool,
+}
+
+/// A value of a SQLite column. A blob is its hex digits, as text.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum SqlValue {
+    Null,
+    Integer(i64),
+    Real(f64),
+    Text(String),
+}
+
+impl std::fmt::Display for SqlValue {
+    /// The value as a table cell: text without quotes, and NULL for null.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Null => f.write_str("NULL"),
+            Self::Integer(n) => write!(f, "{n}"),
+            Self::Real(x) => write!(f, "{x}"),
+            Self::Text(text) => f.write_str(text),
+        }
+    }
 }
 
 impl Reader {
@@ -65,11 +85,11 @@ fn run(reader: &Reader, sql: &str, limit: usize) -> anyhow::Result<SqlResult> {
         let values = (0..columns.len())
             .map(|i| {
                 Ok(match row.get_ref(i)? {
-                    ValueRef::Null => Value::Null,
-                    ValueRef::Integer(n) => n.into(),
-                    ValueRef::Real(x) => x.into(),
-                    ValueRef::Text(text) => String::from_utf8_lossy(text).into(),
-                    ValueRef::Blob(blob) => hex(blob).into(),
+                    ValueRef::Null => SqlValue::Null,
+                    ValueRef::Integer(n) => SqlValue::Integer(n),
+                    ValueRef::Real(x) => SqlValue::Real(x),
+                    ValueRef::Text(text) => SqlValue::Text(String::from_utf8_lossy(text).into()),
+                    ValueRef::Blob(blob) => SqlValue::Text(hex(blob)),
                 })
             })
             .collect::<anyhow::Result<_>>()?;

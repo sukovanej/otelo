@@ -313,7 +313,7 @@ export interface components {
             type: string;
         };
         /** @description The attribute keys of a signal, over the attached days. */
-        Attributes: {
+        AttributeKeys: {
             /**
              * @description The attributes of the records: of the logs, the spans, or the labels
              *     of the series.
@@ -321,6 +321,18 @@ export interface components {
             record: components["schemas"]["Attribute"][];
             /** @description The attributes of the resources that sent them. */
             resource: components["schemas"]["Attribute"][];
+        };
+        /**
+         * @description The value of an attribute: the `AnyValue` of OpenTelemetry.
+         *
+         *     Bytes arrive as a base64 string, as OTLP/JSON writes them, so they read
+         *     back as a string. A double that JSON cannot hold, such as NaN, is a string
+         *     too.
+         */
+        AttributeValue: null | boolean | number | string | unknown[] | components["schemas"]["Attributes"];
+        /** @description Attributes by key, in the order of their keys. */
+        Attributes: {
+            [key: string]: components["schemas"]["AttributeValue"];
         };
         /** @description The points of one series in one step. */
         Bucket: {
@@ -439,16 +451,12 @@ export interface components {
             unindexed: string[];
         };
         LogLine: {
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["Attributes"];
             body: string;
             /** @description The name of the severity: TRACE, DEBUG, INFO, WARN, ERROR, or FATAL. */
             level: string;
             /** @description The attributes of the resource that sent the line. */
-            resource: {
-                [key: string]: unknown;
-            };
+            resource: components["schemas"]["Attributes"];
             service: string;
             /**
              * Format: int32
@@ -494,9 +502,7 @@ export interface components {
              * @description The attributes of its newest request, which tell what the operation
              *     is, such as `http.request.method` and `http.route`.
              */
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["Attributes"];
             /**
              * Format: int32
              * @description The OpenTelemetry span kind.
@@ -512,9 +518,7 @@ export interface components {
          */
         OperationDetail: {
             /** @description The attributes of its newest request. Empty when the range has none. */
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["Attributes"];
             /** @description Every step of the range, oldest first. */
             buckets: components["schemas"]["RequestBucket"][];
             /**
@@ -571,26 +575,18 @@ export interface components {
             /** @description The buckets that have points, oldest first. */
             buckets: components["schemas"]["Bucket"][];
             kind: string;
-            labels: {
-                [key: string]: unknown;
-            };
-            resource: {
-                [key: string]: unknown;
-            };
+            labels: components["schemas"]["Attributes"];
+            resource: components["schemas"]["Attributes"];
             service: string;
             unit: string;
         };
         SeriesInfo: {
             /** @description `gauge`, `sum`, or `histogram`. */
             kind: string;
-            labels: {
-                [key: string]: unknown;
-            };
+            labels: components["schemas"]["Attributes"];
             name: string;
             /** @description The attributes of the resource that sends the series. */
-            resource: {
-                [key: string]: unknown;
-            };
+            resource: components["schemas"]["Attributes"];
             service: string;
             unit: string;
         };
@@ -604,9 +600,7 @@ export interface components {
              * @description The attributes of the newest resource of the service. Empty when the
              *     range has none of its telemetry.
              */
-            resource: {
-                [key: string]: unknown;
-            };
+            resource: components["schemas"]["Attributes"];
             service: string;
             /**
              * Format: date-time
@@ -655,9 +649,7 @@ export interface components {
              * @description The attributes of the newest resource of the service that has any,
              *     such as `telemetry.sdk.language`.
              */
-            resource: {
-                [key: string]: unknown;
-            };
+            resource: components["schemas"]["Attributes"];
             service: string;
             stats: components["schemas"]["ServiceStats"];
         };
@@ -686,9 +678,7 @@ export interface components {
         Signal: "logs" | "spans" | "metrics";
         /** @description Something that happened at one time in a span, such as an exception. */
         SpanEvent: {
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["Attributes"];
             name: string;
             /**
              * Format: int64
@@ -726,11 +716,13 @@ export interface components {
         };
         SqlResult: {
             columns: string[];
-            /** @description Each row has one value per column. A blob is its hex digits. */
-            rows: unknown[][];
+            /** @description Each row has one value per column. */
+            rows: components["schemas"]["SqlValue"][][];
             /** @description The query returned more rows than the limit let through. */
             truncated: boolean;
         };
+        /** @description A value of a SQLite column. A blob is its hex digits, as text. */
+        SqlValue: null | number | string;
         SuggestionBody: {
             /**
              * @description The type of a field and how many records have it, or how many records
@@ -753,9 +745,7 @@ export interface components {
             truncated: boolean;
         };
         TraceSpan: {
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["Attributes"];
             /** Format: int64 */
             duration_ns: number;
             error: boolean;
@@ -768,9 +758,7 @@ export interface components {
             name: string;
             parent_span_id: string | null;
             /** @description The attributes of the resource that sent the span. */
-            resource: {
-                [key: string]: unknown;
-            };
+            resource: components["schemas"]["Attributes"];
             service: string;
             span_id: string;
             /**
@@ -784,9 +772,7 @@ export interface components {
         };
         TraceSummary: {
             /** @description The attributes of the root span, such as `http.route`. */
-            attributes: {
-                [key: string]: unknown;
-            };
+            attributes: components["schemas"]["Attributes"];
             /** Format: int64 */
             duration_ns: number;
             /** @description Whether a span of the trace failed. */
@@ -799,9 +785,7 @@ export interface components {
             /** @description The name of the root span. */
             name: string;
             /** @description The attributes of the resource that sent the root span. */
-            resource: {
-                [key: string]: unknown;
-            };
+            resource: components["schemas"]["Attributes"];
             service: string;
             /** Format: int64 */
             spans: number;
@@ -845,7 +829,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Attributes"];
+                    "application/json": components["schemas"]["AttributeKeys"];
                 };
             };
             400: {

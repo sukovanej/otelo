@@ -29,7 +29,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Attributes"
+                  "$ref": "#/components/schemas/AttributeKeys"
                 }
               }
             }
@@ -1020,7 +1020,7 @@
           }
         }
       },
-      "Attributes": {
+      "AttributeKeys": {
         "type": "object",
         "description": "The attribute keys of a signal, over the attached days.",
         "required": [
@@ -1042,6 +1042,47 @@
             },
             "description": "The attributes of the resources that sent them."
           }
+        }
+      },
+      "AttributeValue": {
+        "oneOf": [
+          {
+            "type": "null",
+            "default": null
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {},
+            "description": "Its items are any JSON in the spec: TypeScript cannot name a union\nthat holds an array of itself."
+          },
+          {
+            "$ref": "#/components/schemas/Attributes"
+          }
+        ],
+        "description": "The value of an attribute: the `AnyValue` of OpenTelemetry.\n\nBytes arrive as a base64 string, as OTLP/JSON writes them, so they read\nback as a string. A double that JSON cannot hold, such as NaN, is a string\ntoo."
+      },
+      "Attributes": {
+        "type": "object",
+        "description": "Attributes by key, in the order of their keys.",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/AttributeValue"
+        },
+        "propertyNames": {
+          "type": "string"
         }
       },
       "Bucket": {
@@ -1362,11 +1403,7 @@
         ],
         "properties": {
           "attributes": {
-            "type": "object",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes"
           },
           "body": {
             "type": "string"
@@ -1376,12 +1413,8 @@
             "description": "The name of the severity: TRACE, DEBUG, INFO, WARN, ERROR, or FATAL."
           },
           "resource": {
-            "type": "object",
-            "description": "The attributes of the resource that sent the line.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the resource that sent the line."
           },
           "service": {
             "type": "string"
@@ -1501,12 +1534,8 @@
         ],
         "properties": {
           "attributes": {
-            "type": "object",
-            "description": "The attributes of its newest request, which tell what the operation\nis, such as `http.request.method` and `http.route`.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of its newest request, which tell what the operation\nis, such as `http.request.method` and `http.route`."
           },
           "kind": {
             "type": "integer",
@@ -1538,12 +1567,8 @@
         ],
         "properties": {
           "attributes": {
-            "type": "object",
-            "description": "The attributes of its newest request. Empty when the range has none.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of its newest request. Empty when the range has none."
           },
           "buckets": {
             "type": "array",
@@ -1662,18 +1687,10 @@
             "type": "string"
           },
           "labels": {
-            "type": "object",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes"
           },
           "resource": {
-            "type": "object",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes"
           },
           "service": {
             "type": "string"
@@ -1699,22 +1716,14 @@
             "description": "`gauge`, `sum`, or `histogram`."
           },
           "labels": {
-            "type": "object",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes"
           },
           "name": {
             "type": "string"
           },
           "resource": {
-            "type": "object",
-            "description": "The attributes of the resource that sends the series.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the resource that sends the series."
           },
           "service": {
             "type": "string"
@@ -1754,12 +1763,8 @@
             "description": "The requests by span name, the most first."
           },
           "resource": {
-            "type": "object",
-            "description": "The attributes of the newest resource of the service. Empty when the\nrange has none of its telemetry.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the newest resource of the service. Empty when the\nrange has none of its telemetry."
           },
           "service": {
             "type": "string"
@@ -1859,12 +1864,8 @@
             "description": "Every step of the range, oldest first."
           },
           "resource": {
-            "type": "object",
-            "description": "The attributes of the newest resource of the service that has any,\nsuch as `telemetry.sdk.language`.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the newest resource of the service that has any,\nsuch as `telemetry.sdk.language`."
           },
           "service": {
             "type": "string"
@@ -1930,11 +1931,7 @@
         ],
         "properties": {
           "attributes": {
-            "type": "object",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes"
           },
           "name": {
             "type": "string"
@@ -2027,15 +2024,37 @@
             "type": "array",
             "items": {
               "type": "array",
-              "items": {}
+              "items": {
+                "$ref": "#/components/schemas/SqlValue"
+              }
             },
-            "description": "Each row has one value per column. A blob is its hex digits."
+            "description": "Each row has one value per column."
           },
           "truncated": {
             "type": "boolean",
             "description": "The query returned more rows than the limit let through."
           }
         }
+      },
+      "SqlValue": {
+        "oneOf": [
+          {
+            "type": "null",
+            "default": null
+          },
+          {
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "description": "A value of a SQLite column. A blob is its hex digits, as text."
       },
       "SuggestionBody": {
         "type": "object",
@@ -2122,11 +2141,7 @@
         ],
         "properties": {
           "attributes": {
-            "type": "object",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes"
           },
           "duration_ns": {
             "type": "integer",
@@ -2156,12 +2171,8 @@
             ]
           },
           "resource": {
-            "type": "object",
-            "description": "The attributes of the resource that sent the span.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the resource that sent the span."
           },
           "service": {
             "type": "string"
@@ -2199,12 +2210,8 @@
         ],
         "properties": {
           "attributes": {
-            "type": "object",
-            "description": "The attributes of the root span, such as `http.route`.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the root span, such as `http.route`."
           },
           "duration_ns": {
             "type": "integer",
@@ -2224,12 +2231,8 @@
             "description": "The name of the root span."
           },
           "resource": {
-            "type": "object",
-            "description": "The attributes of the resource that sent the root span.",
-            "additionalProperties": {},
-            "propertyNames": {
-              "type": "string"
-            }
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of the resource that sent the root span."
           },
           "service": {
             "type": "string"
