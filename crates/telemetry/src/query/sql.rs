@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::{cut, hex};
+use super::{cut, hex, statement_span};
 use crate::Reader;
 
 /// The longest string or blob a query can make, so that one query cannot take
@@ -52,6 +52,8 @@ impl Reader {
 }
 
 fn run(reader: &Reader, sql: &str, limit: usize) -> anyhow::Result<SqlResult> {
+    let span = statement_span(sql);
+    let _entered = span.enter();
     let mut stmt = reader.conn().prepare(sql)?;
     let columns: Vec<String> = stmt.column_names().into_iter().map(Into::into).collect();
     let mut rows = Vec::new();
@@ -73,6 +75,10 @@ fn run(reader: &Reader, sql: &str, limit: usize) -> anyhow::Result<SqlResult> {
             .collect::<anyhow::Result<_>>()?;
         rows.push(values);
     }
+    span.record(
+        "db.response.returned_rows",
+        i64::try_from(rows.len()).unwrap_or(i64::MAX),
+    );
     let truncated = cut(&mut rows, limit);
     Ok(SqlResult {
         columns,

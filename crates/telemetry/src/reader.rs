@@ -48,6 +48,8 @@ impl Reader {
     /// When a file cannot be attached, or when the range covers more than 10
     /// day files.
     pub fn open(dir: &Path, since: i64, until: i64) -> anyhow::Result<Self> {
+        let span = tracing::info_span!("open reader", days = tracing::field::Empty);
+        let _entered = span.enter();
         let conn = Connection::open_in_memory()?;
         // The empty tables in the in-memory database give the views their
         // columns when no day file is attached.
@@ -67,6 +69,7 @@ impl Reader {
             "the range covers {} day files, and a query reads at most {MAX_DAYS}",
             days.len()
         );
+        span.record("days", i64::try_from(days.len())?);
         for day in &days {
             let path = dir.join(day.file_name());
             conn.execute(

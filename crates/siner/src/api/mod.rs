@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, ensure};
+use axum::extract::{MatchedPath, Request as HttpRequest};
 use axum::http::StatusCode;
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -23,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use siner_query::Signal;
 use siner_telemetry::query::InvalidQuery;
 use siner_telemetry::{Day, Indexes, Reader};
+use tracing::Instrument;
+use tracing::field::Empty;
 use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -58,7 +62,7 @@ pub struct Api {
     pub state: Arc<State>,
 }
 
-/// The query routes and `/api/openapi.json`.
+/// The query routes and `/api/openapi.json`, with a span for each request.
 pub fn router(api: Api) -> Router {
     let (router, spec) = OpenApiRouter::with_openapi(Spec::openapi())
         .routes(routes!(queries::logs))
@@ -75,10 +79,40 @@ pub fn router(api: Api) -> Router {
         .routes(routes!(catalog::add_index, catalog::remove_index))
         .with_state(api)
         .split_for_parts();
-    router.route(
-        "/api/openapi.json",
-        get(move || async move { Json(spec.clone()) }),
-    )
+    router
+        .route(
+            "/api/openapi.json",
+            get(move || async move { Json(spec.clone()) }),
+        )
+        .route_layer(middleware::from_fn(trace))
+}
+
+/// Runs the request in a server span named after its route, as the
+/// OpenTelemetry HTTP conventions ask.
+async fn trace(request: HttpRequest, next: Next) -> Response {
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| request.uri().path(), MatchedPath::as_str)
+        .to_owned();
+    let method = request.method().clone();
+    let span = tracing::info_span!(
+        "request",
+        otel.name = format!("{method} {route}"),
+        otel.kind = "server",
+        http.request.method = %method,
+        http.route = route,
+        url.path = request.uri().path(),
+        url.query = request.uri().query(),
+        http.response.status_code = Empty,
+    );
+    let response = next.run(request).instrument(span.clone()).await;
+    // The OpenTelemetry layer keeps an i64 as a number, and a u64 as text.
+    span.record(
+        "http.response.status_code",
+        i64::from(response.status().as_u16()),
+    );
+    response
 }
 
 /// The body of every error response.
@@ -131,6 +165,10 @@ impl From<anyhow::Error> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        // In the request's span, this marks the span as failed.
+        if self.status.is_server_error() {
+            tracing::error!("{}", self.message);
+        }
         (
             self.status,
             Json(ErrorBody {
@@ -163,7 +201,9 @@ impl Api {
         query: impl FnOnce(Request) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         let api = self.clone();
+        let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
             let [since, until] = range;
             let (since, until) = api
                 .range(since.as_deref(), until.as_deref(), default_since)

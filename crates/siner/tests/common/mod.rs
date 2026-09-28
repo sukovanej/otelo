@@ -15,8 +15,14 @@ pub struct Daemon {
     pub otlp_grpc: String,
 }
 
-/// Starts `siner serve` on a free port and waits for it to listen.
+/// Starts `siner serve` on a free port and waits for it to listen. It keeps
+/// its own telemetry to stderr, so a test finds only what it wrote.
 pub fn start(data: &std::path::Path) -> Daemon {
+    start_with(data, &["--own-telemetry", "off"])
+}
+
+/// Starts `siner serve` with `args` added, like [`start`].
+pub fn start_with(data: &std::path::Path, args: &[&str]) -> Daemon {
     let mut child = Command::new(env!("CARGO_BIN_EXE_siner"))
         .args([
             "serve",
@@ -27,6 +33,7 @@ pub fn start(data: &std::path::Path) -> Daemon {
         ])
         .args(["--otlp-grpc", "127.0.0.1:0", "--data"])
         .arg(data)
+        .args(args)
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();

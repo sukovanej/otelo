@@ -141,7 +141,9 @@ impl Api {
         let key =
             IndexedKey::new(parse_signal(signal)?, key).map_err(|e| ApiError::bad_request(&e))?;
         let api = self.clone();
+        let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || -> Result<IndexList, ApiError> {
+            let _entered = span.enter();
             if add {
                 api.state.add_index(&key)?;
             } else if !api.state.remove_index(&key)? {

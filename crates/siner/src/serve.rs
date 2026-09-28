@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal};
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,9 +9,9 @@ use axum::routing::get;
 use siner_telemetry::Indexes;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
-use tracing_subscriber::EnvFilter;
 
 use crate::api::{self, Api};
+use crate::own::{self, Destination};
 use crate::state::State;
 
 #[cfg(target_os = "macos")]
@@ -40,47 +40,76 @@ pub struct Args {
     /// Directory for the state and the telemetry, made when it is missing
     #[arg(long, default_value = DEFAULT_DATA_DIR)]
     data: PathBuf,
+
+    /// Where the daemon sends its own traces and logs: `self` for its own OTLP
+    /// receiver, `off`, or the http:// URL of another OTLP/HTTP receiver
+    #[arg(long, default_value = "self")]
+    own_telemetry: Destination,
+}
+
+/// The listeners of the daemon, bound before anything else starts.
+struct Listeners {
+    api: TcpListener,
+    otlp_http: TcpListener,
+    otlp_grpc: TcpListener,
+}
+
+impl Listeners {
+    async fn bind(args: &Args) -> anyhow::Result<Self> {
+        Ok(Self {
+            api: bind(args.listen).await?,
+            otlp_http: bind(args.otlp_http).await?,
+            otlp_grpc: bind(args.otlp_grpc).await?,
+        })
+    }
 }
 
 /// Runs the daemon until SIGTERM or Ctrl-C.
 ///
 /// # Errors
 ///
-/// When the data directory, the state file, the telemetry writer, or the
-/// listener cannot start, or the server fails.
+/// When the data directory, the state file, the telemetry writer, the
+/// exporters of its own telemetry, or a listener cannot start, or the server
+/// fails.
 pub fn main(args: Args) -> anyhow::Result<()> {
-    init_logging();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("start the async runtime")?
         .block_on(async {
+            let listeners = Listeners::bind(&args).await?;
+            let own =
+                own::Telemetry::start(&args.own_telemetry, listeners.otlp_http.local_addr()?)?;
+            own::init_logging(own.as_ref());
             let shutdown = CancellationToken::new();
             let signal = shutdown_signal().context("listen for SIGTERM")?;
             tokio::spawn({
                 let shutdown = shutdown.clone();
+                let own = own.clone();
                 async move {
                     signal.await;
                     tracing::info!("stopping");
+                    // The receivers still run, so the last of the daemon's
+                    // own telemetry reaches them.
+                    if let Some(own) = own {
+                        let _ = tokio::task::spawn_blocking(move || own.shutdown()).await;
+                    }
                     shutdown.cancel();
                 }
             });
-            run(args, shutdown).await
+            let result = run(args, listeners, shutdown).await;
+            if let Some(own) = own {
+                tokio::task::spawn_blocking(move || own.shutdown())
+                    .await
+                    .context("stop the exporters of the daemon's own telemetry")?;
+            }
+            result
         })
-}
-
-/// Logs go to stderr, where journald picks them up when systemd runs the daemon.
-fn init_logging() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .with_writer(io::stderr)
-        .with_ansi(io::stderr().is_terminal())
-        .init();
 }
 
 /// Runs the daemon until `shutdown` is cancelled. Every server and source
 /// stops on the same token, and the writer flushes after the sources end.
-async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
+async fn run(args: Args, listeners: Listeners, shutdown: CancellationToken) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
     let state = State::open(&args.data)?;
@@ -94,9 +123,11 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
         state: Arc::new(state),
     };
     let writer = siner_telemetry::Writer::spawn(config, inbox)?;
-    let listener = bind(args.listen).await?;
-    let otlp_http = bind(args.otlp_http).await?;
-    let otlp_grpc = bind(args.otlp_grpc).await?;
+    let Listeners {
+        api: listener,
+        otlp_http,
+        otlp_grpc,
+    } = listeners;
     tracing::info!(
         addr = %listener.local_addr()?,
         otlp_http = %otlp_http.local_addr()?,
