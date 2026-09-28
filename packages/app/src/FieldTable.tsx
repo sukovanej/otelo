@@ -1,6 +1,5 @@
 import { Button } from "@siner/ui";
 import { For, Show } from "solid-js";
-import type { Json } from "./api";
 import { heading } from "./classes";
 import { attributeField, literal, quote, resourceField } from "./query";
 
@@ -8,7 +7,7 @@ export interface Field {
   /** The name a query uses for the field, or `undefined` when it has none. */
   name: string | undefined;
   label: string;
-  value: Json;
+  value: unknown;
   /** The literal a comparison uses, or `undefined` when none matches. */
   literal: string | undefined;
 }
@@ -30,11 +29,11 @@ export const builtin = (
   literal: lit ?? undefined,
 });
 
-const sorted = (record: Record<string, Json>) =>
+const sorted = (record: Record<string, unknown>) =>
   Object.entries(record).toSorted(([a], [b]) => a.localeCompare(b));
 
 /** The attributes of a record, by key. */
-export const attributes = (record: Record<string, Json>): Field[] =>
+export const attributes = (record: Record<string, unknown>): Field[] =>
   sorted(record).map(([key, value]) => ({
     name: attributeField(key),
     label: key,
@@ -43,7 +42,7 @@ export const attributes = (record: Record<string, Json>): Field[] =>
   }));
 
 /** The attributes of a resource, by key. */
-export const resource = (record: Record<string, Json>): Field[] =>
+export const resource = (record: Record<string, unknown>): Field[] =>
   sorted(record).map(([key, value]) => ({
     name: resourceField(key),
     label: key,
@@ -51,7 +50,7 @@ export const resource = (record: Record<string, Json>): Field[] =>
     literal: literal(value),
   }));
 
-const show = (value: Json) => (typeof value === "string" ? value : JSON.stringify(value));
+const show = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value));
 
 /** Fields in a table, with buttons that add a field that has a name and a
  * literal to the query. `noun` names the records, such as `lines`. */

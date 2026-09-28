@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use siner::{query, serve};
+use siner::{api, query, serve};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]
@@ -32,6 +32,8 @@ enum Command {
     Complete(query::CompleteArgs),
     /// List, add, or remove the indexed attributes
     Index(query::IndexArgs),
+    /// Print the spec of the query API that /api/openapi.json serves, without a daemon
+    Openapi,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -47,5 +49,6 @@ fn main() -> anyhow::Result<()> {
         Command::Attributes(args) => query::attributes(&args),
         Command::Complete(args) => query::complete(&args),
         Command::Index(args) => query::index(&args),
+        Command::Openapi => api::print_spec(),
     }
 }

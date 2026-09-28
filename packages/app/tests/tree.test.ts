@@ -1,9 +1,9 @@
 import { expect, test } from "vitest";
-import type { Span } from "../src/api";
+import type { TraceSpan } from "@siner/api";
 import { spanTree, traceLength, visibleRows } from "../src/traces/tree";
 
 /** A span that starts `ms` milliseconds into the trace. */
-const span = (id: string, parent: string | null, ms: number, durationMs: number): Span => ({
+const span = (id: string, parent: string | null, ms: number, durationMs: number): TraceSpan => ({
   trace_id: "0af7651916cd43dd8448eb211c80319c",
   span_id: id,
   parent_span_id: parent,

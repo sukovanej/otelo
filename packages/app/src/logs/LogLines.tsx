@@ -1,6 +1,6 @@
 import { Level } from "@siner/ui";
 import { For } from "solid-js";
-import type { LogLine } from "../api";
+import type { LogLine } from "@siner/api";
 import { toggleRow } from "../row";
 import Service from "../Service";
 import { formatTime, parseTime, timeWidth } from "../time";

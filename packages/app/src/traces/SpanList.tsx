@@ -1,5 +1,5 @@
 import { For } from "solid-js";
-import type { Span } from "../api";
+import type { TraceSpan } from "@siner/api";
 import { closedErrorRow, closedRow, header, openRow, row, spanColumns } from "../classes";
 import Duration from "../Duration";
 import Measure from "../Measure";
@@ -11,15 +11,15 @@ import SpanTitle from "./SpanTitle";
 
 /** What tells a span apart, so it stays selected when a reload brings it
  * again. */
-export const spanKey = (span: Span) => `${span.trace_id} ${span.span_id}`;
+export const spanKey = (span: TraceSpan) => `${span.trace_id} ${span.span_id}`;
 
 /** Spans, newest first. A click on a span selects it, and a click on the
  * selected one lets it go. */
 export default function SpanList(props: {
-  spans: Span[];
+  spans: TraceSpan[];
   /** The key of the selected span. */
   selected: string | undefined;
-  onSelect: (span: Span | undefined) => void;
+  onSelect: (span: TraceSpan | undefined) => void;
 }) {
   const longest = () => Math.max(1, ...props.spans.map((span) => span.duration_ns));
   return (

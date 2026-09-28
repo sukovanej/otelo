@@ -1,6 +1,6 @@
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { createSignal, Match, Show, Switch } from "solid-js";
-import { getSpans, getTraces, search, type Span, type Spans, type Traces } from "../api";
+import { getSpans, getTraces, search, type TraceSpan, type Spans, type Traces } from "@siner/api";
 import { count, createList, usePageKeys } from "../list";
 import { Empty, ListContent, QueryBar } from "../ListFrame";
 import { addTerm } from "../query";
@@ -36,7 +36,7 @@ export default function TracesPage() {
 
   // The span open in the panel. It stays open when a reload or another
   // query no longer brings it.
-  const [selected, setSelected] = createSignal<Span>();
+  const [selected, setSelected] = createSignal<TraceSpan>();
   const selectedKey = () => {
     const span = selected();
     return span && spanKey(span);

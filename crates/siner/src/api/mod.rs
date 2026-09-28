@@ -31,7 +31,7 @@ use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-pub use catalog::{Completions, IndexList};
+pub use catalog::{CompletionKind, Completions, IndexBody, IndexList, SignalName, SuggestionBody};
 pub use queries::SqlRequest;
 
 use crate::state::State;
@@ -62,9 +62,9 @@ pub struct Api {
     pub state: Arc<State>,
 }
 
-/// The query routes and `/api/openapi.json`, with a span for each request.
-pub fn router(api: Api) -> Router {
-    let (router, spec) = OpenApiRouter::with_openapi(Spec::openapi())
+/// The query routes, and the spec that their annotations make.
+fn routes() -> OpenApiRouter<Api> {
+    OpenApiRouter::with_openapi(Spec::openapi())
         .routes(routes!(queries::logs))
         .routes(routes!(queries::log_groups))
         .routes(routes!(queries::spans))
@@ -77,8 +77,28 @@ pub fn router(api: Api) -> Router {
         .routes(routes!(catalog::complete))
         .routes(routes!(catalog::list_indexes))
         .routes(routes!(catalog::add_index, catalog::remove_index))
-        .with_state(api)
-        .split_for_parts();
+}
+
+/// The spec of the query API, which `/api/openapi.json` serves and
+/// `packages/api` of the web UI generates its types from.
+#[must_use]
+pub fn spec() -> utoipa::openapi::OpenApi {
+    routes().into_openapi()
+}
+
+/// Prints the spec as pretty JSON, the form of `packages/api/openapi.json`.
+///
+/// # Errors
+///
+/// When stdout is closed.
+pub fn print_spec() -> anyhow::Result<()> {
+    println!("{}", spec().to_pretty_json()?);
+    Ok(())
+}
+
+/// The query routes and `/api/openapi.json`, with a span for each request.
+pub fn router(api: Api) -> Router {
+    let (router, spec) = routes().with_state(api).split_for_parts();
     router
         .route(
             "/api/openapi.json",

@@ -1,14 +1,19 @@
 // How the traces pages name the fields of a span.
 
-import { SPAN_KINDS, SPAN_STATUSES, type Span } from "../api";
+import type { TraceSpan } from "@siner/api";
 import { attributes, builtin, resource, type Section } from "../FieldTable";
+
+/** The names of span kinds and statuses, as the query language writes them.
+ * The kinds count from 1, after unspecified. */
+const SPAN_KINDS = ["unspecified", "internal", "server", "client", "producer", "consumer"];
+const SPAN_STATUSES = ["unset", "ok", "error"];
 
 export const kindName = (kind: number) => SPAN_KINDS[kind] ?? String(kind);
 export const statusName = (status: number) => SPAN_STATUSES[status] ?? String(status);
 
 /** The fields of a span, with the literals the query language compares
  * them to. */
-export function spanSections(span: Span): Section[] {
+export function spanSections(span: TraceSpan): Section[] {
   const kind = kindName(span.kind);
   const status = statusName(span.status);
   return [

@@ -1,6 +1,6 @@
 import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import type { Span } from "../api";
+import type { TraceSpan } from "@siner/api";
 import { heading, link, times } from "../classes";
 import Duration from "../Duration";
 import FieldTable, { Fields } from "../FieldTable";
@@ -16,9 +16,9 @@ import SpanTitle from "./SpanTitle";
  * unless `inTrace` says the page shows it. A plain click on the link calls
  * `onOpenTrace` when there is one. */
 export default function SpanPanel(props: {
-  span: Span;
+  span: TraceSpan;
   inTrace?: boolean;
-  onOpenTrace?: (span: Span) => void;
+  onOpenTrace?: (span: TraceSpan) => void;
   onFilter: (term: string) => void;
   onClose: () => void;
 }) {

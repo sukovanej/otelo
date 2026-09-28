@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
-import type { Span } from "../api";
+import type { TraceSpan } from "@siner/api";
 import { closedErrorRow, closedRow, header, openRow, row, waterfallColumns } from "../classes";
 import { ChevronIcon } from "@siner/icons";
 import Duration from "../Duration";
@@ -32,7 +32,7 @@ export default function Waterfall(props: {
   rows: TreeRow[];
   /** The ID of the selected span. */
   selected: string | undefined;
-  onSelect: (span: Span | undefined) => void;
+  onSelect: (span: TraceSpan | undefined) => void;
 }) {
   const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(new Set());
   const length = () => Math.max(1, traceLength(props.rows));

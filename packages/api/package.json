@@ -1,0 +1,15 @@
+{
+  "name": "@siner/api",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "openapi-typescript": "catalog:",
+    "typescript": "npm:typescript@^5.9.3",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

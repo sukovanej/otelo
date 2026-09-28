@@ -73,11 +73,15 @@ pub struct Distribution {
     pub bounds: Vec<f64>,
     pub counts: Vec<u64>,
     pub count: u64,
+    #[schema(required = true)]
     pub sum: Option<f64>,
     /// Estimates of the median and the 90th and 99th percentiles, by linear
     /// interpolation inside a bucket. `None` without values.
+    #[schema(required = true)]
     pub p50: Option<f64>,
+    #[schema(required = true)]
     pub p90: Option<f64>,
+    #[schema(required = true)]
     pub p99: Option<f64>,
 }
 

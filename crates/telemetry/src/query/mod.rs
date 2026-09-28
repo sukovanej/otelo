@@ -26,7 +26,7 @@ pub use metrics::{
 };
 pub use sql::SqlResult;
 pub use template::template;
-pub use traces::{Spans, Trace, TraceSpan, TraceSummary, Traces};
+pub use traces::{SpanEvent, Spans, Trace, TraceSpan, TraceSummary, Traces};
 
 use crate::{Day, Reader};
 use siner_query::{Query, Signal};

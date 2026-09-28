@@ -1,7 +1,6 @@
 import { databaseName, DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@siner/icons";
 import { Badge, Level, type Tone, Tooltip } from "@siner/ui";
 import { Match, Show, Switch } from "solid-js";
-import type { Json } from "../api";
 import { databaseId, type DbSpan, type HttpSpan, nameRest, spanMeaning } from "../semantics";
 
 const methodTones: Record<string, Tone> = {
@@ -80,7 +79,7 @@ function Db(props: { meaning: DbSpan; rest: string }) {
  */
 export default function SpanTitle(props: {
   name: string;
-  attributes: Record<string, Json>;
+  attributes: Record<string, unknown>;
   error: boolean;
 }) {
   const meaning = () => spanMeaning(props.attributes);

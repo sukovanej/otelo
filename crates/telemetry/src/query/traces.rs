@@ -38,10 +38,10 @@ pub struct TraceSummary {
     /// Whether a span of the trace failed.
     pub error: bool,
     /// The attributes of the root span, such as `http.route`.
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub attributes: Map<String, Value>,
     /// The attributes of the resource that sent the root span.
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub resource: Map<String, Value>,
 }
 
@@ -82,6 +82,7 @@ pub struct Trace {
 pub struct TraceSpan {
     pub trace_id: String,
     pub span_id: String,
+    #[schema(required = true)]
     pub parent_span_id: Option<String>,
     pub service: String,
     pub name: String,
@@ -93,12 +94,22 @@ pub struct TraceSpan {
     /// The OpenTelemetry status code.
     pub status: i32,
     pub error: bool,
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub attributes: Map<String, Value>,
-    pub events: Vec<Value>,
+    pub events: Vec<SpanEvent>,
     /// The attributes of the resource that sent the span.
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub resource: Map<String, Value>,
+}
+
+/// Something that happened at one time in a span, such as an exception.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct SpanEvent {
+    /// Nanoseconds since the Unix epoch.
+    pub ts: i64,
+    pub name: String,
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
+    pub attributes: Map<String, Value>,
 }
 
 const SPAN_COLUMNS: &str = "s.trace_id, s.span_id, s.parent_span_id, r.service, s.name, s.kind,

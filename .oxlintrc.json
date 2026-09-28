@@ -11,9 +11,14 @@
     "es2024": true
   },
   "rules": {
-    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css"]
+      }
+    ],
     "no-unassigned-vars": "off",
     "promise/always-return": "off"
   },
-  "ignorePatterns": ["**/dist/**"]
+  "ignorePatterns": ["**/dist/**", "packages/api/openapi.json", "packages/api/src/schema.ts"]
 }

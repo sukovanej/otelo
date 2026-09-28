@@ -1,5 +1,5 @@
 import { type Accessor, createEffect, createSignal, on, onCleanup } from "solid-js";
-import { aborted } from "./api";
+import { aborted } from "@siner/api";
 
 export interface Fetched<T> {
   /** The last result that arrived. It stays while a new request runs, so the

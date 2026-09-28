@@ -1,5 +1,5 @@
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
-import { search } from "../api";
+import { search } from "@siner/api";
 import { link } from "../classes";
 import { usePageKeys } from "../list";
 import TraceView, { closePanel, createTraceState } from "./TraceView";
