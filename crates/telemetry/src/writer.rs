@@ -461,7 +461,16 @@ impl DayFile {
                     catalog.record(&mut delta, Group::Metrics, labels);
                 })?;
                 for point in points {
-                    let histogram = point.histogram.as_ref().map(ToString::to_string);
+                    let histogram = match &point.histogram {
+                        Some(histogram) => match histogram.check() {
+                            Ok(()) => Some(serde_json::to_string(histogram)?),
+                            Err(error) => {
+                                tracing::debug!(metric = %metric.name, "skipped a point: {error:#}");
+                                continue;
+                            }
+                        },
+                        None => None,
+                    };
                     insert.execute(params![series_id, point.ts, point.value, histogram])?;
                 }
             }

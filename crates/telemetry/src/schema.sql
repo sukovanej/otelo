@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS points (
   series_id INTEGER NOT NULL REFERENCES series (id),
   ts INTEGER NOT NULL,
   value REAL NOT NULL,
+  -- The buckets of a histogram point as JSON: bounds, counts, count, sum, min,
+  -- max, and cumulative. NULL for a gauge or a sum.
   histogram TEXT
 );
 CREATE INDEX IF NOT EXISTS points_series_ts ON points (series_id, ts);

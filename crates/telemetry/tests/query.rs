@@ -618,3 +618,58 @@ fn a_day_file_from_before_the_catalog_gets_its_tables() {
     let reader = Reader::open(dir.path(), yesterday.start(), Day::today().start()).unwrap();
     assert!(reader.attributes(Signal::Logs).unwrap().record.is_empty());
 }
+
+#[test]
+fn a_histogram_returns_the_bucket_counts_of_each_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let start = Day::today().start();
+    let histogram = |counts: [u64; 3], sum: f64| siner_telemetry::Histogram {
+        bounds: vec![0.1, 1.0],
+        counts: counts.to_vec(),
+        count: counts.iter().sum(),
+        sum: Some(sum),
+        min: None,
+        max: None,
+        cumulative: true,
+    };
+    let point = |offset: i64, histogram| Point {
+        ts: start + offset * SECOND,
+        value: 0.0,
+        histogram: Some(histogram),
+    };
+    let mut broken = histogram([1, 1, 1], 1.0);
+    broken.counts.pop();
+    let mut api = records("api", &json!({"service.name": "api"}));
+    api.metrics = vec![Metric {
+        name: "http.server.request.duration".into(),
+        kind: MetricKind::Histogram,
+        unit: "s".into(),
+        labels: object(&json!({"http.route": "/matches"})),
+        points: vec![
+            point(1, histogram([10, 2, 0], 3.0)),
+            point(30, histogram([14, 5, 1], 7.5)),
+            // Counts that do not fit the bounds are not stored.
+            point(40, broken),
+            point(70, histogram([20, 5, 1], 8.0)),
+        ],
+    }];
+    write(dir.path(), vec![api], &Indexes::default());
+    let reader = Reader::open(dir.path(), start, start + 600 * SECOND).unwrap();
+    let filter = MetricFilter {
+        name: "http.server.request.duration".into(),
+        query: parse("", Signal::Metrics).unwrap(),
+        step_ns: 60 * SECOND,
+    };
+    let metric = reader.metric(&filter, 10).unwrap();
+    let buckets = &metric.series[0].buckets;
+    assert_eq!(buckets[0].count, 2);
+    let first = buckets[0].histogram.as_ref().unwrap();
+    assert_eq!(first.bounds, [0.1, 1.0]);
+    assert_eq!(first.counts, [4, 3, 1]);
+    assert_eq!(first.count, 8);
+    assert_eq!(first.sum, Some(4.5));
+    assert!(first.p50.unwrap() > 0.0 && first.p50.unwrap() <= 0.1);
+    assert_eq!(first.p99, Some(1.0));
+    let second = buckets[1].histogram.as_ref().unwrap();
+    assert_eq!(second.counts, [6, 0, 0]);
+}

@@ -6,6 +6,7 @@
 
 mod catalog;
 mod day;
+mod histogram;
 mod indexes;
 pub mod query;
 mod reader;
@@ -14,6 +15,7 @@ mod writer;
 use serde_json::{Map, Value};
 
 pub use day::Day;
+pub use histogram::{Distribution, Histogram};
 pub use indexes::{IndexedKey, Indexes};
 pub use reader::{Reader, timed_out};
 pub use writer::{Config, Inbox, Sender, Writer, channel};
@@ -100,5 +102,5 @@ pub struct Point {
     pub ts: i64,
     pub value: f64,
     /// The buckets of a histogram point. `None` for a gauge or a sum.
-    pub histogram: Option<Value>,
+    pub histogram: Option<Histogram>,
 }

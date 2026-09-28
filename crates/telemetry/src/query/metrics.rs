@@ -10,7 +10,8 @@ use siner_query::{Query, Signal};
 
 use super::compile::{Aliases, compile};
 use super::{Filter, cut, time};
-use crate::Reader;
+use crate::histogram::Merger;
+use crate::{Distribution, Histogram, Reader};
 
 /// The service, kind, unit, labels, and resource attributes of a series.
 /// Series from different day files are one series when these match.
@@ -122,6 +123,11 @@ pub struct Bucket {
     pub avg: f64,
     /// The value of the newest point.
     pub last: f64,
+    /// The values a histogram recorded in the step: the counts of its
+    /// buckets and percentile estimates. `None` for a gauge or a sum, and for
+    /// the first step of a cumulative histogram, which only sets where the
+    /// counting starts.
+    pub histogram: Option<Distribution>,
 }
 
 impl Reader {
@@ -199,13 +205,14 @@ impl Reader {
         let mut where_ = Filter::range(self, "p.ts");
         where_.push("s.name = :name", ":name", filter.name.clone());
         compile(&filter.query, ALIASES, self.indexes(), "q", &mut where_)?;
-        let mut series: BTreeMap<Key, BTreeMap<i64, Bucket>> = BTreeMap::new();
+        let mut series: BTreeMap<Key, (BTreeMap<i64, Bucket>, Merger)> = BTreeMap::new();
         let mut truncated = false;
         self.scan(
             ["", " ORDER BY ts"],
             |day| {
                 format!(
-                    "SELECT r.service, s.kind, s.unit, s.labels, r.attributes, p.ts, p.value
+                    "SELECT r.service, s.kind, s.unit, s.labels, r.attributes, p.ts, p.value,
+                            p.histogram
                      FROM {day}.points p
                      JOIN {day}.series s ON s.id = p.series_id
                      JOIN {day}.resources r ON r.id = s.resource_id
@@ -224,53 +231,30 @@ impl Reader {
                 );
                 let ts: i64 = row.get(5)?;
                 let value: f64 = row.get(6)?;
+                let histogram: Option<String> = row.get(7)?;
                 let len = series.len();
-                let buckets = match series.entry(key) {
+                let (buckets, merger) = match series.entry(key) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(_) if len == limit => {
                         truncated = true;
                         return Ok(true);
                     }
-                    Entry::Vacant(entry) => entry.insert(BTreeMap::new()),
+                    Entry::Vacant(entry) => entry.insert((BTreeMap::new(), Merger::default())),
                 };
                 let start = ts.div_euclid(step) * step;
-                let bucket = buckets.entry(start).or_insert_with(|| Bucket {
-                    time: time(start),
-                    count: 0,
-                    min: value,
-                    max: value,
-                    avg: 0.0,
-                    last: value,
-                });
-                bucket.count += 1;
-                bucket.min = bucket.min.min(value);
-                bucket.max = bucket.max.max(value);
-                // The sum until the end, when it becomes the average.
-                bucket.avg += value;
-                bucket.last = value;
+                if let Some(histogram) = histogram {
+                    merger.push(start, serde_json::from_str::<Histogram>(&histogram)?);
+                }
+                buckets
+                    .entry(start)
+                    .or_insert_with(|| Bucket::new(start, value))
+                    .add(value);
                 Ok(true)
             },
         )?;
         let series = series
             .into_iter()
-            .map(|((service, kind, unit, labels, resource), buckets)| {
-                Ok(Series {
-                    service,
-                    kind,
-                    unit,
-                    labels: serde_json::from_str(&labels)?,
-                    resource: serde_json::from_str(&resource)?,
-                    buckets: buckets
-                        .into_values()
-                        .map(|mut bucket| {
-                            #[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
-                            let count = bucket.count as f64;
-                            bucket.avg /= count;
-                            bucket
-                        })
-                        .collect(),
-                })
-            })
+            .map(|(key, (buckets, merger))| finish(key, buckets, merger))
             .collect::<anyhow::Result<_>>()?;
         Ok(MetricSeries {
             name: filter.name.clone(),
@@ -279,6 +263,59 @@ impl Reader {
             truncated,
         })
     }
+}
+
+impl Bucket {
+    fn new(start: i64, value: f64) -> Self {
+        Self {
+            time: time(start),
+            count: 0,
+            min: value,
+            max: value,
+            avg: 0.0,
+            last: value,
+            histogram: None,
+        }
+    }
+
+    fn add(&mut self, value: f64) {
+        self.count += 1;
+        self.min = self.min.min(value);
+        self.max = self.max.max(value);
+        // The sum until the end, when it becomes the average.
+        self.avg += value;
+        self.last = value;
+    }
+}
+
+/// A series with the averages of its buckets and the distributions of its
+/// histogram steps.
+fn finish(
+    (service, kind, unit, labels, resource): Key,
+    mut buckets: BTreeMap<i64, Bucket>,
+    merger: Merger,
+) -> anyhow::Result<Series> {
+    for (start, distribution) in merger.finish() {
+        if let Some(bucket) = buckets.get_mut(&start) {
+            bucket.histogram = Some(distribution);
+        }
+    }
+    Ok(Series {
+        service,
+        kind,
+        unit,
+        labels: serde_json::from_str(&labels)?,
+        resource: serde_json::from_str(&resource)?,
+        buckets: buckets
+            .into_values()
+            .map(|mut bucket| {
+                #[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
+                let count = bucket.count as f64;
+                bucket.avg /= count;
+                bucket
+            })
+            .collect(),
+    })
 }
 
 #[cfg(test)]

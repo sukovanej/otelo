@@ -6,8 +6,8 @@ use std::io::{self, Read};
 
 use siner_query::Signal;
 use siner_telemetry::query::{
-    Attributes, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Spans, SqlResult,
-    Trace, TraceSpan, Traces,
+    Attributes, Bucket, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Spans,
+    SqlResult, Trace, TraceSpan, Traces,
 };
 
 use crate::api::{Completions, IndexList, SqlRequest};
@@ -422,6 +422,10 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
                 },
                 table::duration(metric.step_ns),
             );
+            if series.kind == "histogram" {
+                print_distributions(&series.buckets)?;
+                continue;
+            }
             let mut table = Table::new(&["TIME (UTC)", "COUNT", "MIN", "AVG", "MAX", "LAST"]);
             for bucket in &series.buckets {
                 table.row(vec![
@@ -443,6 +447,36 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
         "More series match; narrow them with the query, or raise --limit.",
     );
     Ok(())
+}
+
+/// The values a histogram recorded in each step: how many, their average,
+/// and the percentile estimates. A step without a distribution, such as the
+/// first of a cumulative histogram, shows dashes.
+fn print_distributions(buckets: &[Bucket]) -> io::Result<()> {
+    let mut table = Table::new(&["TIME (UTC)", "COUNT", "AVG", "P50", "P90", "P99"]);
+    let estimate = |value: Option<f64>| value.map_or_else(|| "-".into(), table::number);
+    for bucket in buckets {
+        let Some(d) = &bucket.histogram else {
+            let mut cells = vec!["-".to_owned(); 6];
+            cells[0] = table::time(bucket.time);
+            table.row(cells);
+            continue;
+        };
+        #[expect(clippy::cast_precision_loss, reason = "an average to print")]
+        let avg = d
+            .sum
+            .filter(|_| d.count > 0)
+            .map(|sum| sum / d.count as f64);
+        table.row(vec![
+            table::time(bucket.time),
+            d.count.to_string(),
+            estimate(avg),
+            estimate(d.p50),
+            estimate(d.p90),
+            estimate(d.p99),
+        ]);
+    }
+    table.print()
 }
 
 #[derive(clap::Args)]
