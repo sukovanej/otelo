@@ -1,5 +1,7 @@
 //! Starts and stops `siner serve` for the tests.
 
+#![allow(dead_code, reason = "each test file uses a part")]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, ChildStderr, Command, Stdio};
@@ -9,12 +11,21 @@ pub struct Daemon {
     child: Child,
     stderr: BufReader<ChildStderr>,
     pub addr: String,
+    pub otlp_http: String,
+    pub otlp_grpc: String,
 }
 
 /// Starts `siner serve` on a free port and waits for it to listen.
 pub fn start(data: &std::path::Path) -> Daemon {
     let mut child = Command::new(env!("CARGO_BIN_EXE_siner"))
-        .args(["serve", "--listen", "127.0.0.1:0", "--data"])
+        .args([
+            "serve",
+            "--listen",
+            "127.0.0.1:0",
+            "--otlp-http",
+            "127.0.0.1:0",
+        ])
+        .args(["--otlp-grpc", "127.0.0.1:0", "--data"])
         .arg(data)
         .stderr(Stdio::piped())
         .spawn()
@@ -32,15 +43,18 @@ pub fn start(data: &std::path::Path) -> Daemon {
             break;
         }
     }
-    let addr = line
-        .split_whitespace()
-        .find_map(|field| field.strip_prefix("addr="))
-        .unwrap()
-        .to_owned();
+    let field = |name: &str| {
+        line.split_whitespace()
+            .find_map(|field| field.strip_prefix(name)?.strip_prefix('='))
+            .unwrap()
+            .to_owned()
+    };
     Daemon {
+        addr: field("addr"),
+        otlp_http: field("otlp_http"),
+        otlp_grpc: field("otlp_grpc"),
         child,
         stderr,
-        addr,
     }
 }
 

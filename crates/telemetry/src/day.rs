@@ -62,6 +62,11 @@ impl fmt::Display for Day {
 }
 
 /// The current time in unix nanoseconds.
+///
+/// # Panics
+///
+/// After the year 2262, when the nanoseconds overflow an `i64`.
+#[must_use]
 pub fn now() -> i64 {
     i64::try_from(jiff::Timestamp::now().as_nanosecond()).expect("now fits an i64 until 2262")
 }

@@ -49,3 +49,28 @@ fn ctrl_c_stops_it() {
     let log = stop(start(dir.path()), "INT");
     assert!(log.contains("stopped"), "{log}");
 }
+
+#[test]
+fn receives_otlp_on_its_own_ports() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path());
+    std::net::TcpStream::connect(&daemon.otlp_grpc).unwrap();
+    let ts = siner_telemetry::now().to_string();
+    let body = format!(
+        r#"{{"resourceLogs": [{{"scopeLogs": [{{"logRecords": [
+            {{"timeUnixNano": "{ts}", "body": {{"stringValue": "cart is empty"}}}}
+        ]}}]}}]}}"#
+    );
+    let response = ureq::post(format!("http://{}/v1/logs", daemon.otlp_http))
+        .header("Content-Type", "application/json")
+        .send(body)
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    stop(daemon, "TERM");
+    let day = siner_telemetry::Day::today().file_name();
+    let conn = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
+    let body: String = conn
+        .query_row("SELECT body FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(body, "cart is empty");
+}

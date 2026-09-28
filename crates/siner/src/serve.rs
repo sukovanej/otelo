@@ -29,6 +29,14 @@ pub struct Args {
     #[arg(long, default_value = "127.0.0.1:7070")]
     listen: SocketAddr,
 
+    /// Address of the OTLP receiver over HTTP
+    #[arg(long, default_value = "127.0.0.1:4318")]
+    otlp_http: SocketAddr,
+
+    /// Address of the OTLP receiver over gRPC
+    #[arg(long, default_value = "127.0.0.1:4317")]
+    otlp_grpc: SocketAddr,
+
     /// Directory for the state and the telemetry, made when it is missing
     #[arg(long, default_value = DEFAULT_DATA_DIR)]
     data: PathBuf,
@@ -70,8 +78,8 @@ fn init_logging() {
         .init();
 }
 
-/// Runs the daemon until `shutdown` is cancelled. Every source stops on the
-/// same token, and the writer flushes after the sources end.
+/// Runs the daemon until `shutdown` is cancelled. Every server and source
+/// stops on the same token, and the writer flushes after the sources end.
 async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
@@ -86,18 +94,27 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
         state: Arc::new(state),
     };
     let writer = siner_telemetry::Writer::spawn(config, inbox)?;
-    let listener = TcpListener::bind(args.listen)
-        .await
-        .with_context(|| format!("listen on {}", args.listen))?;
+    let listener = bind(args.listen).await?;
+    let otlp_http = bind(args.otlp_http).await?;
+    let otlp_grpc = bind(args.otlp_grpc).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
+        otlp_http = %otlp_http.local_addr()?,
+        otlp_grpc = %otlp_grpc.local_addr()?,
         data = %args.data.display(),
         "listening"
     );
-    axum::serve(listener, router(api))
-        .with_graceful_shutdown(shutdown.cancelled_owned())
-        .await
-        .context("serve HTTP")?;
+    let api = async {
+        axum::serve(listener, router(api))
+            .with_graceful_shutdown(shutdown.clone().cancelled_owned())
+            .await
+            .context("serve HTTP")
+    };
+    tokio::try_join!(
+        api,
+        siner_otlp::serve_http(otlp_http, telemetry.clone(), shutdown.clone()),
+        siner_otlp::serve_grpc(otlp_grpc, telemetry.clone(), shutdown.clone()),
+    )?;
     // The writer ends once the last sender is gone.
     drop(telemetry);
     tokio::task::spawn_blocking(|| writer.join())
@@ -105,6 +122,12 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
         .context("wait for the telemetry writer")??;
     tracing::info!("stopped");
     Ok(())
+}
+
+async fn bind(addr: SocketAddr) -> anyhow::Result<TcpListener> {
+    TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("listen on {addr}"))
 }
 
 fn router(api: Api) -> Router {

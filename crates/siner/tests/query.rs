@@ -59,7 +59,7 @@ fn write_telemetry(data: &Path) {
         metrics: Vec::new(),
     };
     let (sender, inbox) = channel(1);
-    sender.send(vec![records]);
+    assert!(sender.send(vec![records]));
     let writer = Writer::spawn(Config::new(data.join("telemetry")), inbox).unwrap();
     drop(sender);
     writer.join().unwrap();

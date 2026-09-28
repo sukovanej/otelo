@@ -63,7 +63,7 @@ fn records(service: &str, attributes: &Value) -> Records {
 fn write(dir: &Path, batch: Batch, indexes: &Indexes) {
     let (sender, inbox) = channel(1);
     if !batch.is_empty() {
-        sender.send(batch);
+        assert!(sender.send(batch));
     }
     let mut config = Config::new(dir.to_owned());
     config.indexes = indexes.clone();
