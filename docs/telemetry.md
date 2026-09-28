@@ -106,6 +106,8 @@ The CLI and the UI use the same HTTP query API. Every CLI command prints a table
 - A histogram point keeps its buckets in `points.histogram` as JSON: `bounds`, `counts` (one more than the bounds), `count`, `sum`, `min`, `max`, and `cumulative`. The writer skips a point whose counts do not fit its bounds. `siner metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point of a range only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
 - `siner sql` runs a read-only query against the day files.
 
+The logs page of the UI takes the same query, with completion from `/api/complete`, and a range of a preset or a custom `since` and `until`. It shows lines, or the message templates with their counts and samples. A line opens to its attributes and its resource, and a button next to a value adds `key = value` or `key != value` to the query. A template adds its fixed words to the query as `body ~ "…"` to show its lines. The page says which compared attributes have no index and can add one. Live mode reloads every 5 seconds. The query, the range, and the view live in the URL, so a link opens the same page.
+
 ## Query language
 
 Every list takes one query, parsed by the `siner-query` crate. The daemon spec is at `/api/openapi.json`.
