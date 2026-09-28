@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "siner-daemon",
+      "runtimeExecutable": "mise",
+      "runtimeArgs": ["run", "serve:dev"],
+      "port": 7070
+    },
+    {
+      "name": "siner-ui",
+      "runtimeExecutable": "mise",
+      "runtimeArgs": ["run", "web:dev"],
+      "port": 5173
+    }
+  ]
+}

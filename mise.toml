@@ -31,6 +31,10 @@ depends = ["web:install"]
 dir = "packages/app"
 run = "pnpm exec vite"
 
+[tasks."serve:dev"]
+description = "Run the daemon on :7070 with its data in target/dev, where it sends its own logs and traces"
+run = "cargo run -q -- serve --data target/dev"
+
 [tasks."web:fmt"]
 description = "Format the web packages with oxfmt"
 depends = ["web:install"]
