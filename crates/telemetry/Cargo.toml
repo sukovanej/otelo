@@ -7,11 +7,13 @@ publish.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-jiff = { workspace = true }
-rusqlite = { workspace = true }
+jiff = { workspace = true, features = ["serde"] }
+rusqlite = { workspace = true, features = ["hooks", "limits"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
+utoipa = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

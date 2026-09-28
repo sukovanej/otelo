@@ -1,5 +1,6 @@
 use std::fmt::Write;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, ensure};
 use rusqlite::Connection;
@@ -23,6 +24,8 @@ const TABLES: [&str; 5] = ["resources", "logs", "spans", "series", "points"];
 pub struct Reader {
     conn: Connection,
     days: Vec<Day>,
+    since: i64,
+    until: i64,
 }
 
 impl Reader {
@@ -70,7 +73,25 @@ impl Reader {
             conn.execute_batch(&view)?;
         }
         conn.pragma_update(None, "query_only", true)?;
-        Ok(Self { conn, days })
+        Ok(Self {
+            conn,
+            days,
+            since,
+            until,
+        })
+    }
+
+    /// Stops every later statement once `limit` has passed since this call.
+    /// A stopped statement fails with an error that [`timed_out`] tells apart.
+    ///
+    /// # Errors
+    ///
+    /// When the handler cannot be set.
+    pub fn set_time_limit(&self, limit: Duration) -> anyhow::Result<()> {
+        let deadline = Instant::now() + limit;
+        self.conn
+            .progress_handler(1000, Some(move || Instant::now() > deadline))?;
+        Ok(())
     }
 
     /// The days whose files are attached, oldest first.
@@ -79,8 +100,31 @@ impl Reader {
         &self.days
     }
 
+    /// The start of the range, in unix nanoseconds.
+    #[must_use]
+    pub const fn since(&self) -> i64 {
+        self.since
+    }
+
+    /// The end of the range, in unix nanoseconds, not included.
+    #[must_use]
+    pub const fn until(&self) -> i64 {
+        self.until
+    }
+
     #[must_use]
     pub const fn conn(&self) -> &Connection {
         &self.conn
     }
+}
+
+/// Whether `error` comes from a statement that ran past the time limit.
+#[must_use]
+pub fn timed_out(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<rusqlite::Error>()
+            .and_then(rusqlite::Error::sqlite_error_code)
+            == Some(rusqlite::ErrorCode::OperationInterrupted)
+    })
 }

@@ -9,6 +9,8 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
+use crate::api::{self, Api};
+
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
 #[cfg(not(target_os = "macos"))]
@@ -65,10 +67,12 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
     let (telemetry, inbox) = siner_telemetry::channel(TELEMETRY_CAPACITY);
-    let writer = siner_telemetry::Writer::spawn(
-        siner_telemetry::Config::new(args.data.join("telemetry")),
-        inbox,
-    )?;
+    let config = siner_telemetry::Config::new(args.data.join("telemetry"));
+    let api = Api {
+        dir: config.dir.clone(),
+        retention_days: config.retention_days,
+    };
+    let writer = siner_telemetry::Writer::spawn(config, inbox)?;
     let listener = TcpListener::bind(args.listen)
         .await
         .with_context(|| format!("listen on {}", args.listen))?;
@@ -77,7 +81,7 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
         data = %args.data.display(),
         "listening"
     );
-    axum::serve(listener, router())
+    axum::serve(listener, router(api))
         .with_graceful_shutdown(shutdown.cancelled_owned())
         .await
         .context("serve HTTP")?;
@@ -90,8 +94,10 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn router() -> Router {
-    Router::new().route("/health", get(|| async { "ok" }))
+fn router(api: Api) -> Router {
+    Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .merge(api::router(api))
 }
 
 /// Resolves on Ctrl-C, and on SIGTERM where there is one.

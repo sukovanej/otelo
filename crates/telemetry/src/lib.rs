@@ -5,13 +5,14 @@
 //! Every timestamp is in unix nanoseconds.
 
 mod day;
+pub mod query;
 mod reader;
 mod writer;
 
 use serde_json::{Map, Value};
 
 pub use day::Day;
-pub use reader::Reader;
+pub use reader::{Reader, timed_out};
 pub use writer::{Config, Inbox, Sender, Writer, channel};
 
 /// Everything one source sends in one go. A full channel drops all of it.

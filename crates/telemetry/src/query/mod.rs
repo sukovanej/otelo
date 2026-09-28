@@ -1,0 +1,223 @@
+//! The queries behind the HTTP API: logs, traces, metrics, and SQL over the
+//! day files a [`Reader`] attached.
+//!
+//! A query that filters reads each day file on its own and joins the parts
+//! with `UNION ALL`, because FTS5 and the ids only work within one file. Every
+//! query takes a row limit and says when it cut the result.
+
+mod logs;
+mod metrics;
+mod sql;
+mod template;
+mod traces;
+
+use anyhow::{Context, bail};
+use jiff::Timestamp;
+use rusqlite::types::Value;
+use rusqlite::{Row, ToSql};
+
+pub use logs::{GROUP_SCAN_LIMIT, LogFilter, LogGroup, LogGroups, LogLine, Logs};
+pub use metrics::{
+    Bucket, MAX_BUCKETS, MetricFilter, MetricList, MetricSeries, Series, SeriesInfo, default_step,
+};
+pub use sql::SqlResult;
+pub use template::template;
+pub use traces::{Trace, TraceFilter, TraceSpan, TraceSummary, Traces};
+
+use crate::{Day, Reader};
+
+/// The OpenTelemetry status code of a failed span.
+pub const STATUS_ERROR: i32 = 2;
+
+/// The name of an OpenTelemetry severity number.
+#[must_use]
+pub const fn level(severity: i32) -> &'static str {
+    match severity {
+        1..=4 => "TRACE",
+        5..=8 => "DEBUG",
+        9..=12 => "INFO",
+        13..=16 => "WARN",
+        17..=20 => "ERROR",
+        21..=24 => "FATAL",
+        _ => "UNSPECIFIED",
+    }
+}
+
+/// The lowest severity number of a level name, or the number itself.
+///
+/// # Errors
+///
+/// When `text` is neither a level name nor a number.
+pub fn parse_severity(text: &str) -> anyhow::Result<i32> {
+    Ok(match text.to_ascii_lowercase().as_str() {
+        "trace" => 1,
+        "debug" => 5,
+        "info" => 9,
+        "warn" | "warning" => 13,
+        "error" => 17,
+        "fatal" => 21,
+        number => number.parse().with_context(|| {
+            format!(
+                "{text:?} is not a severity: trace, debug, info, warn, error, fatal, or a number"
+            )
+        })?,
+    })
+}
+
+/// A trace ID from its 32 hex digits.
+///
+/// # Errors
+///
+/// When `text` is not 32 hex digits.
+pub fn parse_trace_id(text: &str) -> anyhow::Result<[u8; 16]> {
+    let mut id = [0; 16];
+    if text.len() != 32 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        bail!("{text:?} is not a trace ID of 32 hex digits");
+    }
+    for (i, byte) in id.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[2 * i..2 * i + 2], 16)?;
+    }
+    Ok(id)
+}
+
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+pub(crate) fn time(ts: i64) -> Timestamp {
+    Timestamp::from_nanosecond(i128::from(ts)).expect("an i64 of nanoseconds is a valid timestamp")
+}
+
+/// The conditions of a `WHERE` clause and the named parameters they use. Each
+/// day's part of a query uses the same clause with the same table aliases.
+pub(crate) struct Filter {
+    clauses: Vec<String>,
+    params: Vec<(String, Value)>,
+}
+
+impl Filter {
+    pub(crate) const fn new() -> Self {
+        Self {
+            clauses: Vec::new(),
+            params: Vec::new(),
+        }
+    }
+
+    /// Keeps the rows whose `ts` column falls in the range of the reader.
+    pub(crate) fn range(reader: &Reader, ts: &str) -> Self {
+        let mut filter = Self::new();
+        filter.push(&format!("{ts} >= :since"), ":since", reader.since());
+        filter.push(&format!("{ts} < :until"), ":until", reader.until());
+        filter
+    }
+
+    /// Adds a parameter that a clause of its own does not read.
+    pub(crate) fn param(&mut self, name: &str, value: impl Into<Value>) {
+        self.params.push((name.to_owned(), value.into()));
+    }
+
+    /// Adds `clause`, which reads the parameter `name`.
+    pub(crate) fn push(&mut self, clause: &str, name: &str, value: impl Into<Value>) {
+        self.clauses.push(clause.to_owned());
+        self.params.push((name.to_owned(), value.into()));
+    }
+
+    /// Adds a clause without a parameter. `$day` in it stands for the
+    /// quoted schema name of the day.
+    pub(crate) fn push_clause(&mut self, clause: String) {
+        self.clauses.push(clause);
+    }
+
+    /// The conditions for the day whose quoted schema name is `day`.
+    pub(crate) fn sql(&self, day: &str) -> String {
+        if self.clauses.is_empty() {
+            return "TRUE".into();
+        }
+        self.clauses.join(" AND ").replace("$day", day)
+    }
+
+    fn params(&self) -> Vec<(&str, &dyn ToSql)> {
+        self.params
+            .iter()
+            .map(|(name, value)| (name.as_str(), value as &dyn ToSql))
+            .collect()
+    }
+}
+
+impl Reader {
+    /// Runs one `SELECT` per attached day, joined with `UNION ALL` between
+    /// `head` and `tail`, and calls `each` on every row until it returns
+    /// `false`. `part` writes the `SELECT` of one day from its quoted schema
+    /// name.
+    pub(crate) fn scan(
+        &self,
+        [head, tail]: [&str; 2],
+        part: impl Fn(&str) -> String,
+        filter: &Filter,
+        mut each: impl FnMut(&Row) -> anyhow::Result<bool>,
+    ) -> anyhow::Result<()> {
+        if self.days().is_empty() {
+            return Ok(());
+        }
+        let sql = format!("{head}{}{tail}", union(self.days(), part));
+        let mut stmt = self.conn().prepare(&sql)?;
+        let mut rows = stmt.query(filter.params().as_slice())?;
+        while let Some(row) = rows.next()? {
+            if !each(row)? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Like [`Reader::scan`], and collects the rows `map` makes.
+    pub(crate) fn collect<T>(
+        &self,
+        around: [&str; 2],
+        part: impl Fn(&str) -> String,
+        filter: &Filter,
+        mut map: impl FnMut(&Row) -> anyhow::Result<T>,
+    ) -> anyhow::Result<Vec<T>> {
+        let mut out = Vec::new();
+        self.scan(around, part, filter, |row| {
+            out.push(map(row)?);
+            Ok(true)
+        })?;
+        Ok(out)
+    }
+}
+
+/// The `SELECT` of each day, joined with `UNION ALL`.
+pub(crate) fn union(days: &[Day], part: impl Fn(&str) -> String) -> String {
+    days.iter()
+        .map(|day| part(&format!("\"{day}\"")))
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ")
+}
+
+/// Cuts `rows` to `limit` and says whether it cut any.
+pub(crate) fn cut<T>(rows: &mut Vec<T>, limit: usize) -> bool {
+    let truncated = rows.len() > limit;
+    rows.truncate(limit);
+    truncated
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_trace_ids_and_severities() {
+        let id = parse_trace_id("4bf92f3577b34da6a3ce929d0e0e4736").unwrap();
+        assert_eq!(hex(&id), "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert!(parse_trace_id("4bf9").is_err());
+        assert_eq!(parse_severity("WARN").unwrap(), 13);
+        assert_eq!(parse_severity("17").unwrap(), 17);
+        assert!(parse_severity("loud").is_err());
+        assert_eq!(level(18), "ERROR");
+    }
+}
