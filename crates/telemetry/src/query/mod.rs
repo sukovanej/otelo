@@ -1,5 +1,5 @@
-//! The queries behind the HTTP API: logs, traces, metrics, and SQL over the
-//! day files a [`Reader`] attached.
+//! The queries behind the HTTP API: logs, traces, metrics, services, and SQL
+//! over the day files a [`Reader`] attached.
 //!
 //! A query that filters reads each day file on its own and joins the parts
 //! with `UNION ALL`, because FTS5 and the ids only work within one file. Every
@@ -9,6 +9,7 @@ mod catalog;
 mod compile;
 mod logs;
 mod metrics;
+mod services;
 mod sql;
 mod template;
 mod traces;
@@ -23,6 +24,11 @@ pub use compile::InvalidQuery;
 pub use logs::{GROUP_SCAN_LIMIT, LogGroup, LogGroups, LogLine, Logs};
 pub use metrics::{
     Bucket, MAX_BUCKETS, MetricFilter, MetricList, MetricSeries, Series, SeriesInfo, default_step,
+    step_for,
+};
+pub use services::{
+    Latency, Operation, OperationDetail, RequestBucket, Requests, Service, ServiceBucket,
+    ServiceStats, ServiceSummary, Services,
 };
 pub use sql::SqlResult;
 pub use template::template;

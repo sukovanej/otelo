@@ -15,14 +15,24 @@ export type Distribution = Schemas["Distribution"];
 export type ErrorBody = Schemas["ErrorBody"];
 export type IndexBody = Schemas["IndexBody"];
 export type IndexList = Schemas["IndexList"];
+export type Latency = Schemas["Latency"];
 export type LogGroup = Schemas["LogGroup"];
 export type LogGroups = Schemas["LogGroups"];
 export type LogLine = Schemas["LogLine"];
 export type Logs = Schemas["Logs"];
 export type MetricList = Schemas["MetricList"];
 export type MetricSeries = Schemas["MetricSeries"];
+export type Operation = Schemas["Operation"];
+export type OperationDetail = Schemas["OperationDetail"];
+export type RequestBucket = Schemas["RequestBucket"];
+export type Requests = Schemas["Requests"];
 export type Series = Schemas["Series"];
 export type SeriesInfo = Schemas["SeriesInfo"];
+export type Service = Schemas["Service"];
+export type ServiceBucket = Schemas["ServiceBucket"];
+export type ServiceStats = Schemas["ServiceStats"];
+export type ServiceSummary = Schemas["ServiceSummary"];
+export type Services = Schemas["Services"];
 export type Signal = Schemas["Signal"];
 export type SpanEvent = Schemas["SpanEvent"];
 export type Spans = Schemas["Spans"];
@@ -114,6 +124,32 @@ export const getTrace = (
   request<Ok<"/api/traces/{trace_id}", "get">>(
     "GET",
     `/api/traces/${encodeURIComponent(id)}${search(query)}`,
+    signal,
+  );
+
+export const getServices = (query: QueryOf<"/api/services">, signal?: AbortSignal) =>
+  request<Ok<"/api/services", "get">>("GET", `/api/services${search(query)}`, signal);
+
+export const getService = (
+  name: string,
+  query: QueryOf<"/api/services/{name}">,
+  signal?: AbortSignal,
+) =>
+  request<Ok<"/api/services/{name}", "get">>(
+    "GET",
+    `/api/services/${encodeURIComponent(name)}${search(query)}`,
+    signal,
+  );
+
+/** One operation of a service: its span name and kind. */
+export const getOperation = (
+  service: string,
+  query: QueryOf<"/api/services/{name}/operation">,
+  signal?: AbortSignal,
+) =>
+  request<Ok<"/api/services/{name}/operation", "get">>(
+    "GET",
+    `/api/services/${encodeURIComponent(service)}/operation${search(query)}`,
     signal,
   );
 

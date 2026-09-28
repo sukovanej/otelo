@@ -1,7 +1,8 @@
 import { A } from "@solidjs/router";
-import { createSignal, onMount } from "solid-js";
+import { createSignal } from "solid-js";
 
 import { link } from "../classes";
+import Modal from "../Modal";
 import { CloseButton } from "../Panel";
 import TraceView, { closePanel, createTraceState, type TraceTab, tracePath } from "./TraceView";
 
@@ -24,28 +25,8 @@ export default function TraceModal(props: {
   const state = createTraceState(tab, setTab, span, setSpan);
   const page = () => tracePath(props.id, state);
 
-  let dialog!: HTMLDialogElement;
-  onMount(() => dialog.showModal());
-
   return (
-    <dialog
-      ref={dialog}
-      aria-label="Trace"
-      class="m-auto h-[88dvh] max-h-none w-[min(94vw,96rem)] max-w-none overflow-hidden rounded-lg border border-line bg-surface p-0 text-ink shadow-popup backdrop:bg-[rgb(0_0_0/0.45)] open:flex open:flex-col"
-      // The dialog gets a click on its backdrop; its content covers the rest.
-      onClick={(e) => {
-        if (e.target === dialog) props.onClose();
-      }}
-      on:keydown={(e) => {
-        // The keys stay in the modal, away from the page under it.
-        if (e.key === "/") e.stopPropagation();
-        if (e.key !== "Escape") return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (!closePanel(state)) props.onClose();
-      }}
-      onClose={() => props.onClose()}
-    >
+    <Modal label="Trace" onClose={props.onClose} onEscape={() => closePanel(state)}>
       <TraceView
         id={props.id}
         state={state}
@@ -60,6 +41,6 @@ export default function TraceModal(props: {
           </>
         }
       />
-    </dialog>
+    </Modal>
   );
 }

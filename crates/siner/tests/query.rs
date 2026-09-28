@@ -153,6 +153,30 @@ fn the_cli_reads_what_the_api_serves() {
     let (metrics, _) = json(&addr, &["metrics", "--since", "2d"]);
     assert!(metrics["series"].is_array());
 
+    // Both spans have the server kind, so both are requests.
+    let (services, _) = json(&addr, &["services"]);
+    let api = &services["services"][0];
+    assert_eq!(api["service"], "api");
+    assert_eq!(api["stats"]["requests"]["count"], 2);
+    assert_eq!(api["stats"]["requests"]["errors"], 1);
+    assert_eq!(api["stats"]["error_logs"], 1);
+    assert!(api.get("buckets").is_none(), "{api}");
+    let (services, _) = json(&addr, &["services", "--buckets", "--step", "10m"]);
+    assert_eq!(services["step_ns"], 600 * SECOND);
+    assert!(
+        !services["services"][0]["buckets"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let (service, _) = json(&addr, &["service", "api"]);
+    assert_eq!(service["operations"][0]["name"], "GET /languages");
+    assert_eq!(service["operations"][1]["requests"]["errors"], 1);
+    let table = siner(&addr, &["service", "api", "--table"]);
+    let table = String::from_utf8(table.stdout).unwrap();
+    assert!(table.contains("GET /languages"), "{table}");
+
     let spec = get(&addr, "/api/openapi.json");
     for path in [
         "/api/logs",
@@ -162,6 +186,9 @@ fn the_cli_reads_what_the_api_serves() {
         "/api/traces/{trace_id}",
         "/api/metrics",
         "/api/metrics/{name}",
+        "/api/services",
+        "/api/services/{name}",
+        "/api/services/{name}/operation",
         "/api/sql",
         "/api/attributes",
         "/api/complete",

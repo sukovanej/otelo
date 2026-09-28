@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { databaseId, language, nameRest, spanMeaning } from "../src/semantics";
+import { databaseId, language, nameRest, routeParts, spanMeaning } from "../src/semantics";
 
 test("an HTTP server span has its method, route, and status", () => {
   expect(
@@ -69,4 +69,31 @@ test("databaseId names a system the way the database icons do", () => {
   expect(databaseId("postgresql")).toBe("postgresql");
   expect(databaseId("microsoft.sql_server")).toBe("mssql");
   expect(databaseId("oracle.db")).toBe("oracle");
+});
+
+const parts = (route: string) => routeParts(route).map((p) => `${p.kind}:${p.text}`);
+
+test("routeParts marks the slashes and the parameters of a route", () => {
+  expect(parts("/users/{id}/orders")).toEqual([
+    "slash:/",
+    "text:users",
+    "slash:/",
+    "param:{id}",
+    "slash:/",
+    "text:orders",
+  ]);
+  expect(parts("/a/:name/<file>/*")).toEqual([
+    "slash:/",
+    "text:a",
+    "slash:/",
+    "param::name",
+    "slash:/",
+    "param:<file>",
+    "slash:/",
+    "param:*",
+  ]);
+  // A colon inside a segment is text.
+  expect(parts("/at/10:30")).toEqual(["slash:/", "text:at", "slash:/", "text:10:30"]);
+  expect(parts("/users:batch")).toEqual(["slash:/", "text:users:batch"]);
+  expect(parts("")).toEqual([]);
 });

@@ -7,6 +7,10 @@
   --color-*: initial;
   --color-surface: #ffffff;
   --color-subtle: #f6f7f9;
+  /* The page under the bars, and the frame of a chart, a stat, or a table
+     on it: lighter than the page in light mode, darker in dark mode. */
+  --color-page: #fafbfc;
+  --color-panel: #ffffff;
   --color-hover: #eef1f5;
   --color-active: #e3e9f3;
   --color-line: #dde1e7;
@@ -54,6 +58,25 @@
   }
 }
 
+/* The colors of chart series, which charts set in inline styles that
+   Tailwind does not see, so they are emitted whether a class uses them or
+   not. `series-1` to `series-8` tell series apart in this order, which keeps
+   neighbors apart for color-blind eyes too. `p50`, `p95`, and `p99` are one
+   hue, darker for the higher percentile. */
+@theme static {
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+  --color-series-5: #e87ba4;
+  --color-series-6: #008300;
+  --color-series-7: #4a3aa7;
+  --color-series-8: #e34948;
+  --color-p50: #6da7ec;
+  --color-p95: #3987e5;
+  --color-p99: #1c5cab;
+}
+
 @layer base {
   :root {
     color-scheme: light dark;
@@ -67,6 +90,8 @@
     :root {
       --color-surface: #15171b;
       --color-subtle: #1c1f24;
+      --color-page: #15171b;
+      --color-panel: #121418;
       --color-hover: #23272e;
       --color-active: #2a3140;
       --color-line: #2e333b;
@@ -87,6 +112,17 @@
       --color-error-soft: #3a1d20;
       --color-hint: #332b15;
       --color-bar: #253552;
+      --color-series-1: #3987e5;
+      --color-series-2: #d95926;
+      --color-series-3: #199e70;
+      --color-series-4: #c98500;
+      --color-series-5: #d55181;
+      --color-series-6: #008300;
+      --color-series-7: #9085e9;
+      --color-series-8: #e66767;
+      --color-p50: #256abf;
+      --color-p95: #5598e7;
+      --color-p99: #9ec5f4;
       --raised: 0 1px 0 var(--color-line), 0 8px 20px -10px rgb(0 0 0 / 0.6);
       --floating: -18px 0 44px -18px rgb(0 0 0 / 0.75);
     }

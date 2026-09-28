@@ -15,6 +15,15 @@ pub struct Daemon {
     pub otlp_grpc: String,
 }
 
+/// Kills a daemon that a failed test left running. Its stdout is the test's,
+/// so a live daemon would keep open a pipe that reads the test's output.
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 /// Starts `siner serve` on a free port and waits for it to listen. It keeps
 /// its own telemetry to stderr, so a test finds only what it wrote.
 pub fn start(data: &std::path::Path) -> Daemon {

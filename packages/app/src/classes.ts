@@ -14,28 +14,11 @@ export const times = "mb-2 text-xs text-muted";
 export const heading =
   "mt-2.5 mb-1 font-sans text-2xs font-semibold tracking-[0.04em] text-muted uppercase";
 
-/** The columns of each list, for its rows and its header alike: log lines,
- * log templates, traces, spans, and the spans of one trace. */
-export const lineColumns = "grid-cols-[var(--time-width)_6.5ch_minmax(6ch,16ch)_1fr]";
-export const groupColumns = "grid-cols-[16ch_6.5ch_1fr_minmax(8ch,20ch)_7ch]";
-export const traceColumns = "grid-cols-[var(--time-width)_minmax(6ch,16ch)_1fr_6ch_20ch]";
-export const spanColumns = "grid-cols-[var(--time-width)_minmax(6ch,16ch)_1fr_10ch_20ch]";
-export const waterfallColumns = "grid-cols-[minmax(28ch,2fr)_minmax(6ch,13ch)_9ch_3fr]";
-
-/** The names of the columns, which stay at the top while the rows scroll.
- * The header keeps the font of the rows, because the columns are sized in
- * `ch` of its font, and sets the labels smaller. */
-export const header =
-  "sticky top-0 z-10 grid items-baseline gap-3 border-b border-line bg-surface px-3 py-2 font-mono text-sm text-muted *:font-sans *:text-2xs *:font-semibold *:tracking-[0.04em] *:uppercase";
-
-/** A row that opens its panel, closed and open. */
-export const row = "grid cursor-pointer items-baseline gap-3 px-3";
-export const closedRow = "hover:bg-hover";
-export const openRow = "bg-active shadow-[inset_3px_0_0_var(--color-accent)]";
-
-/** A closed row of an error or a fatal line, or of a failed span or trace,
- * tinted so it stands out. */
-export const closedErrorRow = "bg-error/5 hover:bg-error/10";
+/** The part of a page under its bar, which scrolls. The gap under the bar
+ * is a margin of the first part in it, not a padding: a sticky header, such
+ * as the one of a table, sticks inside the padding of what scrolls, so a
+ * padding would leave rows showing above it. */
+export const pageContent = "overflow-y-auto px-4 pb-8 [&>:first-child]:mt-5";
 
 /** A link in the text of a view. */
 export const link = "text-accent hover:underline";

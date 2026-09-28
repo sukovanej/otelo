@@ -1,9 +1,17 @@
-import { Match, Show, Switch } from "solid-js";
+import { For, Match, Show, Switch } from "solid-js";
 
 import { databaseName, DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@siner/icons";
 import { Badge, Level, type Tone, Tooltip } from "@siner/ui";
 
-import { databaseId, type DbSpan, type HttpSpan, nameRest, spanMeaning } from "../semantics";
+import {
+  databaseId,
+  type DbSpan,
+  type HttpSpan,
+  nameRest,
+  routeParts,
+  type SpanMeaning,
+  spanMeaning,
+} from "../semantics";
 
 const methodTones: Record<string, Tone> = {
   GET: "info",
@@ -21,6 +29,25 @@ const statusTone = (status: number): Tone => {
   return "muted";
 };
 
+const routeClasses = {
+  slash: "text-muted",
+  param: "text-placeholder",
+  text: "",
+} as const;
+
+/** A route or a path: faint slashes between the segments, and each
+ * parameter, such as `{id}`, in the color of a value that goes there. It
+ * truncates in a narrow cell. */
+function Route(props: { route: string }) {
+  return (
+    <span class="truncate" title={props.route}>
+      <For each={routeParts(props.route)}>
+        {(part) => <span class={routeClasses[part.kind]}>{part.text}</span>}
+      </For>
+    </span>
+  );
+}
+
 function Http(props: { meaning: HttpSpan; rest: string }) {
   return (
     <>
@@ -30,7 +57,7 @@ function Http(props: { meaning: HttpSpan; rest: string }) {
       <Show when={props.meaning.method}>
         {(method) => <Badge tone={methodTones[method()] ?? "muted"}>{method()}</Badge>}
       </Show>
-      <Show when={props.meaning.route}>{(route) => <span class="truncate">{route()}</span>}</Show>
+      <Show when={props.meaning.route}>{(route) => <Route route={route()} />}</Show>
       <Show when={props.meaning.status}>
         {(status) => <Badge tone={statusTone(status())}>{status()}</Badge>}
       </Show>
@@ -83,8 +110,14 @@ export default function SpanTitle(props: {
   name: string;
   attributes: Record<string, unknown>;
   error: boolean;
+  /** The badge of the status code of an HTTP request, unless this is false,
+   * such as for a name that stands for many requests. */
+  status?: boolean;
 }) {
-  const meaning = () => spanMeaning(props.attributes);
+  const meaning = (): SpanMeaning => {
+    const m = spanMeaning(props.attributes);
+    return m.type === "http" && props.status === false ? { ...m, status: undefined } : m;
+  };
   const rest = () => nameRest(props.name, meaning());
   const http = () => {
     const m = meaning();

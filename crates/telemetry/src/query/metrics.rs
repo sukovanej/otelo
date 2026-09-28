@@ -50,10 +50,17 @@ const STEPS: [i64; 15] = [
 /// into 120 buckets at most.
 #[must_use]
 pub fn default_step(since: i64, until: i64) -> i64 {
+    step_for(since, until, 120)
+}
+
+/// The smallest round step that splits the range from `since` to `until`
+/// into `buckets` buckets at most.
+#[must_use]
+pub fn step_for(since: i64, until: i64, buckets: i64) -> i64 {
     let range = until.saturating_sub(since);
     STEPS
         .into_iter()
-        .find(|step| range / step <= 120)
+        .find(|step| range / step <= buckets)
         .unwrap_or(STEPS[STEPS.len() - 1])
 }
 

@@ -6,6 +6,7 @@
     "@siner/api": "workspace:*",
     "@siner/icons": "workspace:*",
     "@siner/ui": "workspace:*",
+    "@siner/viz": "workspace:*",
     "@solidjs/router": "catalog:",
     "solid-js": "catalog:"
   },

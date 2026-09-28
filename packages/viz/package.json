@@ -1,0 +1,22 @@
+{
+  "name": "@siner/viz",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@siner/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "solid-js": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "solid-js": "catalog:",
+    "tailwindcss": "catalog:"
+  }
+}
