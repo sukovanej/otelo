@@ -41,12 +41,14 @@ pub struct LogLine {
     /// The name of the severity: TRACE, DEBUG, INFO, WARN, ERROR, or FATAL.
     pub level: String,
     pub body: String,
+    #[schema(required = true)]
     pub trace_id: Option<String>,
+    #[schema(required = true)]
     pub span_id: Option<String>,
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub attributes: Map<String, Value>,
     /// The attributes of the resource that sent the line.
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub resource: Map<String, Value>,
     /// `otlp`, or the service log source that read the line.
     pub source: String,

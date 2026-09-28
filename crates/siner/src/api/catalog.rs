@@ -1,19 +1,55 @@
 //! The endpoints that describe what a query can read: the attributes, the
 //! completion of a query, and the indexed attributes.
 
+use std::fmt;
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::{Deserialize, Serialize};
+use siner_query::{Signal, SuggestionKind};
 use siner_telemetry::IndexedKey;
 use siner_telemetry::query::{Attributes, ReaderCatalog};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Api, ApiError, ApiResult, ErrorBody, WHOLE_RETENTION, parse_signal};
 
+/// The kind of record a query reads, as the API names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[schema(as = Signal)]
+pub enum SignalName {
+    Logs,
+    Spans,
+    Metrics,
+}
+
+impl From<Signal> for SignalName {
+    fn from(signal: Signal) -> Self {
+        match signal {
+            Signal::Logs => Self::Logs,
+            Signal::Spans => Self::Spans,
+            Signal::Metrics => Self::Metrics,
+        }
+    }
+}
+
+impl fmt::Display for SignalName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let signal = match self {
+            Self::Logs => Signal::Logs,
+            Self::Spans => Signal::Spans,
+            Self::Metrics => Signal::Metrics,
+        };
+        f.write_str(signal.as_str())
+    }
+}
+
+/// A parameter of a signal stays a string, so a wrong one gets the JSON of
+/// an error from `parse_signal`; the spec still names the values it takes.
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(super) struct SignalParams {
-    /// `logs`, `spans`, or `metrics`.
+    #[param(value_type = SignalName)]
     signal: String,
 }
 
@@ -42,7 +78,7 @@ pub(super) async fn attributes(
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(super) struct CompleteParams {
-    /// `logs`, `spans`, or `metrics`.
+    #[param(value_type = SignalName)]
     signal: String,
     /// The query as typed so far.
     q: Option<String>,
@@ -63,11 +99,44 @@ pub struct SuggestionBody {
     pub text: String,
     pub start: usize,
     pub end: usize,
-    /// `field`, `operator`, `value`, or `keyword`.
-    pub kind: String,
+    pub kind: CompletionKind,
     /// The type of a field and how many records have it, or how many records
     /// have a value.
+    #[schema(required = true)]
     pub detail: Option<String>,
+}
+
+/// What the text of a suggestion is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CompletionKind {
+    Field,
+    Operator,
+    Value,
+    Keyword,
+}
+
+impl From<SuggestionKind> for CompletionKind {
+    fn from(kind: SuggestionKind) -> Self {
+        match kind {
+            SuggestionKind::Field => Self::Field,
+            SuggestionKind::Operator => Self::Operator,
+            SuggestionKind::Value => Self::Value,
+            SuggestionKind::Keyword => Self::Keyword,
+        }
+    }
+}
+
+impl fmt::Display for CompletionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self {
+            Self::Field => SuggestionKind::Field,
+            Self::Operator => SuggestionKind::Operator,
+            Self::Value => SuggestionKind::Value,
+            Self::Keyword => SuggestionKind::Keyword,
+        };
+        f.write_str(kind.as_str())
+    }
 }
 
 /// Suggests the fields, operators, values, and keywords that can go at the
@@ -98,7 +167,7 @@ pub(super) async fn complete(
                 start: chars(s.replace.start),
                 end: chars(s.replace.end),
                 text: s.text,
-                kind: s.kind.as_str().into(),
+                kind: s.kind.into(),
                 detail: s.detail,
             })
             .collect();
@@ -116,7 +185,7 @@ pub struct IndexList {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexBody {
     /// `logs` or `spans`.
-    pub signal: String,
+    pub signal: SignalName,
     pub key: String,
 }
 
@@ -128,7 +197,7 @@ impl Api {
                 .get()
                 .into_iter()
                 .map(|key| IndexBody {
-                    signal: key.signal.as_str().into(),
+                    signal: key.signal.into(),
                     key: key.key,
                 })
                 .collect(),
@@ -178,7 +247,7 @@ pub(super) async fn list_indexes(State(api): State<Api>) -> Json<IndexList> {
     put,
     path = "/api/indexes/{signal}/{key}",
     params(
-        ("signal" = String, Path, description = "`logs` or `spans`"),
+        ("signal" = SignalName, Path, description = "`logs` or `spans`"),
         ("key" = String, Path, description = "The attribute key, such as `user.id`"),
     ),
     responses(
@@ -198,7 +267,7 @@ pub(super) async fn add_index(
     delete,
     path = "/api/indexes/{signal}/{key}",
     params(
-        ("signal" = String, Path, description = "`logs` or `spans`"),
+        ("signal" = SignalName, Path, description = "`logs` or `spans`"),
         ("key" = String, Path, description = "The attribute key, such as `user.id`"),
     ),
     responses(

@@ -4,7 +4,7 @@
 
 import { useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
-import type { ListParams } from "./api";
+import type { ListQuery } from "@siner/api";
 import { createFetch, type Fetched } from "./fetch";
 import { addTerm } from "./query";
 
@@ -61,7 +61,7 @@ export interface List<V extends string, R extends ListResult<V>> {
 export function createList<V extends string, R extends ListResult<V>>(options: {
   views: readonly [V, ...V[]];
   page: Record<V, number>;
-  fetch: (key: ListParams & { view: V }, signal: AbortSignal) => Promise<R>;
+  fetch: (key: ListQuery & { view: V }, signal: AbortSignal) => Promise<R>;
 }): List<V, R> {
   const [params, setParams] = useSearchParams<{
     q?: string;
@@ -88,7 +88,7 @@ export function createList<V extends string, R extends ListResult<V>>(options: {
   const limit = () => (more().base === base() ? more().limit : options.page[view()]);
 
   const key = createMemo(
-    () => ({ view: view(), q: q(), since: since(), until: until(), limit: limit() }),
+    () => ({ view: view(), q: q().trim(), since: since(), until: until(), limit: limit() }),
     undefined,
     { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
   );

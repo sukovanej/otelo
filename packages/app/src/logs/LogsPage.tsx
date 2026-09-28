@@ -1,5 +1,5 @@
 import { createSignal, Match, Show, Switch } from "solid-js";
-import { getLogGroups, getLogs, type LogGroups, type LogLine, type Logs } from "../api";
+import { getLogGroups, getLogs, type LogGroups, type LogLine, type Logs } from "@siner/api";
 import { count, createList, usePageKeys } from "../list";
 import { Empty, ListContent, QueryBar } from "../ListFrame";
 import LogGroupList from "./LogGroupList";

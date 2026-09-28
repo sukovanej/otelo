@@ -2,8 +2,6 @@
 // literals, and edits of a query as typed. The rules follow `Display for
 // Field` and `quote` in crates/query/src/lib.rs.
 
-import type { Json } from "./api";
-
 /** The built-in fields of every signal. An attribute with one of these names
  * is written as `attr.<key>`. */
 const BUILTINS = new Set([
@@ -63,7 +61,7 @@ export function quote(text: string): string {
 
 /** The literal of an attribute value, or `undefined` for arrays, objects,
  * and null, which a comparison cannot match. */
-export function literal(value: Json): string | undefined {
+export function literal(value: unknown): string | undefined {
   switch (typeof value) {
     case "string":
       return quote(value);

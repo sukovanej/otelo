@@ -1,6 +1,6 @@
 import { Button, Callout, Checkbox, QueryInput, RangePicker, Tabs } from "@siner/ui";
 import { createSignal, For, type JSX, Show } from "solid-js";
-import { addIndex, complete, type Signal } from "./api";
+import { addIndex, complete, type Signal } from "@siner/api";
 import { LIVE_MS, type List, type ListResult } from "./list";
 import { formatTime } from "./time";
 

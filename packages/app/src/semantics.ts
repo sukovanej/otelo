@@ -2,15 +2,13 @@
 // attributes and its resource: an HTTP request, a database call, and the
 // language of the service. The older names of each attribute count too.
 
-import type { Json } from "./api";
-
 export interface HttpSpan {
   type: "http";
   /** Such as `GET`, upper case. */
-  method: string | undefined;
+  method?: string;
   /** The route, or the path when there is no route. */
-  route: string | undefined;
-  status: number | undefined;
+  route?: string;
+  status?: number;
 }
 
 export interface DbSpan {
@@ -18,14 +16,14 @@ export interface DbSpan {
   /** Such as `postgresql` or `sqlite`. */
   system: string;
   /** Such as `SELECT`, upper case. */
-  operation: string | undefined;
+  operation?: string;
   /** The query, with its whitespace folded. */
-  query: string | undefined;
+  query?: string;
 }
 
 export type SpanMeaning = HttpSpan | DbSpan | { type: "other" };
 
-type Attributes = Record<string, Json>;
+type Attributes = Record<string, unknown>;
 
 /** The first of `keys` that holds a string or a number, as a string. */
 function text(attributes: Attributes, ...keys: string[]): string | undefined {

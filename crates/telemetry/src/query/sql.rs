@@ -26,7 +26,7 @@ const PRAGMAS: [&str; 6] = [
 pub struct SqlResult {
     pub columns: Vec<String>,
     /// Each row has one value per column. A blob is its hex digits.
-    #[schema(value_type = Vec<Vec<Object>>)]
+    #[schema(value_type = Vec<Vec<serde_json::Value>>)]
     pub rows: Vec<Vec<Value>>,
     /// The query returned more rows than the limit let through.
     pub truncated: bool,

@@ -1,6 +1,6 @@
 import { Button, Level } from "@siner/ui";
 import { createSignal, For, Show } from "solid-js";
-import type { LogGroup } from "../api";
+import type { LogGroup } from "@siner/api";
 import Measure from "../Measure";
 import { templateTerm } from "../query";
 import { toggleRow } from "../row";

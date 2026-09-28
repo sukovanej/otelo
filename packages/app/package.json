@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@siner/api": "workspace:*",
     "@siner/icons": "workspace:*",
     "@siner/ui": "workspace:*",
     "@solidjs/router": "catalog:",

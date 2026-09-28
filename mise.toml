@@ -35,6 +35,14 @@ run = "pnpm exec vite"
 description = "Run the daemon on :7070 with its data in target/dev, where it sends its own logs and traces"
 run = "cargo run -q -- serve --data target/dev"
 
+[tasks."api:generate"]
+description = "Write the OpenAPI spec of the daemon to packages/api, and the TypeScript types of it"
+depends = ["web:install"]
+run = [
+  "cargo run -q -- openapi > packages/api/openapi.json",
+  "node packages/api/generate.ts",
+]
+
 [tasks."web:fmt"]
 description = "Format the web packages with oxfmt"
 depends = ["web:install"]

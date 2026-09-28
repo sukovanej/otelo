@@ -72,10 +72,10 @@ pub struct SeriesInfo {
     pub kind: String,
     pub unit: String,
     pub service: String,
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub labels: Map<String, Value>,
     /// The attributes of the resource that sends the series.
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub resource: Map<String, Value>,
 }
 
@@ -103,9 +103,9 @@ pub struct Series {
     pub service: String,
     pub kind: String,
     pub unit: String,
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub labels: Map<String, Value>,
-    #[schema(value_type = Object)]
+    #[schema(value_type = HashMap<String, serde_json::Value>)]
     pub resource: Map<String, Value>,
     /// The buckets that have points, oldest first.
     pub buckets: Vec<Bucket>,
@@ -127,6 +127,7 @@ pub struct Bucket {
     /// buckets and percentile estimates. `None` for a gauge or a sum, and for
     /// the first step of a cumulative histogram, which only sets where the
     /// counting starts.
+    #[schema(required = true)]
     pub histogram: Option<Distribution>,
 }
 

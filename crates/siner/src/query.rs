@@ -647,7 +647,7 @@ pub fn complete(args: &CompleteArgs) -> anyhow::Result<()> {
         for suggestion in &completions.suggestions {
             table.row(vec![
                 suggestion.text.clone(),
-                suggestion.kind.clone(),
+                suggestion.kind.to_string(),
                 suggestion.detail.clone().unwrap_or_default(),
             ]);
         }
@@ -702,7 +702,7 @@ pub fn index(args: &IndexArgs) -> anyhow::Result<()> {
     if args.client.wants_table() {
         let mut table = Table::new(&["SIGNAL", "KEY"]);
         for index in &list.indexes {
-            table.row(vec![index.signal.clone(), index.key.clone()]);
+            table.row(vec![index.signal.to_string(), index.key.clone()]);
         }
         table.print()?;
     } else {
