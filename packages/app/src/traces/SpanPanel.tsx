@@ -2,9 +2,9 @@ import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 
 import type { TraceSpan } from "@siner/api";
+import { Value } from "@siner/viz";
 
 import { heading, link, times } from "../classes";
-import Duration from "../Duration";
 import FieldTable, { Fields } from "../FieldTable";
 import Panel from "../Panel";
 import { plainClick } from "../row";
@@ -60,7 +60,7 @@ export default function SpanPanel(props: {
           />
         </div>
         <div class={times}>
-          <Duration nanos={props.span.duration_ns} /> from{" "}
+          <Value value={props.span.duration_ns} unit="duration" /> from{" "}
           {formatDateTime(parseTime(props.span.time))} local · {props.span.time}
         </div>
         <FieldTable sections={spanSections(props.span)} noun="spans" onFilter={props.onFilter} />
@@ -72,7 +72,7 @@ export default function SpanPanel(props: {
                 <div class="mb-2">
                   <div>
                     <span class="text-muted">
-                      +<Duration nanos={nanosAfter(props.span.time, event.ts)} />
+                      +<Value value={nanosAfter(props.span.time, event.ts)} unit="duration" />
                     </span>{" "}
                     {event.name}
                   </div>

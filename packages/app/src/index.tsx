@@ -3,6 +3,8 @@ import { render } from "solid-js/web";
 
 import App from "./App";
 import LogsPage from "./logs/LogsPage";
+import ServicePage from "./services/ServicePage";
+import ServicesPage from "./services/ServicesPage";
 import TracePage from "./traces/TracePage";
 import TracesPage from "./traces/TracesPage";
 
@@ -19,7 +21,9 @@ if (!root) throw new Error("index.html has no #root");
 render(
   () => (
     <Router root={App}>
-      <Route path="/" component={() => <Navigate href="/logs" />} />
+      <Route path="/" component={() => <Navigate href="/services" />} />
+      <Route path="/services" component={ServicesPage} />
+      <Route path="/services/:name" component={ServicePage} />
       <Route path="/logs" component={LogsPage} />
       <Route path="/traces" component={TracesPage} />
       <Route path="/traces/:id" component={TracePage} />

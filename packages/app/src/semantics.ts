@@ -80,6 +80,30 @@ export function spanMeaning(attributes: Attributes): SpanMeaning {
   return { type: "other" };
 }
 
+/** A piece of a route: a slash, a parameter such as `{id}`, `:id`, `<id>`,
+ * or `*`, or the fixed text between them. */
+export interface RoutePart {
+  text: string;
+  kind: "slash" | "param" | "text";
+}
+
+// A `:name` parameter starts a segment; a colon inside one, such as in
+// `10:30` or `users:batch`, is text.
+const ROUTE_TOKEN = /(\/)|(\{[^}/]*\}|(?<=\/):[A-Za-z_]\w*|<[^>/]*>|\*)/g;
+
+/** The pieces of a route or a path, such as `/users/{id}`, in order. */
+export function routeParts(route: string): RoutePart[] {
+  const parts: RoutePart[] = [];
+  let at = 0;
+  for (const match of route.matchAll(ROUTE_TOKEN)) {
+    if (match.index > at) parts.push({ text: route.slice(at, match.index), kind: "text" });
+    parts.push({ text: match[0], kind: match[1] ? "slash" : "param" });
+    at = match.index + match[0].length;
+  }
+  if (at < route.length) parts.push({ text: route.slice(at), kind: "text" });
+  return parts;
+}
+
 /** The part of a span name that a badge of its meaning does not already
  * say: `SELECT carts` is `carts` after a `SELECT` badge, and `GET /users`
  * is nothing after a badge of `GET` and `/users`. */

@@ -13,6 +13,9 @@ export default function App(props: RouteSectionProps) {
           siner
         </A>
         <nav class="flex gap-4">
+          <A href="/services" activeClass="text-ink" inactiveClass="text-muted hover:text-ink">
+            Services
+          </A>
           <A href="/logs" activeClass="text-ink" inactiveClass="text-muted hover:text-ink">
             Logs
           </A>
@@ -21,7 +24,7 @@ export default function App(props: RouteSectionProps) {
           </A>
         </nav>
       </header>
-      <main class="flex min-h-0 flex-1 flex-col">{props.children}</main>
+      <main class="flex min-h-0 flex-1 flex-col bg-page">{props.children}</main>
     </div>
   );
 }

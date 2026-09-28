@@ -2,13 +2,15 @@ import { type Accessor, createMemo, createSignal, type JSX, Match, Show, Switch 
 
 import { getTrace, type LogLine, search } from "@siner/api";
 import { Button, Callout, Tabs } from "@siner/ui";
+import { Panel, Value } from "@siner/viz";
 
-import Duration from "../Duration";
+import { pageContent } from "../classes";
 import { createFetch } from "../fetch";
 import { count } from "../list";
 import { Empty } from "../ListFrame";
 import LinePanel from "../logs/LinePanel";
 import LogLines, { lineKey } from "../logs/LogLines";
+import PageBar from "../PageBar";
 import Service from "../Service";
 import { formatDateTime, formatTime, parseTime } from "../time";
 import SpanPanel from "./SpanPanel";
@@ -100,107 +102,109 @@ export default function TraceView(props: {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
-      <div class="relative z-20 shrink-0 bg-surface px-4 pt-3.5 shadow-(--raised)">
-        <div class="flex items-center gap-3">
-          {props.lead}
-          <h1 class="min-w-0 font-mono text-md font-semibold">
-            <Show when={root()} fallback="Trace">
+      <PageBar
+        fetched={fetched}
+        top={
+          <div class="flex items-center gap-3">
+            {props.lead}
+            <h1 class="min-w-0 font-mono text-md font-semibold">
+              <Show when={root()} fallback="Trace">
+                {(span) => (
+                  <SpanTitle
+                    name={span().name}
+                    attributes={span().attributes}
+                    error={errors() > 0}
+                  />
+                )}
+              </Show>
+            </h1>
+            <Show when={root()}>
               {(span) => (
-                <SpanTitle name={span().name} attributes={span().attributes} error={errors() > 0} />
+                <span class="min-w-0 font-mono text-muted">
+                  <Service name={span().service} resource={span().resource} />
+                </span>
               )}
             </Show>
-          </h1>
-          <Show when={root()}>
-            {(span) => (
-              <span class="min-w-0 font-mono text-muted">
-                <Service name={span().service} resource={span().resource} />
-              </span>
-            )}
-          </Show>
-          <span class="flex-1" />
-          <span class="font-mono text-xs text-muted" title="Trace ID">
-            {props.id}
-          </span>
-          {props.actions}
-        </div>
-
-        <div class="flex items-center gap-3 pt-3 pb-2.5 text-muted">
-          <Tabs
-            label="View"
-            options={[
-              { value: "spans", label: `Spans${trace() ? ` (${trace()?.spans.length})` : ""}` },
-              { value: "logs", label: `Logs${trace() ? ` (${trace()?.logs.length})` : ""}` },
-            ]}
-            value={state().tab()}
-            onChange={(tab) => state().setTab(tab)}
-          />
-          <Show when={root()}>
-            {(span) => (
-              <span>
-                <Duration nanos={traceLength(rows())} /> from{" "}
-                <time datetime={span().time} title={formatDateTime(parseTime(span().time))}>
-                  {formatTime(parseTime(span().time))}
-                </time>
-                <Show when={errors() > 0}>, {count(errors(), "failed span")}</Show>
-              </span>
-            )}
-          </Show>
-          <span class="flex-1" />
-          <Show when={fetched.loading()}>
-            <span aria-live="polite">Loading…</span>
-          </Show>
-          <Show when={fetched.updated()}>
-            {(updated) => <span>Updated {formatTime(updated())}</span>}
-          </Show>
+            <span class="flex-1" />
+            <span class="font-mono text-xs text-muted" title="Trace ID">
+              {props.id}
+            </span>
+            {props.actions}
+          </div>
+        }
+        end={
           <Button disabled={fetched.loading()} onClick={() => fetched.reload()}>
             Reload
           </Button>
-        </div>
-      </div>
+        }
+      >
+        <Tabs
+          label="View"
+          options={[
+            { value: "spans", label: `Spans${trace() ? ` (${trace()?.spans.length})` : ""}` },
+            { value: "logs", label: `Logs${trace() ? ` (${trace()?.logs.length})` : ""}` },
+          ]}
+          value={state().tab()}
+          onChange={(tab) => state().setTab(tab)}
+        />
+        <Show when={root()}>
+          {(span) => (
+            <span>
+              <Value value={traceLength(rows())} unit="duration" /> from{" "}
+              <time datetime={span().time} title={formatDateTime(parseTime(span().time))}>
+                {formatTime(parseTime(span().time))}
+              </time>
+              <Show when={errors() > 0}>, {count(errors(), "failed span")}</Show>
+            </span>
+          )}
+        </Show>
+      </PageBar>
 
       <div class="flex min-h-0 flex-1">
-        <div class="min-w-0 flex-1 overflow-y-auto px-4 pb-8">
+        <div class={`min-w-0 flex-1 bg-page ${pageContent}`}>
           <Show when={fetched.error()}>
             {(error) => (
-              <div class="mt-2">
+              <div class="mb-3">
                 <Callout tone="error">{error()}</Callout>
               </div>
             )}
           </Show>
           <Show when={trace()?.truncated}>
-            <div class="mt-2">
+            <div class="mb-3">
               <Callout tone="hint">The trace has more spans or logs than the page shows.</Callout>
             </div>
           </Show>
 
           <Show when={trace()}>
             {(shown) => (
-              <Switch>
-                <Match when={state().tab() === "spans"}>
-                  <Show
-                    when={rows().length > 0}
-                    fallback={<Empty>The retention has logs of this trace, but no spans.</Empty>}
-                  >
-                    <Waterfall
-                      rows={rows()}
-                      selected={state().span()}
-                      onSelect={(span) => state().setSpan(span?.span_id)}
-                    />
-                  </Show>
-                </Match>
-                <Match when={state().tab() === "logs"}>
-                  <Show
-                    when={shown().logs.length > 0}
-                    fallback={<Empty>No log line carries the ID of this trace.</Empty>}
-                  >
-                    <LogLines
-                      lines={shown().logs}
-                      selected={selectedLineKey()}
-                      onSelect={(line) => state().setLine(line)}
-                    />
-                  </Show>
-                </Match>
-              </Switch>
+              <Panel flush>
+                <Switch>
+                  <Match when={state().tab() === "spans"}>
+                    <Show
+                      when={rows().length > 0}
+                      fallback={<Empty>The retention has logs of this trace, but no spans.</Empty>}
+                    >
+                      <Waterfall
+                        rows={rows()}
+                        selected={state().span()}
+                        onSelect={(span) => state().setSpan(span?.span_id)}
+                      />
+                    </Show>
+                  </Match>
+                  <Match when={state().tab() === "logs"}>
+                    <Show
+                      when={shown().logs.length > 0}
+                      fallback={<Empty>No log line carries the ID of this trace.</Empty>}
+                    >
+                      <LogLines
+                        lines={shown().logs}
+                        selected={selectedLineKey()}
+                        onSelect={(line) => state().setLine(line)}
+                      />
+                    </Show>
+                  </Match>
+                </Switch>
+              </Panel>
             )}
           </Show>
         </div>

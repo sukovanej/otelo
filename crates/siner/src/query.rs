@@ -1,13 +1,14 @@
 //! The CLI commands that read telemetry: `logs`, `spans`, `traces`, `trace`,
-//! `metrics`, `metric`, `sql`, `attributes`, `complete`, and `index`.
+//! `metrics`, `metric`, `services`, `service`, `sql`, `attributes`,
+//! `complete`, and `index`.
 
 use std::collections::HashMap;
 use std::io::{self, Read};
 
 use siner_query::Signal;
 use siner_telemetry::query::{
-    Attributes, Bucket, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Spans,
-    SqlResult, Trace, TraceSpan, Traces,
+    Attributes, Bucket, GROUP_SCAN_LIMIT, LogGroups, Logs, MetricList, MetricSeries, Requests,
+    Service, ServiceBucket, Services, Spans, SqlResult, Trace, TraceSpan, Traces,
 };
 
 use crate::api::{Completions, IndexList, SqlRequest};
@@ -505,6 +506,201 @@ fn print_distributions(buckets: &[Bucket]) -> io::Result<()> {
             estimate(d.p90),
             estimate(d.p99),
         ]);
+    }
+    table.print()
+}
+
+#[derive(clap::Args)]
+pub struct ServicesArgs {
+    /// Print the requests and the logs of each step too
+    #[arg(long)]
+    buckets: bool,
+
+    /// The length of a step, such as 1m [default: one that makes 60 steps at
+    /// most]
+    #[arg(long)]
+    step: Option<String>,
+
+    #[command(flatten)]
+    range: Range,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+/// Runs `siner services`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
+pub fn services(args: &ServicesArgs) -> anyhow::Result<()> {
+    let mut params = args.range.params();
+    params.push(("step", args.step.clone()));
+    let list: Services = args.client.get("/api/services", &params)?;
+    if args.client.wants_table() {
+        let mut table = Table::new(&[
+            "SERVICE",
+            "REQUESTS",
+            "ERRORS",
+            "P50",
+            "P95",
+            "P99",
+            "LOGS",
+            "ERROR LOGS",
+        ]);
+        for service in &list.services {
+            let mut cells = vec![service.service.clone()];
+            cells.extend(request_cells(&service.stats.requests));
+            cells.extend([
+                service.stats.logs.to_string(),
+                service.stats.error_logs.to_string(),
+            ]);
+            table.row(cells);
+        }
+        table.print()?;
+        if args.buckets {
+            for service in &list.services {
+                println!();
+                println!(
+                    "{} every {}",
+                    service.service,
+                    table::duration(list.step_ns)
+                );
+                print_steps(&service.buckets)?;
+            }
+        }
+    } else if args.buckets {
+        print_json(&list)?;
+    } else {
+        let mut value = serde_json::to_value(&list)?;
+        for service in value["services"].as_array_mut().into_iter().flatten() {
+            service.as_object_mut().map(|s| s.remove("buckets"));
+        }
+        print_json(&value)?;
+    }
+    note_cut(
+        list.truncated,
+        "More services sent telemetry; raise --limit.",
+    );
+    Ok(())
+}
+
+#[derive(clap::Args)]
+pub struct ServiceArgs {
+    /// The name of the service
+    name: String,
+
+    /// Print the requests and the logs of each step too
+    #[arg(long)]
+    buckets: bool,
+
+    /// The length of a step, such as 1m [default: one that makes 120 steps at
+    /// most]
+    #[arg(long)]
+    step: Option<String>,
+
+    #[command(flatten)]
+    range: Range,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+/// Runs `siner service`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
+pub fn service(args: &ServiceArgs) -> anyhow::Result<()> {
+    let mut params = args.range.params();
+    params.push(("step", args.step.clone()));
+    let service: Service = args.client.get(
+        &format!("/api/services/{}", path_segment(&args.name)),
+        &params,
+    )?;
+    if args.client.wants_table() {
+        let requests = &service.stats.requests;
+        println!(
+            "{}: {} requests, {} errors, {} logs, {} error logs",
+            service.service,
+            requests.count,
+            requests.errors,
+            service.stats.logs,
+            service.stats.error_logs,
+        );
+        if !service.operations.is_empty() {
+            println!();
+            let mut table = Table::new(&[
+                "OPERATION",
+                "REQUESTS",
+                "ERRORS",
+                "P50",
+                "P95",
+                "P99",
+                "TOTAL",
+            ]);
+            for operation in &service.operations {
+                let mut cells = vec![operation.name.clone()];
+                cells.extend(request_cells(&operation.requests));
+                cells.push(table::duration(operation.requests.total_ns));
+                table.row(cells);
+            }
+            table.print()?;
+        }
+        if args.buckets {
+            println!();
+            println!("every {}", table::duration(service.step_ns));
+            print_steps(&service.buckets)?;
+        }
+    } else if args.buckets {
+        print_json(&service)?;
+    } else {
+        let mut value = serde_json::to_value(&service)?;
+        value.as_object_mut().map(|s| s.remove("buckets"));
+        print_json(&value)?;
+    }
+    note_cut(
+        service.truncated,
+        "The service has more operations; raise --limit.",
+    );
+    Ok(())
+}
+
+/// The count, the errors, and the percentiles of requests, with dashes for
+/// the percentiles when there are none.
+fn request_cells(requests: &Requests) -> [String; 5] {
+    let percentile = |pick: fn(&siner_telemetry::query::Latency) -> i64| {
+        requests
+            .latency
+            .as_ref()
+            .map_or_else(|| "-".into(), |latency| table::duration(pick(latency)))
+    };
+    [
+        requests.count.to_string(),
+        requests.errors.to_string(),
+        percentile(|l| l.p50),
+        percentile(|l| l.p95),
+        percentile(|l| l.p99),
+    ]
+}
+
+/// The requests and the logs of each step.
+fn print_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
+    let mut table = Table::new(&[
+        "TIME (UTC)",
+        "REQUESTS",
+        "ERRORS",
+        "P50",
+        "P95",
+        "P99",
+        "LOGS",
+        "ERROR LOGS",
+    ]);
+    for bucket in buckets {
+        let mut cells = vec![table::time(bucket.time)];
+        cells.extend(request_cells(&bucket.requests));
+        cells.extend([bucket.logs.to_string(), bucket.error_logs.to_string()]);
+        table.row(cells);
     }
     table.print()
 }

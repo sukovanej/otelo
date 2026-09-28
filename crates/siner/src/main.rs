@@ -24,6 +24,10 @@ enum Command {
     Metrics(query::MetricsArgs),
     /// Print the series of one metric in buckets
     Metric(query::MetricArgs),
+    /// List the services with their requests, errors, latency, and logs
+    Services(query::ServicesArgs),
+    /// Print the requests, errors, latency, and logs of one service, by operation
+    Service(query::ServiceArgs),
     /// Run a read-only SQL query over the telemetry
     Sql(query::SqlArgs),
     /// List the attributes a query can read, with their types
@@ -45,6 +49,8 @@ fn main() -> anyhow::Result<()> {
         Command::Trace(args) => query::trace(&args),
         Command::Metrics(args) => query::metrics(&args),
         Command::Metric(args) => query::metric(&args),
+        Command::Services(args) => query::services(&args),
+        Command::Service(args) => query::service(&args),
         Command::Sql(args) => query::sql(&args),
         Command::Attributes(args) => query::attributes(&args),
         Command::Complete(args) => query::complete(&args),

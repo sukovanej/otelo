@@ -2,10 +2,8 @@ import { createSignal, For, Show } from "solid-js";
 
 import type { TraceSpan } from "@siner/api";
 import { ChevronIcon } from "@siner/icons";
+import { type Column, Table, Value } from "@siner/viz";
 
-import { closedErrorRow, closedRow, header, openRow, row, waterfallColumns } from "../classes";
-import Duration from "../Duration";
-import { toggleRow } from "../row";
 import Service from "../Service";
 import SpanTitle from "./SpanTitle";
 import { traceLength, type TreeRow, visibleRows } from "./tree";
@@ -46,84 +44,105 @@ export default function Waterfall(props: {
       return next;
     });
 
-  return (
-    <div class="font-mono text-sm">
-      <div class={`${header} ${waterfallColumns}`} aria-hidden="true">
-        <span>Span</span>
-        <span>Service</span>
-        <span class="text-right">Duration</span>
-        <span class="@container relative h-[1lh]">
+  const columns: Column<TreeRow>[] = [
+    {
+      id: "span",
+      label: "Span",
+      width: "minmax(28ch,2fr)",
+      value: (item) => item.span.name,
+      cell: (item) => {
+        const isCollapsed = () => collapsed().has(item.span.span_id);
+        return (
+          <span
+            class="flex min-w-0 items-baseline gap-1.5"
+            style={{ "padding-left": `${item.depth * 1.5}ch` }}
+          >
+            <Show when={item.children > 0} fallback={<span class="w-[2ch] shrink-0" />}>
+              <button
+                type="button"
+                class="flex w-[2ch] shrink-0 cursor-pointer justify-center self-center text-muted hover:text-ink"
+                title={isCollapsed() ? `Show ${item.children} under it` : "Fold"}
+                aria-label={isCollapsed() ? "Unfold" : "Fold"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fold(item.span.span_id);
+                }}
+              >
+                <ChevronIcon size={13} direction={isCollapsed() ? "right" : "down"} />
+              </button>
+            </Show>
+            <SpanTitle
+              name={item.span.name}
+              attributes={item.span.attributes}
+              error={item.span.error}
+            />
+            <Show when={isCollapsed()}>
+              <span class="shrink-0 text-muted">+{item.children}</span>
+            </Show>
+          </span>
+        );
+      },
+    },
+    {
+      id: "service",
+      label: "Service",
+      width: "minmax(6ch,13ch)",
+      value: (item) => item.span.service,
+      tone: () => "muted",
+      cell: (item) => <Service name={item.span.service} resource={item.span.resource} />,
+    },
+    {
+      id: "duration",
+      label: "Duration",
+      unit: "duration",
+      value: (item) => item.span.duration_ns,
+    },
+    {
+      id: "timeline",
+      label: "Timeline",
+      width: "3fr",
+      value: (item) => item.offset,
+      header: () => (
+        <span class="@container relative h-[1lh] w-full">
           <For each={TICKS}>
             {(tick) => (
               <span
-                class={`absolute pl-1 normal-case ${tick.class}`}
+                class={`absolute pl-1 font-mono normal-case ${tick.class}`}
                 style={{ left: share(tick.share * length()) }}
               >
-                <Duration nanos={Math.round(tick.share * length())} />
+                <Value value={Math.round(tick.share * length())} unit="duration" />
               </span>
             )}
           </For>
         </span>
-      </div>
-      <div role="tree">
-        <For each={visibleRows(props.rows, collapsed())}>
-          {(item) => {
-            const span = item.span;
-            const isSelected = () => props.selected === span.span_id;
-            const isCollapsed = () => collapsed().has(span.span_id);
-            return (
-              <div
-                class={`${row} ${waterfallColumns} border-b border-line py-1 ${
-                  isSelected() ? openRow : span.error ? closedErrorRow : closedRow
-                }`}
-                aria-level={item.depth + 1}
-                aria-selected={isSelected()}
-                aria-expanded={item.children > 0 ? !isCollapsed() : undefined}
-                {...toggleRow(() => props.onSelect(isSelected() ? undefined : span))}
-                role="treeitem"
-              >
-                <span
-                  class="flex min-w-0 items-baseline gap-1.5"
-                  style={{ "padding-left": `${item.depth * 1.5}ch` }}
-                >
-                  <Show when={item.children > 0} fallback={<span class="w-[2ch] shrink-0" />}>
-                    <button
-                      type="button"
-                      class="flex w-[2ch] shrink-0 cursor-pointer justify-center self-center text-muted hover:text-ink"
-                      title={isCollapsed() ? `Show ${item.children} under it` : "Fold"}
-                      aria-label={isCollapsed() ? "Unfold" : "Fold"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        fold(span.span_id);
-                      }}
-                    >
-                      <ChevronIcon size={13} direction={isCollapsed() ? "right" : "down"} />
-                    </button>
-                  </Show>
-                  <SpanTitle name={span.name} attributes={span.attributes} error={span.error} />
-                  <Show when={isCollapsed()}>
-                    <span class="shrink-0 text-muted">+{item.children}</span>
-                  </Show>
-                </span>
-                <span class="text-muted">
-                  <Service name={span.service} resource={span.resource} />
-                </span>
-                <span class="text-right">
-                  <Duration nanos={span.duration_ns} align />
-                </span>
-                <span class="relative h-[1lh] self-center" style={grid}>
-                  <span
-                    class={`absolute inset-y-1 min-w-0.5 rounded-sm ${
-                      span.error ? "bg-error" : "bg-accent"
-                    }`}
-                    style={{ left: share(item.offset), width: share(span.duration_ns) }}
-                  />
-                </span>
-              </div>
-            );
-          }}
-        </For>
-      </div>
-    </div>
+      ),
+      cell: (item) => (
+        <span class="relative h-[1lh] w-full self-center" style={grid}>
+          <span
+            class={`absolute inset-y-1 min-w-0.5 rounded-sm ${
+              item.span.error ? "bg-error" : "bg-accent"
+            }`}
+            style={{ left: share(item.offset), width: share(item.span.duration_ns) }}
+          />
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <Table
+      label="Spans of the trace"
+      rows={visibleRows(props.rows, collapsed())}
+      columns={columns}
+      level={(item) => ({
+        depth: item.depth,
+        expanded: item.children > 0 ? !collapsed().has(item.span.span_id) : undefined,
+      })}
+      selected={(item) => props.selected === item.span.span_id}
+      tone={(item) => (item.span.error ? "error" : undefined)}
+      onRowClick={(item) =>
+        props.onSelect(props.selected === item.span.span_id ? undefined : item.span)
+      }
+    />
   );
 }

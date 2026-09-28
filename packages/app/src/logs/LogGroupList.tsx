@@ -2,21 +2,10 @@ import { createSignal, For, Show } from "solid-js";
 
 import type { LogGroup } from "@siner/api";
 import { Button, Level } from "@siner/ui";
+import { type Column, Table } from "@siner/viz";
 
-import {
-  body,
-  closedRow,
-  detail,
-  groupColumns,
-  header,
-  heading,
-  openRow,
-  row,
-  times,
-} from "../classes";
-import Measure from "../Measure";
+import { body, detail, heading, times } from "../classes";
 import { templateTerm } from "../query";
-import { toggleRow } from "../row";
 import { ago, formatTime, parseTime } from "../time";
 
 /** A template with its placeholders marked, so the fixed words stand out. */
@@ -38,70 +27,89 @@ export default function LogGroupList(props: {
   onShowLines: (term: string) => void;
 }) {
   const [open, setOpen] = createSignal<string>();
-  const most = () => Math.max(1, ...props.groups.map((group) => group.count));
+  const columns: Column<LogGroup>[] = [
+    {
+      id: "count",
+      label: "Lines",
+      unit: "count",
+      meter: true,
+      width: "16ch",
+      value: (g) => g.count,
+    },
+    {
+      id: "level",
+      label: "Level",
+      width: "max-content",
+      value: (g) => g.level,
+      cell: (g) => <Level level={g.level} />,
+    },
+    {
+      id: "template",
+      label: "Template",
+      width: "minmax(0,1fr)",
+      value: (g) => g.template,
+      cell: (g) => (
+        <span class="wrap-anywhere">
+          <Template text={g.template} />
+        </span>
+      ),
+    },
+    {
+      id: "services",
+      label: "Services",
+      width: "minmax(8ch,20ch)",
+      value: (g) => g.services.join(", "),
+      tone: () => "muted",
+    },
+    {
+      id: "last",
+      label: "Last",
+      align: "end",
+      width: "max-content",
+      value: (g) => g.last,
+      tone: () => "muted",
+      cell: (g) => (
+        <time class="whitespace-nowrap" datetime={g.last} title={g.last}>
+          {ago(parseTime(g.last))}
+        </time>
+      ),
+    },
+  ];
 
   return (
-    <div class="font-mono text-sm">
-      <div class={`${header} ${groupColumns}`} aria-hidden="true">
-        <span class="text-right">Lines</span>
-        <span>Level</span>
-        <span>Template</span>
-        <span>Services</span>
-        <span class="text-right">Last</span>
+    <Table
+      label="Log templates"
+      rows={props.groups}
+      columns={columns}
+      selected={(g) => open() === g.template}
+      onRowClick={(g) => setOpen(open() === g.template ? undefined : g.template)}
+      expanded={(g) => open() === g.template}
+      detail={(g) => <Samples group={g} onShowLines={props.onShowLines} />}
+    />
+  );
+}
+
+/** The samples of an open group, and a button that shows its lines. */
+function Samples(props: { group: LogGroup; onShowLines: (term: string) => void }) {
+  const term = () => templateTerm(props.group.template);
+  return (
+    <div class={detail}>
+      <div class={times}>
+        From {formatTime(parseTime(props.group.first))} to {formatTime(parseTime(props.group.last))}
       </div>
-      <div role="list">
-        <For each={props.groups}>
-          {(group) => {
-            const isOpen = () => open() === group.template;
-            const term = templateTerm(group.template);
-            const toggle = () => setOpen(isOpen() ? undefined : group.template);
-            return (
-              <div class="border-b border-line" role="listitem">
-                <div
-                  class={`${row} ${groupColumns} py-2 ${isOpen() ? openRow : closedRow}`}
-                  aria-expanded={isOpen()}
-                  {...toggleRow(toggle)}
-                >
-                  <Measure share={group.count / most()}>{group.count.toLocaleString()}</Measure>
-                  <Level level={group.level} />
-                  <span class="wrap-anywhere">
-                    <Template text={group.template} />
-                  </span>
-                  <span class="truncate text-muted">{group.services.join(", ")}</span>
-                  <time
-                    class="whitespace-nowrap text-muted"
-                    datetime={group.last}
-                    title={group.last}
-                  >
-                    {ago(parseTime(group.last))}
-                  </time>
-                </div>
-                <Show when={isOpen()}>
-                  <div class={detail}>
-                    <div class={times}>
-                      From {formatTime(parseTime(group.first))} to{" "}
-                      {formatTime(parseTime(group.last))}
-                    </div>
-                    <h3 class={heading}>Samples</h3>
-                    <For each={group.samples}>{(sample) => <pre class={body}>{sample}</pre>}</For>
-                    <Show when={term}>
-                      {(shown) => (
-                        <Button
-                          class="mt-1.5"
-                          title={`Add ${shown()} to the query`}
-                          onClick={() => props.onShowLines(shown())}
-                        >
-                          Show lines
-                        </Button>
-                      )}
-                    </Show>
-                  </div>
-                </Show>
-              </div>
-            );
-          }}
-        </For>
-      </div>
+      <h3 class={heading}>Samples</h3>
+      <For each={props.group.samples}>{(sample) => <pre class={body}>{sample}</pre>}</For>
+      <Show when={term()}>
+        {(shown) => (
+          <Button
+            class="mt-1.5"
+            title={`Add ${shown()} to the query`}
+            onClick={() => props.onShowLines(shown())}
+          >
+            Show lines
+          </Button>
+        )}
+      </Show>
     </div>
   );
 }

@@ -1,10 +1,12 @@
 import { createSignal, For, type JSX, Show } from "solid-js";
 
 import { addIndex, complete, type Signal } from "@siner/api";
-import { Button, Callout, Checkbox, QueryInput, RangePicker, Tabs } from "@siner/ui";
+import { Button, Callout, QueryInput, RangePicker, Tabs } from "@siner/ui";
+import { Panel } from "@siner/viz";
 
-import { LIVE_MS, type List, type ListResult } from "./list";
-import { formatTime } from "./time";
+import { pageContent } from "./classes";
+import type { List, ListResult } from "./list";
+import PageBar, { LiveToggle } from "./PageBar";
 
 /**
  * The top of a list page, which stays under the top bar while the results
@@ -21,63 +23,52 @@ export function QueryBar<V extends string, R extends ListResult<V>>(props: {
 }) {
   const list = () => props.list;
   return (
-    <div class="relative z-20 shrink-0 bg-surface px-4 pt-3.5 shadow-(--raised)">
-      <form
-        class="flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          list().run();
-        }}
-      >
-        <QueryInput
-          value={list().draft()}
-          complete={(text, cursor, signal) => complete(props.signal, text, cursor, signal)}
-          onInput={(q) => list().setDraft(q)}
-          onSubmit={() => list().run()}
-          placeholder={props.placeholder}
-          size="lg"
-          ref={props.ref}
-        />
-        <RangePicker
-          since={list().since()}
-          until={list().until()}
-          onChange={(since, until) => list().setRange(since, until)}
-          size="lg"
-        />
-        <Button type="submit" variant="primary" size="lg">
-          Run
-        </Button>
-      </form>
-
-      <div class="flex items-center gap-3 pt-3 pb-2.5 text-muted">
-        <Tabs
-          label="View"
-          options={props.views}
-          value={list().view()}
-          onChange={(v) => list().setView(v)}
-        />
-        <span>{props.children}</span>
-        <span class="flex-1" />
-        <Show when={list().fetched.loading()}>
-          <span aria-live="polite">Loading…</span>
-        </Show>
-        <Show when={list().fetched.updated()}>
-          {(updated) => <span>Updated {formatTime(updated())}</span>}
-        </Show>
-        <Checkbox
-          checked={list().live()}
-          disabled={list().until() !== ""}
-          onChange={(checked) => list().setLive(checked)}
-          title={
-            list().until() === ""
-              ? `Reload every ${LIVE_MS / 1000} s`
-              : "Live needs a range that ends now"
-          }
+    <PageBar
+      fetched={list().fetched}
+      top={
+        <form
+          class="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            list().run();
+          }}
         >
-          Live
-        </Checkbox>
-      </div>
-    </div>
+          <QueryInput
+            value={list().draft()}
+            complete={(text, cursor, signal) => complete(props.signal, text, cursor, signal)}
+            onInput={(q) => list().setDraft(q)}
+            onSubmit={() => list().run()}
+            placeholder={props.placeholder}
+            size="lg"
+            ref={props.ref}
+          />
+          <RangePicker
+            since={list().since()}
+            until={list().until()}
+            onChange={(since, until) => list().setRange(since, until)}
+            size="lg"
+          />
+          <Button type="submit" variant="primary" size="lg">
+            Run
+          </Button>
+        </form>
+      }
+      end={
+        <LiveToggle
+          live={list().live()}
+          until={list().until()}
+          onChange={(live) => list().setLive(live)}
+        />
+      }
+    >
+      <Tabs
+        label="View"
+        options={props.views}
+        value={list().view()}
+        onChange={(v) => list().setView(v)}
+      />
+      <span>{props.children}</span>
+    </PageBar>
   );
 }
 
@@ -97,17 +88,17 @@ export function ListContent<V extends string, R extends ListResult<V>>(props: {
   const list = () => props.list;
   return (
     <div class="flex min-h-0 flex-1">
-      <div class="min-w-0 flex-1 overflow-y-auto px-4 pb-8">
+      <div class={`min-w-0 flex-1 ${pageContent}`}>
         <Show when={list().fetched.error()}>
           {(error) => (
-            <div class="mt-2">
+            <div class="mb-3">
               <Callout tone="error">{error()}</Callout>
             </div>
           )}
         </Show>
 
         <Show when={list().current()?.body.unindexed.length}>
-          <div class="mt-2">
+          <div class="mb-3">
             <IndexHint
               signal={props.signal}
               noun={props.noun}
@@ -116,7 +107,7 @@ export function ListContent<V extends string, R extends ListResult<V>>(props: {
           </div>
         </Show>
 
-        {props.children}
+        <Panel flush>{props.children}</Panel>
 
         <Show when={list().canShowMore()}>
           <Button
