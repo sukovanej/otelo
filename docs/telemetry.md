@@ -86,6 +86,16 @@ erDiagram
   }
 ```
 
+## OTLP receiver
+
+The `siner-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JSON, gzip or not) and over gRPC on `127.0.0.1:4317`. `siner serve --otlp-http` and `--otlp-grpc` move them. Both transports call one mapping to the rows:
+
+- `service` is `service.name`, or `unknown_service` without one.
+- The instrumentation scope becomes `otel.scope.name` and `otel.scope.version` on each record, and the status message of a span becomes `otel.status_description`, as the OTel spec maps them for formats without those fields. A log's `event_name` becomes `event.name`.
+- A histogram point stores its sum as `points.value`. A point without buckets gets one bucket without bounds.
+- Exponential histograms, summaries, and a span without valid IDs are rejected. Span links, severity text, and trace state are not kept.
+- A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
+
 ## Querying
 
 The CLI and the UI use the same HTTP query API. Every CLI command prints a table to a terminal and JSON otherwise, and `--json` and `--table` override that. Every query has a row limit. A cut result says so and names the flag that narrows it. Agents read what humans read, so the output stays small by default:
