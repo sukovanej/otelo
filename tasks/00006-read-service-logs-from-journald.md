@@ -21,10 +21,10 @@ Logs of apps that do not speak OTel, Caddy and the backup script among them, com
 
 ## macOS: launchd log files
 
-- launchd writes each app's stdout and stderr to `<root>/logs/<app>.log`. Siner tails the file and keeps its read offset in the data directory.
-- When a file passes 10 MB, siner truncates it after reading to the end. launchd opens the file in append mode, so the next write lands at the new end.
+- launchd writes each app's stdout and stderr to `<root>/logs/<app>.log`. Otelo tails the file and keeps its read offset in the data directory.
+- When a file passes 10 MB, otelo truncates it after reading to the end. launchd opens the file in append mode, so the next write lands at the new end.
 - Every line is `info`, except a line that starts with `error`, `warn`, or `debug`, which takes that level.
-- Siner polls `launchctl print system/siner.<app>` every 5 seconds. A new PID is a start. A change of the last exit code is an exit.
+- Otelo polls `launchctl print system/otelo.<app>` every 5 seconds. A new PID is a start. A change of the last exit code is an exit.
 
 ## Both
 
