@@ -10,6 +10,7 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 ## Decisions
 
 - OpenTelemetry only. Apps send OTLP, and otelo stores it and answers queries about it. Otelo does not deploy, start, or supervise apps, and it keeps no secrets. The app's deploy script and the service manager of the OS keep doing that.
+- Logs of apps without OTel, such as Caddy, reach otelo through an OTel collector that sends OTLP. Otelo reads no journald and no log files.
 - One server only. Multi-server is out of scope, and the README says so. The code can assume one SQLite and one clock.
 - Otelo does not own Caddy. Caddy puts the UI on a hostname with HTTPS and proxies it to the daemon.
 - A CLI, not MCP. Humans and agents use the same commands. The CLI prints a table to a terminal and JSON otherwise; `--json` and `--table` override. Every query has a row limit and says when it truncated. `otelo guide` prints how to debug with otelo ([[../tasks/00011-print-a-debugging-guide-with-sin.md]]).
@@ -76,5 +77,4 @@ A tool that does these could send its events to otelo over OTLP, so otelo shows 
 
 ## Open questions
 
-- Logs of apps without OTel, such as Caddy: read journald in otelo ([[../tasks/00006-read-service-logs-from-journald.md]]), or leave them to an OTel collector that sends OTLP.
 - Prior art to check first: OpenObserve (a single Rust binary with OTLP, but heavy for 1 GB).
