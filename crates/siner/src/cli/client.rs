@@ -1,6 +1,3 @@
-//! The CLI end of the query API: the daemon address, the HTTP calls, and the
-//! choice between a table and JSON.
-
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::{Context, bail};
@@ -9,8 +6,7 @@ use serde::de::DeserializeOwned;
 
 use siner_api::ErrorBody;
 
-/// The largest response the CLI reads.
-const MAX_RESPONSE: u64 = 256 * 1024 * 1024;
+const MAX_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(clap::Args)]
 pub struct Client {
@@ -33,7 +29,6 @@ pub struct Client {
 }
 
 impl Client {
-    /// Whether to print a table and not JSON.
     #[must_use]
     pub fn wants_table(&self) -> bool {
         if self.json {
@@ -43,11 +38,6 @@ impl Client {
         }
     }
 
-    /// GETs `path` with the query parameters that have a value.
-    ///
-    /// # Errors
-    ///
-    /// When the daemon cannot be reached, or answers with an error.
     pub fn get<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -64,11 +54,6 @@ impl Client {
         read(response)
     }
 
-    /// POSTs `body` to `path` as JSON.
-    ///
-    /// # Errors
-    ///
-    /// When the daemon cannot be reached, or answers with an error.
     pub fn post<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -81,11 +66,6 @@ impl Client {
         read(response)
     }
 
-    /// PUTs to `path` with no body.
-    ///
-    /// # Errors
-    ///
-    /// When the daemon cannot be reached, or answers with an error.
     pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let response = Self::agent()
             .put(self.url(path))
@@ -94,11 +74,6 @@ impl Client {
         read(response)
     }
 
-    /// DELETEs `path`.
-    ///
-    /// # Errors
-    ///
-    /// When the daemon cannot be reached, or answers with an error.
     pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let response = Self::agent()
             .delete(self.url(path))
@@ -121,7 +96,7 @@ impl Client {
 
 fn read<T: DeserializeOwned>(mut response: ureq::http::Response<ureq::Body>) -> anyhow::Result<T> {
     let status = response.status();
-    let body = response.body_mut().with_config().limit(MAX_RESPONSE);
+    let body = response.body_mut().with_config().limit(MAX_RESPONSE_BYTES);
     if status.is_success() {
         return body.read_json().context("read the response of the daemon");
     }
@@ -131,9 +106,8 @@ fn read<T: DeserializeOwned>(mut response: ureq::http::Response<ureq::Body>) -> 
     }
 }
 
-/// Escapes `segment` for a URL path.
 #[must_use]
-pub fn path_segment(segment: &str) -> String {
+pub fn escape_path_segment(segment: &str) -> String {
     segment
         .bytes()
         .map(|b| {
@@ -146,11 +120,6 @@ pub fn path_segment(segment: &str) -> String {
         .collect()
 }
 
-/// Prints `value` as JSON on stdout.
-///
-/// # Errors
-///
-/// When stdout cannot be written.
 pub fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     let mut out = io::stdout().lock();
     serde_json::to_writer_pretty(&mut out, value)?;
@@ -158,7 +127,6 @@ pub fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Tells on stderr that the result was cut, and how to narrow it.
 pub fn note_cut(truncated: bool, message: &str) {
     if truncated {
         eprintln!("{message}");

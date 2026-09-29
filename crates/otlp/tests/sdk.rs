@@ -1,11 +1,8 @@
-//! The Rust OpenTelemetry SDK sends each signal over each transport, and the rows come
-//! back the same.
-
 mod common;
 
 use std::time::SystemTime;
 
-use common::{Receiver, rows, today};
+use common::{Receiver, open_todays_day_file, rows};
 use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
@@ -43,10 +40,10 @@ fn http_json_takes_each_signal() {
 
 fn round_trip(transport: Transport) {
     let dir = tempfile::tempdir().unwrap();
-    let receiver = Receiver::start(dir.path());
+    let receiver = Receiver::start_writing_into(dir.path());
     send_each_signal(&receiver, transport);
-    receiver.stop();
-    let conn = today(dir.path());
+    receiver.stop_and_wait_for_writer();
+    let conn = open_todays_day_file(dir.path());
 
     let services: Vec<String> = rows(&conn, "SELECT service FROM resources ORDER BY id");
     assert_eq!(services, ["shop", "siner"]);
@@ -122,8 +119,6 @@ fn round_trip(transport: Transport) {
     );
 }
 
-/// Records one trace of two spans, a log in the root span, a counter, and a
-/// histogram, and shuts the providers down, which exports all of them.
 fn send_each_signal(receiver: &Receiver, transport: Transport) {
     let (spans, logs, metrics) = exporters(receiver, transport);
     let resource = Resource::builder()
@@ -178,6 +173,7 @@ fn send_each_signal(receiver: &Receiver, transport: Transport) {
     duration.record(5.0, &plan);
     duration.record(50.0, &plan);
 
+    // Shutting a provider down exports what it holds.
     tracer_provider.shutdown().unwrap();
     logger_provider.shutdown().unwrap();
     meter_provider.shutdown().unwrap();

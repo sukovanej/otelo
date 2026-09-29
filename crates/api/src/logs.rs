@@ -1,8 +1,6 @@
-//! The endpoints of the log lines and of their groups by template.
-
 use axum::extract::{Query, State};
 use siner_query::Signal;
-use siner_telemetry::query::{LogGroups, Logs};
+use siner_storage::query::{LogGroups, Logs};
 
 use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
@@ -20,11 +18,11 @@ use crate::params::{QueryParams, parse_query};
 )]
 pub async fn logs(State(api): State<Api>, Query(params): Query<QueryParams>) -> ApiResult<Logs> {
     let query = parse_query(params.q.as_deref(), Signal::Logs)?;
-    api.run(
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 100),
-        move |r| Ok(r.reader.logs(&query, r.limit)?),
+        move |r| Ok(r.queries.logs(&query, r.limit)?),
     )
     .await
 }
@@ -46,11 +44,11 @@ pub async fn log_groups(
     Query(params): Query<QueryParams>,
 ) -> ApiResult<LogGroups> {
     let query = parse_query(params.q.as_deref(), Signal::Logs)?;
-    api.run(
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 50),
-        move |r| Ok(r.reader.log_groups(&query, r.limit)?),
+        move |r| Ok(r.queries.log_groups(&query, r.limit)?),
     )
     .await
 }

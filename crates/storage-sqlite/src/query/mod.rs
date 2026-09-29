@@ -1,0 +1,306 @@
+mod calls;
+mod catalog;
+mod compile;
+mod logs;
+mod metrics;
+mod services;
+mod sql;
+mod traces;
+
+use anyhow::bail;
+use jiff::Timestamp;
+use rusqlite::types::Value;
+use rusqlite::{Row, ToSql};
+use siner_query::{Query, Signal};
+use siner_storage::query::{
+    AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
+    OperationDetail, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
+};
+use siner_storage::{Error, RangeQueries, Result, SpanId, SpanKind, TraceId};
+
+pub use compile::InvalidQuery;
+
+use crate::reader::timed_out;
+use crate::{Day, Reader};
+
+pub fn hex_digits(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+pub fn timestamp_from_nanos(unix_nanos: i64) -> Timestamp {
+    Timestamp::from_nanosecond(i128::from(unix_nanos))
+        .expect("an i64 of nanoseconds is a valid timestamp")
+}
+
+pub fn trace_id_from_blob(blob: Vec<u8>) -> anyhow::Result<TraceId> {
+    let bytes = blob
+        .try_into()
+        .map_err(|blob: Vec<u8>| anyhow::anyhow!("a trace ID of {} bytes", blob.len()))?;
+    Ok(TraceId(bytes))
+}
+
+pub fn span_id_from_blob(blob: Vec<u8>) -> anyhow::Result<SpanId> {
+    let bytes = blob
+        .try_into()
+        .map_err(|blob: Vec<u8>| anyhow::anyhow!("a span ID of {} bytes", blob.len()))?;
+    Ok(SpanId(bytes))
+}
+
+pub struct WhereClause {
+    clauses: Vec<String>,
+    params: Vec<(String, Value)>,
+}
+
+impl WhereClause {
+    pub const fn new() -> Self {
+        Self {
+            clauses: Vec::new(),
+            params: Vec::new(),
+        }
+    }
+
+    pub fn within_reader_range(reader: &Reader, ts_column: &str) -> Self {
+        let mut filter = Self::new();
+        filter.push_clause_with_param(
+            &format!("{ts_column} >= :since"),
+            ":since",
+            reader.range().start_at(),
+        );
+        filter.push_clause_with_param(
+            &format!("{ts_column} < :until"),
+            ":until",
+            reader.range().end_at(),
+        );
+        filter
+    }
+
+    pub fn push_param(&mut self, name: &str, value: impl Into<Value>) {
+        self.params.push((name.to_owned(), value.into()));
+    }
+
+    pub fn push_clause_with_param(&mut self, clause: &str, name: &str, value: impl Into<Value>) {
+        self.clauses.push(clause.to_owned());
+        self.params.push((name.to_owned(), value.into()));
+    }
+
+    pub fn absorb_params(&mut self, other: Self) {
+        for (name, value) in other.params {
+            if !self.params.iter().any(|(n, _)| *n == name) {
+                self.params.push((name, value));
+            }
+        }
+    }
+
+    pub fn push_clause(&mut self, clause: String) {
+        self.clauses.push(clause);
+    }
+
+    pub fn sql_for_day(&self, quoted_day: &str) -> String {
+        if self.clauses.is_empty() {
+            return "TRUE".into();
+        }
+        self.clauses.join(" AND ").replace("$day", quoted_day)
+    }
+
+    fn params(&self) -> Vec<(&str, &dyn ToSql)> {
+        self.params
+            .iter()
+            .map(|(name, value)| (name.as_str(), value as &dyn ToSql))
+            .collect()
+    }
+}
+
+impl Reader {
+    pub(crate) fn scan_rows(
+        &self,
+        [head, tail]: [&str; 2],
+        select_for_day: impl Fn(&str) -> String,
+        filter: &WhereClause,
+        mut on_row: impl FnMut(&Row) -> anyhow::Result<bool>,
+    ) -> anyhow::Result<()> {
+        if self.days().is_empty() {
+            return Ok(());
+        }
+        let sql = format!(
+            "{head}{}{tail}",
+            union_day_selects(self.days(), select_for_day)
+        );
+        let span = new_statement_span(&sql);
+        let _entered = span.enter();
+        let mut stmt = self.conn().prepare(&sql)?;
+        let mut rows = stmt.query(filter.params().as_slice())?;
+        let mut read = 0_i64;
+        while let Some(row) = rows.next()? {
+            read += 1;
+            if !on_row(row)? {
+                break;
+            }
+        }
+        span.record("db.response.returned_rows", read);
+        Ok(())
+    }
+
+    pub(crate) fn explain_scan(
+        &self,
+        [head, tail]: [&str; 2],
+        select_for_day: impl Fn(&str) -> String,
+        filter: &WhereClause,
+    ) -> anyhow::Result<Vec<String>> {
+        if self.days().is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "EXPLAIN QUERY PLAN {head}{}{tail}",
+            union_day_selects(self.days(), select_for_day)
+        );
+        let mut stmt = self.conn().prepare(&sql)?;
+        let steps = stmt.query_map(filter.params().as_slice(), |row| row.get::<_, String>(3))?;
+        Ok(steps.collect::<Result<_, _>>()?)
+    }
+
+    pub(crate) fn collect_rows<T>(
+        &self,
+        around: [&str; 2],
+        select_for_day: impl Fn(&str) -> String,
+        filter: &WhereClause,
+        mut map_row: impl FnMut(&Row) -> anyhow::Result<T>,
+    ) -> anyhow::Result<Vec<T>> {
+        let mut out = Vec::new();
+        self.scan_rows(around, select_for_day, filter, |row| {
+            out.push(map_row(row)?);
+            Ok(true)
+        })?;
+        Ok(out)
+    }
+}
+
+// Record db.response.returned_rows as an i64: the OpenTelemetry layer keeps a u64 as text.
+pub fn new_statement_span(sql: &str) -> tracing::Span {
+    tracing::info_span!(
+        "SELECT",
+        otel.kind = "client",
+        db.system.name = "sqlite",
+        db.query.text = sql,
+        db.response.returned_rows = tracing::field::Empty,
+    )
+}
+
+// FTS5 and the row ids only work within one file, so each day file gets a SELECT of its own.
+pub fn union_day_selects(days: &[Day], select_for_day: impl Fn(&str) -> String) -> String {
+    days.iter()
+        .map(|day| select_for_day(&format!("\"{day}\"")))
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ")
+}
+
+pub fn truncate_to_limit<T>(rows: &mut Vec<T>, limit: usize) -> bool {
+    let truncated = rows.len() > limit;
+    rows.truncate(limit);
+    truncated
+}
+
+fn explain(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
+    match query.signal {
+        Signal::Logs => logs::explain_logs(reader, query),
+        Signal::Spans => traces::explain_spans(reader, query),
+        Signal::Metrics => bail!("a plan shows how logs and spans use their indexes"),
+    }
+}
+
+fn classify_query_error(error: anyhow::Error) -> Error {
+    if timed_out(&error) {
+        Error::TimedOut
+    } else if let Some(invalid) = error.downcast_ref::<InvalidQuery>() {
+        Error::InvalidQuery(invalid.0.clone())
+    } else {
+        Error::Backend(error)
+    }
+}
+
+impl RangeQueries for Reader {
+    fn logs(&self, query: &Query, limit: usize) -> Result<Logs> {
+        logs::read_logs(self, query, limit).map_err(classify_query_error)
+    }
+
+    fn log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups> {
+        logs::group_logs(self, query, limit).map_err(classify_query_error)
+    }
+
+    fn spans(&self, query: &Query, limit: usize) -> Result<Spans> {
+        traces::read_spans(self, query, limit).map_err(classify_query_error)
+    }
+
+    fn traces(&self, query: &Query, limit: usize) -> Result<Traces> {
+        traces::read_traces(self, query, limit).map_err(classify_query_error)
+    }
+
+    fn trace(&self, id: TraceId, limit: usize) -> Result<Option<Trace>> {
+        traces::read_trace(self, id, limit).map_err(classify_query_error)
+    }
+
+    fn metrics(&self, query: &Query, limit: usize) -> Result<MetricList> {
+        metrics::list_metrics(self, query, limit).map_err(classify_query_error)
+    }
+
+    fn metric(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries> {
+        metrics::read_metric_buckets(self, filter, limit).map_err(classify_query_error)
+    }
+
+    fn services(&self, step_ns: i64, limit: usize) -> Result<Services> {
+        services::summarize_services(self, step_ns, limit).map_err(classify_query_error)
+    }
+
+    fn service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service> {
+        services::summarize_service(self, service, step_ns, limit).map_err(classify_query_error)
+    }
+
+    fn operation(
+        &self,
+        service: &str,
+        name: &str,
+        kind: SpanKind,
+        step_ns: i64,
+    ) -> Result<OperationDetail> {
+        services::summarize_operation(self, service, name, kind, step_ns)
+            .map_err(classify_query_error)
+    }
+
+    fn calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls> {
+        calls::summarize_calls(self, service, step_ns, limit).map_err(classify_query_error)
+    }
+
+    fn call(
+        &self,
+        service: &str,
+        target: &TargetKey,
+        summary: &str,
+        kind: SpanKind,
+        step_ns: i64,
+    ) -> Result<CallDetail> {
+        calls::summarize_call_operation(self, service, target, summary, kind, step_ns)
+            .map_err(classify_query_error)
+    }
+
+    fn attributes(&self, signal: Signal) -> Result<AttributeKeys> {
+        catalog::list_attribute_keys(self, signal).map_err(classify_query_error)
+    }
+
+    fn sql(&self, sql: &str, limit: usize) -> Result<SqlResult> {
+        sql::run_user_sql(self, sql, limit).map_err(|e| {
+            // SQL comes from the user, so every failure but a time out is theirs.
+            if timed_out(&e) {
+                Error::TimedOut
+            } else {
+                Error::InvalidQuery(format!("{e:#}"))
+            }
+        })
+    }
+
+    fn explain(&self, query: &Query) -> Result<Vec<String>> {
+        explain(self, query).map_err(classify_query_error)
+    }
+}

@@ -1,14 +1,12 @@
-//! What OTLP over HTTP takes, refuses, and rejects in part.
-
 mod common;
 
 use std::io::Write;
 
-use common::{Receiver, rows, today};
+use common::{Receiver, open_todays_day_file, rows};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use serde_json::{Value, json};
-use siner_telemetry::now;
+use siner_storage::now_unix_nanos;
 
 fn post(receiver: &Receiver, path: &str, headers: &[(&str, &str)], body: &[u8]) -> (u16, Value) {
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -46,7 +44,7 @@ fn spans(resource: &Value, spans: &Value) -> Value {
 }
 
 fn span(name: &str, trace_id: &str, span_id: &str) -> Value {
-    let start = now();
+    let start = now_unix_nanos();
     json!({
         "traceId": trace_id,
         "spanId": span_id,
@@ -63,7 +61,7 @@ const SPAN: &str = "eee19b7ec3c1b174";
 #[test]
 fn takes_a_gzip_json_body_and_answers_in_json() {
     let dir = tempfile::tempdir().unwrap();
-    let receiver = Receiver::start(dir.path());
+    let receiver = Receiver::start_writing_into(dir.path());
     let body = spans(
         &json!([{"key": "service.name", "value": {"stringValue": "shop"}}]),
         &json!([span("GET /cart", TRACE, SPAN)]),
@@ -80,15 +78,15 @@ fn takes_a_gzip_json_body_and_answers_in_json() {
         &gzip.finish().unwrap(),
     );
     assert_eq!((status, response), (200, json!({"partialSuccess": null})));
-    receiver.stop();
-    let names: Vec<String> = rows(&today(dir.path()), "SELECT name FROM spans");
+    receiver.stop_and_wait_for_writer();
+    let names: Vec<String> = rows(&open_todays_day_file(dir.path()), "SELECT name FROM spans");
     assert_eq!(names, ["GET /cart"]);
 }
 
 #[test]
 fn refuses_another_content_type() {
     let dir = tempfile::tempdir().unwrap();
-    let receiver = Receiver::start(dir.path());
+    let receiver = Receiver::start_writing_into(dir.path());
     let (status, _) = post(
         &receiver,
         "/v1/logs",
@@ -104,13 +102,13 @@ fn refuses_another_content_type() {
     );
     assert_eq!(status, 400);
     assert_eq!(response["code"], 3, "{response}");
-    receiver.stop();
+    receiver.stop_and_wait_for_writer();
 }
 
 #[test]
 fn rejects_a_span_without_ids_and_keeps_the_rest() {
     let dir = tempfile::tempdir().unwrap();
-    let receiver = Receiver::start(dir.path());
+    let receiver = Receiver::start_writing_into(dir.path());
     let body = spans(
         &json!([]),
         &json!([
@@ -121,9 +119,9 @@ fn rejects_a_span_without_ids_and_keeps_the_rest() {
     let (status, response) = post_json(&receiver, "/v1/traces", &body);
     assert_eq!(status, 200);
     assert_eq!(response["partialSuccess"]["rejectedSpans"], 1, "{response}");
-    receiver.stop();
+    receiver.stop_and_wait_for_writer();
     let spans: Vec<String> = rows(
-        &today(dir.path()),
+        &open_todays_day_file(dir.path()),
         "SELECT r.service || ' ' || s.name FROM spans s JOIN resources r ON r.id = s.resource_id",
     );
     assert_eq!(spans, ["unknown_service GET /cart"]);
@@ -132,8 +130,8 @@ fn rejects_a_span_without_ids_and_keeps_the_rest() {
 #[test]
 fn rejects_the_metric_types_the_store_lacks() {
     let dir = tempfile::tempdir().unwrap();
-    let receiver = Receiver::start(dir.path());
-    let ts = now().to_string();
+    let receiver = Receiver::start_writing_into(dir.path());
+    let ts = now_unix_nanos().to_string();
     let body = json!({"resourceMetrics": [{"scopeMetrics": [{"metrics": [
         {"name": "queue.depth", "gauge": {"dataPoints": [{"timeUnixNano": ts, "asInt": "4"}]}},
         {"name": "latency", "summary": {"dataPoints": [{"timeUnixNano": ts}, {"timeUnixNano": ts}]}},
@@ -144,9 +142,9 @@ fn rejects_the_metric_types_the_store_lacks() {
         response["partialSuccess"],
         json!({"rejectedDataPoints": 2, "errorMessage": "siner does not store summaries"})
     );
-    receiver.stop();
+    receiver.stop_and_wait_for_writer();
     let points: Vec<String> = rows(
-        &today(dir.path()),
+        &open_todays_day_file(dir.path()),
         "SELECT s.name || ' ' || p.value FROM points p JOIN series s ON s.id = p.series_id
          WHERE s.name != 'siner.telemetry.dropped_batches'",
     );
@@ -155,7 +153,7 @@ fn rejects_the_metric_types_the_store_lacks() {
 
 #[test]
 fn a_full_queue_rejects_the_whole_request() {
-    let (receiver, _inbox) = Receiver::full();
+    let (receiver, _inbox) = Receiver::start_with_full_queue();
     let body = spans(
         &json!([]),
         &json!([span("a", TRACE, SPAN), span("b", TRACE, SPAN)]),
@@ -165,5 +163,5 @@ fn a_full_queue_rejects_the_whole_request() {
     let (status, second) = post_json(&receiver, "/v1/traces", &body);
     assert_eq!(status, 200);
     assert_eq!(second["partialSuccess"]["rejectedSpans"], 2, "{second}");
-    receiver.stop();
+    receiver.stop_and_wait_for_writer();
 }

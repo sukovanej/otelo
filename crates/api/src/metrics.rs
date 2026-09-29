@@ -1,14 +1,12 @@
-//! The endpoints of the metric series and of one metric in buckets.
-
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use siner_query::Signal;
-use siner_telemetry::query::{MetricFilter, MetricList, MetricSeries};
+use siner_storage::query::{MetricFilter, MetricList, MetricSeries};
 use utoipa::IntoParams;
 
 use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
-use crate::params::{QueryParams, check_step, parse_query, parse_step};
+use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
 
 /// The series that have points in the range and that the query keeps, by
 /// name. The query reads `name`, `service`, `kind`, `unit`, the labels, and
@@ -27,11 +25,11 @@ pub async fn metrics(
     Query(params): Query<QueryParams>,
 ) -> ApiResult<MetricList> {
     let query = parse_query(params.q.as_deref(), Signal::Metrics)?;
-    api.run(
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 100),
-        move |r| Ok(r.reader.metrics(&query, r.limit)?),
+        move |r| Ok(r.queries.metrics(&query, r.limit)?),
     )
     .await
 }
@@ -75,8 +73,8 @@ pub async fn metric(
     Query(params): Query<MetricParams>,
 ) -> ApiResult<MetricSeries> {
     let query = parse_query(params.q.as_deref(), Signal::Metrics)?;
-    let step = parse_step(params.step.as_deref())?;
-    api.run(
+    let step = parse_step_ns(params.step.as_deref())?;
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 20),
@@ -84,9 +82,9 @@ pub async fn metric(
             let filter = MetricFilter {
                 name,
                 query,
-                step_ns: check_step(&r, step, 120)?,
+                step_ns: resolve_step(&r, step, 120)?,
             };
-            Ok(r.reader.metric(&filter, r.limit)?)
+            Ok(r.queries.metric(&filter, r.limit)?)
         },
     )
     .await

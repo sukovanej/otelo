@@ -12,6 +12,9 @@ const SPAN_STATUSES = ["unset", "ok", "error"];
 export const kindName = (kind: number) => SPAN_KINDS[kind] ?? String(kind);
 export const statusName = (status: number) => SPAN_STATUSES[status] ?? String(status);
 
+/** Whether a span failed: its status is error. */
+export const spanFailed = (span: TraceSpan) => span.status === 2;
+
 /** The fields of a span, with the literals the query language compares
  * them to. */
 export function spanSections(span: TraceSpan): Section[] {

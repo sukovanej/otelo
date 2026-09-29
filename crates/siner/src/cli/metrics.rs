@@ -1,12 +1,10 @@
-//! `siner metrics` and `siner metric`.
-
 use std::io;
 
-use siner_telemetry::query::{Bucket, MetricList, MetricSeries};
+use siner_storage::query::{Bucket, MetricList, MetricSeries};
 
-use super::client::{Client, note_cut, path_segment, print_json};
+use super::client::{Client, escape_path_segment, note_cut, print_json};
 use super::table::{self, Table};
-use super::{Range, joined};
+use super::{Range, join_query_words};
 
 #[derive(clap::Args)]
 pub struct MetricsArgs {
@@ -21,14 +19,9 @@ pub struct MetricsArgs {
     client: Client,
 }
 
-/// Runs `siner metrics`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
-    params.push(("q", joined(&args.query)));
+    params.push(("q", join_query_words(&args.query)));
     let list: MetricList = args.client.get("/api/metrics", &params)?;
     if args.client.wants_table() {
         let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "LABELS"]);
@@ -38,7 +31,7 @@ pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
                 series.kind.clone(),
                 series.unit.clone(),
                 series.service.clone(),
-                table::labels(&series.labels),
+                table::format_labels(&series.labels),
             ]);
         }
         table.print()?;
@@ -73,16 +66,14 @@ pub struct MetricArgs {
     client: Client,
 }
 
-/// Runs `siner metric`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
-    params.extend([("q", joined(&args.query)), ("step", args.step.clone())]);
+    params.extend([
+        ("q", join_query_words(&args.query)),
+        ("step", args.step.clone()),
+    ]);
     let metric: MetricSeries = args.client.get(
-        &format!("/api/metrics/{}", path_segment(&args.name)),
+        &format!("/api/metrics/{}", escape_path_segment(&args.name)),
         &params,
     )?;
     if args.client.wants_table() {
@@ -90,7 +81,7 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
             if i > 0 {
                 println!();
             }
-            let labels = table::labels(&series.labels);
+            let labels = table::format_labels(&series.labels);
             println!(
                 "{} {} {} {}{} every {}",
                 metric.name,
@@ -102,7 +93,7 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
                 } else {
                     format!(" {labels}")
                 },
-                table::duration(metric.step_ns),
+                table::format_duration(metric.step_ns),
             );
             if series.kind == "histogram" {
                 print_distributions(&series.buckets)?;
@@ -111,12 +102,12 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
             let mut table = Table::new(&["TIME (UTC)", "COUNT", "MIN", "AVG", "MAX", "LAST"]);
             for bucket in &series.buckets {
                 table.row(vec![
-                    table::time(bucket.time),
+                    table::format_utc_time(bucket.start_at),
                     bucket.count.to_string(),
-                    table::number(bucket.min),
-                    table::number(bucket.avg),
-                    table::number(bucket.max),
-                    table::number(bucket.last),
+                    table::format_number(bucket.min),
+                    table::format_number(bucket.avg),
+                    table::format_number(bucket.max),
+                    table::format_number(bucket.last),
                 ]);
             }
             table.print()?;
@@ -131,31 +122,29 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The values a histogram recorded in each step: how many, their average,
-/// and the percentile estimates. A step without a distribution, such as the
-/// first of a cumulative histogram, shows dashes.
 fn print_distributions(buckets: &[Bucket]) -> io::Result<()> {
     let mut table = Table::new(&["TIME (UTC)", "COUNT", "AVG", "P50", "P90", "P99"]);
-    let estimate = |value: Option<f64>| value.map_or_else(|| "-".into(), table::number);
+    let estimate = |value: Option<f64>| value.map_or_else(|| "-".into(), table::format_number);
     for bucket in buckets {
-        let Some(d) = &bucket.histogram else {
+        // The first step of a cumulative histogram has no distribution.
+        let Some(distribution) = &bucket.histogram else {
             let mut cells = vec!["-".to_owned(); 6];
-            cells[0] = table::time(bucket.time);
+            cells[0] = table::format_utc_time(bucket.start_at);
             table.row(cells);
             continue;
         };
         #[expect(clippy::cast_precision_loss, reason = "an average to print")]
-        let avg = d
+        let avg = distribution
             .sum
-            .filter(|_| d.count > 0)
-            .map(|sum| sum / d.count as f64);
+            .filter(|_| distribution.count > 0)
+            .map(|sum| sum / distribution.count as f64);
         table.row(vec![
-            table::time(bucket.time),
-            d.count.to_string(),
+            table::format_utc_time(bucket.start_at),
+            distribution.count.to_string(),
             estimate(avg),
-            estimate(d.p50),
-            estimate(d.p90),
-            estimate(d.p99),
+            estimate(distribution.p50),
+            estimate(distribution.p90),
+            estimate(distribution.p99),
         ]);
     }
     table.print()

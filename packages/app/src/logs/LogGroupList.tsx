@@ -7,6 +7,7 @@ import { type Column, Table } from "@siner/viz";
 import { body, detail, heading, times } from "../classes";
 import { templateTerm } from "../query";
 import { ago, formatTime, parseTime } from "../time";
+import { levelName } from "./level";
 
 /** A template with its placeholders marked, so the fixed words stand out. */
 function Template(props: { text: string }) {
@@ -40,8 +41,8 @@ export default function LogGroupList(props: {
       id: "level",
       label: "Level",
       width: "max-content",
-      value: (g) => g.level,
-      cell: (g) => <Level level={g.level} />,
+      value: (g) => levelName(g.severity),
+      cell: (g) => <Level level={levelName(g.severity)} />,
     },
     {
       id: "template",
@@ -66,11 +67,11 @@ export default function LogGroupList(props: {
       label: "Last",
       align: "end",
       width: "max-content",
-      value: (g) => g.last,
+      value: (g) => g.last_at,
       tone: () => "muted",
       cell: (g) => (
-        <time class="whitespace-nowrap" datetime={g.last} title={g.last}>
-          {ago(parseTime(g.last))}
+        <time class="whitespace-nowrap" datetime={g.last_at} title={g.last_at}>
+          {ago(parseTime(g.last_at))}
         </time>
       ),
     },
@@ -95,7 +96,8 @@ function Samples(props: { group: LogGroup; onShowLines: (term: string) => void }
   return (
     <div class={detail}>
       <div class={times}>
-        From {formatTime(parseTime(props.group.first))} to {formatTime(parseTime(props.group.last))}
+        From {formatTime(parseTime(props.group.first_at))} to{" "}
+        {formatTime(parseTime(props.group.last_at))}
       </div>
       <h3 class={heading}>Samples</h3>
       <For each={props.group.samples}>{(sample) => <pre class={body}>{sample}</pre>}</For>

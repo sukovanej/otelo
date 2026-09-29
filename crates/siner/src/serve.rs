@@ -6,23 +6,21 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::Router;
 use axum::routing::get;
-use siner_telemetry::Indexes;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::own::{self, Destination};
 use crate::ui;
 use siner_api::{self as api, Api};
-use siner_state::State;
+use siner_storage_sqlite::Sqlite;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_DATA_DIR: &str = "/var/lib/siner";
 
-/// Batches the sources can queue for the telemetry writer. An OTLP batch can
-/// hold a few hundred kilobytes, so this bounds the queue to tens of megabytes.
-const TELEMETRY_CAPACITY: usize = 64;
+// An OTLP batch can hold a few hundred kilobytes, so the queue stays at tens of megabytes.
+const TELEMETRY_QUEUE_BATCHES: usize = 64;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -48,7 +46,6 @@ pub struct Args {
     own_telemetry: Destination,
 }
 
-/// The listeners of the daemon, bound before anything else starts.
 struct Listeners {
     api: TcpListener,
     otlp_http: TcpListener,
@@ -65,13 +62,6 @@ impl Listeners {
     }
 }
 
-/// Runs the daemon until SIGTERM or Ctrl-C.
-///
-/// # Errors
-///
-/// When the data directory, the state file, the telemetry writer, the
-/// exporters of its own telemetry, or a listener cannot start, or the server
-/// fails.
 pub fn main(args: Args) -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -90,15 +80,14 @@ pub fn main(args: Args) -> anyhow::Result<()> {
                 async move {
                     signal.await;
                     tracing::info!("stopping");
-                    // The receivers still run, so the last of the daemon's
-                    // own telemetry reaches them.
+                    // The receivers still run, so the daemon's last telemetry reaches them.
                     if let Some(own) = own {
                         let _ = tokio::task::spawn_blocking(move || own.shutdown()).await;
                     }
                     shutdown.cancel();
                 }
             });
-            let result = run(args, listeners, shutdown).await;
+            let result = run_daemon(args, listeners, shutdown).await;
             if let Some(own) = own {
                 tokio::task::spawn_blocking(move || own.shutdown())
                     .await
@@ -108,22 +97,19 @@ pub fn main(args: Args) -> anyhow::Result<()> {
         })
 }
 
-/// Runs the daemon until `shutdown` is cancelled. Every server and source
-/// stops on the same token, and the writer flushes after the sources end.
-async fn run(args: Args, listeners: Listeners, shutdown: CancellationToken) -> anyhow::Result<()> {
+async fn run_daemon(
+    args: Args,
+    listeners: Listeners,
+    shutdown: CancellationToken,
+) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
-    let state = State::open(&args.data)?;
-    let (telemetry, inbox) = siner_telemetry::channel(TELEMETRY_CAPACITY);
-    let mut config = siner_telemetry::Config::new(args.data.join("telemetry"));
-    config.indexes = Indexes::new(state.indexes()?);
+    let storage = Sqlite::open(&args.data)?;
+    let (telemetry, inbox) = siner_storage::batch_channel(TELEMETRY_QUEUE_BATCHES);
+    let writer = storage.spawn_writer(inbox)?;
     let api = Api {
-        dir: config.dir.clone(),
-        retention_days: config.retention_days,
-        indexes: config.indexes.clone(),
-        state: Arc::new(state),
+        storage: Arc::new(storage),
     };
-    let writer = siner_telemetry::Writer::spawn(config, inbox)?;
     let Listeners {
         api: listener,
         otlp_http,
@@ -169,7 +155,6 @@ fn router(api: Api) -> Router {
         .fallback(ui::serve)
 }
 
-/// Resolves on Ctrl-C, and on SIGTERM where there is one.
 fn shutdown_signal() -> io::Result<impl Future<Output = ()>> {
     #[cfg(unix)]
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

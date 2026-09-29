@@ -159,7 +159,7 @@ export default function OperationModal(props: {
               value={requests()?.count}
               unit="count"
               detail={formatValue(
-                rate(requests()?.count ?? 0, seconds(data()?.since ?? "", data()?.until ?? "")),
+                rate(requests()?.count ?? 0, seconds(data()?.start_at ?? "", data()?.end_at ?? "")),
                 "rate",
               )}
               trend={data()?.buckets.map((b) => b.requests.count)}

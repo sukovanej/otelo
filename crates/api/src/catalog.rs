@@ -1,12 +1,9 @@
-//! The endpoints that describe what a query can read: the attribute keys
-//! and the completion of a query.
-
 use std::fmt;
 
 use axum::extract::{Query, State};
 use serde::{Deserialize, Serialize};
 use siner_query::{Signal, SuggestionKind};
-use siner_telemetry::query::{AttributeKeys, ReaderCatalog};
+use siner_storage::query::AttributeKeys;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::error::{ApiResult, ErrorBody};
@@ -44,11 +41,10 @@ impl fmt::Display for SignalName {
     }
 }
 
-/// A parameter of a signal stays a string, so a wrong one gets the JSON of
-/// an error from `parse_signal`; the spec still names the values it takes.
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct SignalParams {
+    // A string, so a wrong signal gets the JSON error of `parse_signal`.
     #[param(value_type = SignalName)]
     signal: String,
 }
@@ -69,8 +65,8 @@ pub async fn attributes(
     Query(params): Query<SignalParams>,
 ) -> ApiResult<AttributeKeys> {
     let signal = parse_signal(&params.signal)?;
-    api.run([None, None], WHOLE_RETENTION, (None, 1), move |r| {
-        Ok(r.reader.attributes(signal)?)
+    api.run_range_query([None, None], WHOLE_RETENTION, (None, 1), move |r| {
+        Ok(r.queries.attributes(signal)?)
     })
     .await
 }
@@ -159,9 +155,9 @@ pub async fn complete(
     let cursor = params.cursor.map_or(q.len(), |chars| {
         q.char_indices().nth(chars).map_or(q.len(), |(i, _)| i)
     });
-    api.run([None, None], WHOLE_RETENTION, (None, 1), move |r| {
+    api.run_range_query([None, None], WHOLE_RETENTION, (None, 1), move |r| {
         let chars = |byte: usize| q[..byte].chars().count();
-        let suggestions = siner_query::complete(&q, cursor, signal, &ReaderCatalog(&r.reader))
+        let suggestions = siner_query::complete(&q, cursor, signal, &*r.queries)
             .into_iter()
             .map(|s| SuggestionBody {
                 start: chars(s.replace.start),

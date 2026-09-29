@@ -33,7 +33,7 @@ export default function CallsSection(props: {
   callHref: (row: CallRow) => string;
   onOpenCall: (row: CallRow) => void;
 }) {
-  const rangeSeconds = () => seconds(props.calls.since, props.calls.until);
+  const rangeSeconds = () => seconds(props.calls.start_at, props.calls.end_at);
 
   const frame = createMemo(() => timeFrame(props.calls));
   const countChart = createMemo(() => requestSeries(props.calls.buckets));

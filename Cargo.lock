@@ -1772,8 +1772,8 @@ dependencies = [
  "siner-api",
  "siner-otlp",
  "siner-query",
- "siner-state",
- "siner-telemetry",
+ "siner-storage",
+ "siner-storage-sqlite",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1792,8 +1792,8 @@ dependencies = [
  "jiff",
  "serde",
  "siner-query",
- "siner-state",
- "siner-telemetry",
+ "siner-storage",
+ "siner-storage-sqlite",
  "tempfile",
  "tokio",
  "tracing",
@@ -1817,7 +1817,8 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "siner-telemetry",
+ "siner-storage",
+ "siner-storage-sqlite",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1834,18 +1835,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "siner-state"
+name = "siner-storage"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "rusqlite",
+ "jiff",
+ "serde",
+ "serde_json",
  "siner-query",
- "siner-telemetry",
- "tempfile",
+ "utoipa",
 ]
 
 [[package]]
-name = "siner-telemetry"
+name = "siner-storage-sqlite"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -1854,6 +1856,7 @@ dependencies = [
  "serde",
  "serde_json",
  "siner-query",
+ "siner-storage",
  "tempfile",
  "tracing",
  "twox-hash",

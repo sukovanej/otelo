@@ -1,13 +1,10 @@
-//! The errors of the API, each a status and a JSON body.
-
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use siner_telemetry::query::InvalidQuery;
 use utoipa::ToSchema;
 
-use crate::TIME_LIMIT;
+use crate::QUERY_TIME_LIMIT;
 
 /// The body of every error response.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -36,20 +33,24 @@ impl ApiError {
     }
 }
 
-impl From<anyhow::Error> for ApiError {
-    fn from(error: anyhow::Error) -> Self {
-        if siner_telemetry::timed_out(&error) {
-            return Self {
+impl From<siner_storage::Error> for ApiError {
+    fn from(error: siner_storage::Error) -> Self {
+        match error {
+            siner_storage::Error::InvalidQuery(message) => Self::bad_request(&message),
+            siner_storage::Error::TimedOut => Self {
                 status: StatusCode::BAD_REQUEST,
                 message: format!(
                     "the query ran longer than {} s; narrow the range or the query",
-                    TIME_LIMIT.as_secs()
+                    QUERY_TIME_LIMIT.as_secs()
                 ),
-            };
+            },
+            siner_storage::Error::Backend(error) => error.into(),
         }
-        if let Some(invalid) = error.downcast_ref::<InvalidQuery>() {
-            return Self::bad_request(invalid);
-        }
+    }
+}
+
+impl From<anyhow::Error> for ApiError {
+    fn from(error: anyhow::Error) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: format!("{error:#}"),

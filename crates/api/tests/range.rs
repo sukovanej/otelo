@@ -1,10 +1,8 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use jiff::Timestamp;
 use siner_api::{Api, nanos, parse_duration, parse_time};
-use siner_state::State;
-use siner_telemetry::{Day, Indexes};
+use siner_storage_sqlite::{Day, Sqlite};
 
 const HOUR: i64 = 3600 * 1_000_000_000;
 
@@ -25,12 +23,10 @@ fn parses_durations_and_timestamps() {
 fn caps_the_range_at_the_retention() {
     let dir = tempfile::tempdir().unwrap();
     let api = Api {
-        dir: PathBuf::new(),
-        retention_days: 7,
-        indexes: Indexes::default(),
-        state: Arc::new(State::open(dir.path()).unwrap()),
+        storage: Arc::new(Sqlite::open(dir.path()).unwrap()),
     };
-    let (since, _) = api.range(Some("30d"), None, None).unwrap();
-    assert_eq!(since, Day::today().plus(-6).start());
-    assert!(api.range(Some("1h"), Some("2h"), None).is_err());
+    let range = api.resolve_range(Some("30d"), None, None).unwrap();
+    assert_eq!(range.start_at(), Day::today().plus(-6).start());
+    assert!(api.resolve_range(Some("1h"), Some("2h"), None).is_err());
+    assert!(api.resolve_range(Some("30d"), Some("20d"), None).is_err());
 }

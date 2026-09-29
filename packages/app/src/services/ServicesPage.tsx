@@ -22,7 +22,7 @@ export default function ServicesPage() {
   const fetched = createRangeFetch(range, () => ({}), getServices);
   const rangeSeconds = () => {
     const data = fetched.data();
-    return data ? seconds(data.since, data.until) : 0;
+    return data ? seconds(data.start_at, data.end_at) : 0;
   };
 
   const columns: Column<ServiceSummary>[] = [

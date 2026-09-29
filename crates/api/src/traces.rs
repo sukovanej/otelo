@@ -1,8 +1,7 @@
-//! The endpoints of the spans, the traces by their root span, and one trace.
-
 use axum::extract::{Path, Query, State};
 use siner_query::Signal;
-use siner_telemetry::query::{self, Spans, Trace, Traces};
+use siner_storage::TraceId;
+use siner_storage::query::{Spans, Trace, Traces};
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{LookupParams, QueryParams, parse_query};
@@ -20,11 +19,11 @@ use crate::{Api, WHOLE_RETENTION};
 )]
 pub async fn spans(State(api): State<Api>, Query(params): Query<QueryParams>) -> ApiResult<Spans> {
     let query = parse_query(params.q.as_deref(), Signal::Spans)?;
-    api.run(
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 100),
-        move |r| Ok(r.reader.spans(&query, r.limit)?),
+        move |r| Ok(r.queries.spans(&query, r.limit)?),
     )
     .await
 }
@@ -44,11 +43,11 @@ pub async fn traces(
     Query(params): Query<QueryParams>,
 ) -> ApiResult<Traces> {
     let query = parse_query(params.q.as_deref(), Signal::Spans)?;
-    api.run(
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 50),
-        move |r| Ok(r.reader.traces(&query, r.limit)?),
+        move |r| Ok(r.queries.traces(&query, r.limit)?),
     )
     .await
 }
@@ -72,13 +71,13 @@ pub async fn trace(
     Path(trace_id): Path<String>,
     Query(params): Query<LookupParams>,
 ) -> ApiResult<Trace> {
-    let id = query::parse_trace_id(&trace_id).map_err(|e| ApiError::bad_request(&e))?;
-    api.run(
+    let id = TraceId::parse_hex(&trace_id).map_err(|e| ApiError::bad_request(&e))?;
+    api.run_range_query(
         [params.since, params.until],
         WHOLE_RETENTION,
         (params.limit, 1000),
         move |r| {
-            r.reader
+            r.queries
                 .trace(id, r.limit)?
                 .ok_or_else(|| ApiError::not_found(format!("no spans or logs of trace {trace_id}")))
         },

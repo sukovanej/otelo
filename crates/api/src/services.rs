@@ -1,16 +1,14 @@
-//! The endpoints of the services, of one service, of one of its
-//! operations, and of the calls it makes.
-
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
-use siner_telemetry::query::{
+use siner_storage::SpanKind;
+use siner_storage::query::{
     CallDetail, Calls, OperationDetail, Service, Services, TargetKey, TargetType,
 };
 use utoipa::IntoParams;
 
 use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
-use crate::params::{check_step, parse_step};
+use crate::params::{parse_step_ns, resolve_step};
 
 /// The range, the limit, and the step of the services.
 #[derive(Deserialize, IntoParams)]
@@ -45,14 +43,14 @@ pub async fn services(
     State(api): State<Api>,
     Query(params): Query<ServiceParams>,
 ) -> ApiResult<Services> {
-    let step = parse_step(params.step.as_deref())?;
-    api.run(
+    let step = parse_step_ns(params.step.as_deref())?;
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 100),
         move |r| {
-            let step_ns = check_step(&r, step, 60)?;
-            Ok(r.reader.services(step_ns, r.limit)?)
+            let step_ns = resolve_step(&r, step, 60)?;
+            Ok(r.queries.services(step_ns, r.limit)?)
         },
     )
     .await
@@ -78,14 +76,14 @@ pub async fn service(
     Path(name): Path<String>,
     Query(params): Query<ServiceParams>,
 ) -> ApiResult<Service> {
-    let step = parse_step(params.step.as_deref())?;
-    api.run(
+    let step = parse_step_ns(params.step.as_deref())?;
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 50),
         move |r| {
-            let step_ns = check_step(&r, step, 120)?;
-            Ok(r.reader.service(&name, step_ns, r.limit)?)
+            let step_ns = resolve_step(&r, step, 120)?;
+            Ok(r.queries.service(&name, step_ns, r.limit)?)
         },
     )
     .await
@@ -129,11 +127,12 @@ pub async fn operation(
     Path(name): Path<String>,
     Query(params): Query<OperationParams>,
 ) -> ApiResult<OperationDetail> {
-    let step = parse_step(params.step.as_deref())?;
+    let step = parse_step_ns(params.step.as_deref())?;
     let (operation, kind) = (params.operation, params.kind);
-    api.run([params.since, params.until], None, (None, 1), move |r| {
-        let step_ns = check_step(&r, step, 120)?;
-        Ok(r.reader.operation(&name, &operation, kind, step_ns)?)
+    api.run_range_query([params.since, params.until], None, (None, 1), move |r| {
+        let step_ns = resolve_step(&r, step, 120)?;
+        Ok(r.queries
+            .operation(&name, &operation, SpanKind::from_number(kind), step_ns)?)
     })
     .await
 }
@@ -163,14 +162,14 @@ pub async fn calls(
     Path(name): Path<String>,
     Query(params): Query<ServiceParams>,
 ) -> ApiResult<Calls> {
-    let step = parse_step(params.step.as_deref())?;
-    api.run(
+    let step = parse_step_ns(params.step.as_deref())?;
+    api.run_range_query(
         [params.since, params.until],
         None,
         (params.limit, 50),
         move |r| {
-            let step_ns = check_step(&r, step, 120)?;
-            Ok(r.reader.calls(&name, step_ns, r.limit)?)
+            let step_ns = resolve_step(&r, step, 120)?;
+            Ok(r.queries.calls(&name, step_ns, r.limit)?)
         },
     )
     .await
@@ -225,16 +224,22 @@ pub async fn call(
     Path(name): Path<String>,
     Query(params): Query<CallParams>,
 ) -> ApiResult<CallDetail> {
-    let step = parse_step(params.step.as_deref())?;
+    let step = parse_step_ns(params.step.as_deref())?;
     let target = TargetKey {
         target_type: params.target_type,
         system: params.system,
         name: params.target,
     };
     let (summary, kind) = (params.summary, params.kind);
-    api.run([params.since, params.until], None, (None, 1), move |r| {
-        let step_ns = check_step(&r, step, 120)?;
-        Ok(r.reader.call(&name, &target, &summary, kind, step_ns)?)
+    api.run_range_query([params.since, params.until], None, (None, 1), move |r| {
+        let step_ns = resolve_step(&r, step, 120)?;
+        Ok(r.queries.call(
+            &name,
+            &target,
+            &summary,
+            SpanKind::from_number(kind),
+            step_ns,
+        )?)
     })
     .await
 }

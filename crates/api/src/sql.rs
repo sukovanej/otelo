@@ -1,13 +1,11 @@
-//! The endpoint of read-only SQL over the day files.
-
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
-use siner_telemetry::query::SqlResult;
+use siner_storage::query::SqlResult;
 use utoipa::ToSchema;
 
 use crate::Api;
-use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::error::{ApiResult, ErrorBody};
 
 /// A read-only SQL query.
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -39,19 +37,11 @@ pub struct SqlRequest {
 )]
 pub async fn sql(State(api): State<Api>, Json(request): Json<SqlRequest>) -> ApiResult<SqlResult> {
     let sql = request.sql;
-    api.run(
+    api.run_range_query(
         [request.since, request.until],
         None,
         (request.limit, 100),
-        move |r| {
-            r.reader.sql(&sql, r.limit).map_err(|e| {
-                if siner_telemetry::timed_out(&e) {
-                    e.into()
-                } else {
-                    ApiError::bad_request(&e)
-                }
-            })
-        },
+        move |r| Ok(r.queries.sql(&sql, r.limit)?),
     )
     .await
 }

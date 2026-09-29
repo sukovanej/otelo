@@ -1,5 +1,3 @@
-//! OTLP over gRPC: the logs, trace, and metrics collector services.
-
 use anyhow::Context;
 use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::{
     LogsService, LogsServiceServer,
@@ -19,7 +17,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use siner_telemetry::Sender;
+use siner_storage::Sender;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tonic::codec::CompressionEncoding;
@@ -27,15 +25,9 @@ use tonic::transport::Server;
 use tonic::transport::server::TcpIncoming;
 use tonic::{Request, Response, Status};
 
-use crate::{Export, MAX_REQUEST};
+use crate::{ExportRequest, MAX_REQUEST_BYTES};
 
-/// Serves the OTLP collector services on `listener` until `shutdown` is
-/// cancelled.
-///
-/// # Errors
-///
-/// When the server fails.
-pub async fn serve(
+pub async fn serve_grpc(
     listener: TcpListener,
     sender: Sender,
     shutdown: CancellationToken,
@@ -45,17 +37,17 @@ pub async fn serve(
         .add_service(
             LogsServiceServer::new(receiver.clone())
                 .accept_compressed(CompressionEncoding::Gzip)
-                .max_decoding_message_size(MAX_REQUEST),
+                .max_decoding_message_size(MAX_REQUEST_BYTES),
         )
         .add_service(
             TraceServiceServer::new(receiver.clone())
                 .accept_compressed(CompressionEncoding::Gzip)
-                .max_decoding_message_size(MAX_REQUEST),
+                .max_decoding_message_size(MAX_REQUEST_BYTES),
         )
         .add_service(
             MetricsServiceServer::new(receiver)
                 .accept_compressed(CompressionEncoding::Gzip)
-                .max_decoding_message_size(MAX_REQUEST),
+                .max_decoding_message_size(MAX_REQUEST_BYTES),
         )
         .serve_with_incoming_shutdown(TcpIncoming::from(listener), shutdown.cancelled_owned())
         .await
@@ -71,7 +63,9 @@ impl LogsService for Receiver {
         &self,
         request: Request<ExportLogsServiceRequest>,
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
-        Ok(Response::new(request.into_inner().receive(&self.0)))
+        Ok(Response::new(
+            request.into_inner().store_and_respond(&self.0),
+        ))
     }
 }
 
@@ -81,7 +75,9 @@ impl TraceService for Receiver {
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
-        Ok(Response::new(request.into_inner().receive(&self.0)))
+        Ok(Response::new(
+            request.into_inner().store_and_respond(&self.0),
+        ))
     }
 }
 
@@ -91,6 +87,8 @@ impl MetricsService for Receiver {
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
-        Ok(Response::new(request.into_inner().receive(&self.0)))
+        Ok(Response::new(
+            request.into_inner().store_and_respond(&self.0),
+        ))
     }
 }

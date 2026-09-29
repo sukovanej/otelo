@@ -22,7 +22,7 @@ export interface TreeRow {
 export function spanTree(spans: TraceSpan[]): TreeRow[] {
   const start = spans.reduce<string | undefined>(
     (first, span) =>
-      first === undefined || nanosBetween(first, span.time) < 0 ? span.time : first,
+      first === undefined || nanosBetween(first, span.started_at) < 0 ? span.started_at : first,
     undefined,
   );
   const ids = new Set(spans.map((span) => span.span_id));
@@ -47,7 +47,7 @@ export function spanTree(spans: TraceSpan[]): TreeRow[] {
       span,
       depth,
       children: kids.length,
-      offset: start === undefined ? 0 : nanosBetween(start, span.time),
+      offset: start === undefined ? 0 : nanosBetween(start, span.started_at),
     });
     for (const kid of kids) visit(kid, depth + 1);
   };

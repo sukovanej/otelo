@@ -4,6 +4,7 @@ import { type Column, Table } from "@siner/viz";
 import Service from "../Service";
 import { formatTime, parseTime } from "../time";
 import KindBadge from "./KindBadge";
+import { spanFailed } from "./span";
 import SpanTitle from "./SpanTitle";
 
 /** What tells a span apart, so it stays selected when a reload brings it
@@ -15,11 +16,11 @@ const COLUMNS: Column<TraceSpan>[] = [
     id: "time",
     label: "Time",
     width: "max-content",
-    value: (span) => span.time,
+    value: (span) => span.started_at,
     tone: () => "muted",
     cell: (span) => (
-      <time class="whitespace-nowrap" datetime={span.time}>
-        {formatTime(parseTime(span.time))}
+      <time class="whitespace-nowrap" datetime={span.started_at}>
+        {formatTime(parseTime(span.started_at))}
       </time>
     ),
   },
@@ -36,7 +37,9 @@ const COLUMNS: Column<TraceSpan>[] = [
     label: "Name",
     width: "minmax(0,1fr)",
     value: (span) => span.name,
-    cell: (span) => <SpanTitle name={span.name} attributes={span.attributes} error={span.error} />,
+    cell: (span) => (
+      <SpanTitle name={span.name} attributes={span.attributes} error={spanFailed(span)} />
+    ),
   },
   {
     id: "kind",
@@ -69,7 +72,7 @@ export default function SpanList(props: {
       rows={props.spans}
       columns={COLUMNS}
       selected={(span) => props.selected === spanKey(span)}
-      tone={(span) => (span.error ? "error" : undefined)}
+      tone={(span) => (spanFailed(span) ? "error" : undefined)}
       onRowClick={(span) => props.onSelect(props.selected === spanKey(span) ? undefined : span)}
     />
   );

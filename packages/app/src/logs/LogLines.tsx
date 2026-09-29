@@ -4,11 +4,12 @@ import { type Column, Table } from "@siner/viz";
 
 import Service from "../Service";
 import { formatTime, parseTime } from "../time";
+import { levelName } from "./level";
 
 /** What tells a line apart, so it stays selected when a reload brings it
  * again. */
 export const lineKey = (line: LogLine) =>
-  `${line.time} ${line.service} ${line.span_id ?? ""} ${line.body}`;
+  `${line.logged_at} ${line.service} ${line.span_id ?? ""} ${line.body}`;
 
 /** The lowest severity number of ERROR. */
 const ERROR = 17;
@@ -18,11 +19,11 @@ const COLUMNS: Column<LogLine>[] = [
     id: "time",
     label: "Time",
     width: "max-content",
-    value: (line) => line.time,
+    value: (line) => line.logged_at,
     tone: () => "muted",
     cell: (line) => (
-      <time class="whitespace-nowrap" datetime={line.time}>
-        {formatTime(parseTime(line.time))}
+      <time class="whitespace-nowrap" datetime={line.logged_at}>
+        {formatTime(parseTime(line.logged_at))}
       </time>
     ),
   },
@@ -30,8 +31,8 @@ const COLUMNS: Column<LogLine>[] = [
     id: "level",
     label: "Level",
     width: "max-content",
-    value: (line) => line.level,
-    cell: (line) => <Level level={line.level} />,
+    value: (line) => levelName(line.severity),
+    cell: (line) => <Level level={levelName(line.severity)} />,
   },
   {
     id: "service",

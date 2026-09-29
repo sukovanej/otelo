@@ -1,19 +1,14 @@
-//! Snapshots of what each query in `parse/<signal>/*.txt` parses to, one
-//! query per line.
-
 use std::fmt::Write;
 use std::path::Path;
 
 use siner_query::{Builtin, Expr, Field, Op, Query, Signal, Value, parse};
 
-/// The signal of a case file: the name of its directory.
-fn signal(path: &Path) -> Signal {
+fn signal_of_case_file(path: &Path) -> Signal {
     let dir = path.parent().and_then(Path::file_name).unwrap();
     dir.to_str().unwrap().parse().unwrap()
 }
 
-/// What kind of field each name resolved to.
-fn describe(field: &Field) -> String {
+fn describe_resolved_field(field: &Field) -> String {
     match field {
         Field::Builtin(builtin) => format!("{} (built-in)", Builtin::name(*builtin)),
         Field::Attribute(key) => format!("{key:?} (attribute)"),
@@ -24,14 +19,18 @@ fn describe(field: &Field) -> String {
 #[test]
 fn queries() {
     insta::glob!("parse/**/*.txt", |path| {
-        let signal = signal(path);
+        let signal = signal_of_case_file(path);
         let mut out = String::new();
         for line in std::fs::read_to_string(path).unwrap().lines() {
             writeln!(out, "> {line}").unwrap();
             match parse(line, signal) {
                 Ok(query) => {
                     writeln!(out, "{query}").unwrap();
-                    let fields: Vec<String> = query.fields().into_iter().map(describe).collect();
+                    let fields: Vec<String> = query
+                        .fields()
+                        .into_iter()
+                        .map(describe_resolved_field)
+                        .collect();
                     writeln!(out, "fields: {}", fields.join(", ")).unwrap();
                 }
                 Err(error) => writeln!(out, "error: {error}").unwrap(),

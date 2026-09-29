@@ -1,6 +1,3 @@
-//! OTLP over HTTP: `POST /v1/logs`, `/v1/traces`, and `/v1/metrics`, with a
-//! protobuf or JSON body, gzip or not.
-
 use std::io::Read;
 
 use anyhow::Context;
@@ -17,18 +14,13 @@ use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequ
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use serde::Serialize;
 use serde_json::Value;
-use siner_telemetry::Sender;
+use siner_storage::Sender;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-use crate::{Export, MAX_REQUEST};
+use crate::{ExportRequest, MAX_REQUEST_BYTES};
 
-/// Serves OTLP over HTTP on `listener` until `shutdown` is cancelled.
-///
-/// # Errors
-///
-/// When the server fails.
-pub async fn serve(
+pub async fn serve_http(
     listener: TcpListener,
     sender: Sender,
     shutdown: CancellationToken,
@@ -44,11 +36,11 @@ fn router(sender: Sender) -> Router {
         .route("/v1/logs", post(export::<ExportLogsServiceRequest>))
         .route("/v1/traces", post(export::<ExportTraceServiceRequest>))
         .route("/v1/metrics", post(export::<ExportMetricsServiceRequest>))
-        .layer(DefaultBodyLimit::max(MAX_REQUEST))
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(sender)
 }
 
-async fn export<R: Export>(
+async fn export<R: ExportRequest>(
     State(sender): State<Sender>,
     headers: HeaderMap,
     body: Bytes,
@@ -57,8 +49,8 @@ async fn export<R: Export>(
         Ok(format) => format,
         Err(refusal) => return refusal.respond(Format::Protobuf),
     };
-    match inflate(&headers, body).and_then(|body| format.decode::<R>(&body)) {
-        Ok(request) => format.encode(StatusCode::OK, &request.receive(&sender)),
+    match decompress_body(&headers, body).and_then(|body| format.decode::<R>(&body)) {
+        Ok(request) => format.encode(StatusCode::OK, &request.store_and_respond(&sender)),
         Err(refusal) => refusal.respond(format),
     }
 }
@@ -94,13 +86,13 @@ impl Format {
             })
     }
 
-    fn decode<R: Export>(self, body: &[u8]) -> Result<R, Refusal> {
+    fn decode<R: ExportRequest>(self, body: &[u8]) -> Result<R, Refusal> {
         match self {
             Self::Protobuf => R::decode(body).map_err(|error| Refusal::bad(error.to_string())),
             Self::Json => {
                 let mut value = serde_json::from_slice(body)
                     .map_err(|error| Refusal::bad(error.to_string()))?;
-                int_strings(&mut value);
+                convert_as_int_strings_to_numbers(&mut value);
                 R::deserialize(value).map_err(|error| Refusal::bad(error.to_string()))
             }
         }
@@ -120,10 +112,9 @@ impl Format {
     }
 }
 
-/// Turns each `asInt` written as a string, as proto3 JSON writes an int64,
-/// into a number. The decoder of `opentelemetry-proto` takes only a number
-/// there, and would lose the value.
-fn int_strings(value: &mut Value) {
+// Proto3 JSON writes an int64 as a string, but the decoder of opentelemetry-proto
+// takes only a number for `asInt`, and would lose the value.
+fn convert_as_int_strings_to_numbers(value: &mut Value) {
     match value {
         Value::Object(object) => {
             for (key, value) in object {
@@ -133,17 +124,18 @@ fn int_strings(value: &mut Value) {
                             *value = int.into();
                         }
                     }
-                    _ => int_strings(value),
+                    _ => convert_as_int_strings_to_numbers(value),
                 }
             }
         }
-        Value::Array(values) => values.iter_mut().for_each(int_strings),
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(convert_as_int_strings_to_numbers),
         _ => {}
     }
 }
 
-/// Undoes the content encoding of the body.
-fn inflate(headers: &HeaderMap, body: Bytes) -> Result<Bytes, Refusal> {
+fn decompress_body(headers: &HeaderMap, body: Bytes) -> Result<Bytes, Refusal> {
     let encoding = headers
         .get(CONTENT_ENCODING)
         .map(|value| value.to_str().unwrap_or_default().trim());
@@ -153,14 +145,14 @@ fn inflate(headers: &HeaderMap, body: Bytes) -> Result<Bytes, Refusal> {
         Some(encoding) if encoding.eq_ignore_ascii_case("gzip") => {
             let mut inflated = Vec::new();
             GzDecoder::new(&body[..])
-                .take(MAX_REQUEST as u64 + 1)
+                .take(MAX_REQUEST_BYTES as u64 + 1)
                 .read_to_end(&mut inflated)
                 .map_err(|error| Refusal::bad(format!("inflate the gzip body: {error}")))?;
-            if inflated.len() > MAX_REQUEST {
+            if inflated.len() > MAX_REQUEST_BYTES {
                 return Err(Refusal {
                     status: StatusCode::PAYLOAD_TOO_LARGE,
                     code: tonic::Code::ResourceExhausted,
-                    message: format!("the request is over {MAX_REQUEST} bytes after gzip"),
+                    message: format!("the request is over {MAX_REQUEST_BYTES} bytes after gzip"),
                 });
             }
             Ok(inflated.into())
@@ -171,8 +163,6 @@ fn inflate(headers: &HeaderMap, body: Bytes) -> Result<Bytes, Refusal> {
     }
 }
 
-/// Why a request was refused. The body is a `google.rpc.Status`, as OTLP/HTTP
-/// asks.
 struct Refusal {
     status: StatusCode,
     code: tonic::Code,
@@ -196,8 +186,9 @@ impl Refusal {
         }
     }
 
+    // OTLP/HTTP answers a refused request with a google.rpc.Status.
     fn respond(self, format: Format) -> Response {
-        let status = Status {
+        let status = RpcStatus {
             code: self.code as i32,
             message: self.message,
         };
@@ -205,9 +196,8 @@ impl Refusal {
     }
 }
 
-/// `google.rpc.Status` without its details.
 #[derive(Clone, PartialEq, Eq, prost::Message, Serialize)]
-struct Status {
+struct RpcStatus {
     #[prost(int32, tag = "1")]
     code: i32,
     #[prost(string, tag = "2")]

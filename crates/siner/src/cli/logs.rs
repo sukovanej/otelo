@@ -1,11 +1,9 @@
-//! `siner logs`: log lines, or their groups by message template.
-
 use siner_query::Signal;
-use siner_telemetry::query::{GROUP_SCAN_LIMIT, LogGroups, Logs};
+use siner_storage::query::{GROUP_SCAN_LIMIT, LogGroups, Logs};
 
 use super::client::{Client, note_cut, print_json};
 use super::table::{self, Table};
-use super::{QUERY_HELP, Range, joined, note_unindexed};
+use super::{QUERY_HELP, Range, join_query_words, note_unindexed};
 
 #[derive(clap::Args)]
 pub struct LogsArgs {
@@ -23,14 +21,9 @@ pub struct LogsArgs {
     client: Client,
 }
 
-/// Runs `siner logs`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
-    params.push(("q", joined(&args.query)));
+    params.push(("q", join_query_words(&args.query)));
     let narrow = "narrow them with the query or --since, or raise --limit";
     if args.raw {
         let logs: Logs = args.client.get("/api/logs", &params)?;
@@ -38,10 +31,11 @@ pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
             let mut table = Table::new(&["TIME (UTC)", "SERVICE", "LEVEL", "TRACE", "BODY"]);
             for line in &logs.logs {
                 table.row(vec![
-                    table::time(line.time),
+                    table::format_utc_time(line.logged_at),
                     line.service.clone(),
-                    line.level.clone(),
-                    line.trace_id.clone().unwrap_or_else(|| "-".into()),
+                    line.severity.level().into(),
+                    line.trace_id
+                        .map_or_else(|| "-".into(), |id| id.to_string()),
                     line.body.clone(),
                 ]);
             }
@@ -59,13 +53,13 @@ pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
         for group in &groups.groups {
             table.row(vec![
                 group.count.to_string(),
-                group.level.clone(),
+                group.severity.level().into(),
                 group.services.join(","),
-                table::time(group.last),
+                table::format_utc_time(group.last_at),
                 group.template.clone(),
             ]);
             if let Some(sample) = group.samples.first().filter(|s| **s != group.template) {
-                table.under(&format!("e.g. {sample}"));
+                table.add_line_under_last_row(&format!("e.g. {sample}"));
             }
         }
         table.print()?;

@@ -1,17 +1,15 @@
-//! `siner services`, `siner service`, and `siner calls`.
-
 use std::io;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use siner_telemetry::Attributes;
-use siner_telemetry::query::{
+use siner_storage::Attributes;
+use siner_storage::query::{
     CallOperation, Calls, Operation, RequestBucket, Requests, Service, ServiceBucket, ServiceStats,
     Services, Target, TargetKey, TargetType,
 };
 
 use super::Range;
-use super::client::{Client, note_cut, path_segment, print_json};
+use super::client::{Client, escape_path_segment, note_cut, print_json};
 use super::table::{self, Table};
 
 #[derive(clap::Args)]
@@ -32,11 +30,6 @@ pub struct ServicesArgs {
     client: Client,
 }
 
-/// Runs `siner services`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn services(args: &ServicesArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("step", args.step.clone()));
@@ -68,7 +61,7 @@ pub fn services(args: &ServicesArgs) -> anyhow::Result<()> {
                 println!(
                     "{} every {}",
                     service.service,
-                    table::duration(list.step_ns)
+                    table::format_duration(list.step_ns)
                 );
                 print_steps(&service.buckets)?;
             }
@@ -76,7 +69,7 @@ pub fn services(args: &ServicesArgs) -> anyhow::Result<()> {
     } else if args.buckets {
         print_json(&list)?;
     } else {
-        print_json(&ServicesTotals::of(&list))?;
+        print_json(&ServicesWithoutBuckets::of(&list))?;
     }
     note_cut(
         list.truncated,
@@ -106,16 +99,11 @@ pub struct ServiceArgs {
     client: Client,
 }
 
-/// Runs `siner service`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn service(args: &ServiceArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("step", args.step.clone()));
     let service: Service = args.client.get(
-        &format!("/api/services/{}", path_segment(&args.name)),
+        &format!("/api/services/{}", escape_path_segment(&args.name)),
         &params,
     )?;
     if args.client.wants_table() {
@@ -142,20 +130,20 @@ pub fn service(args: &ServiceArgs) -> anyhow::Result<()> {
             for operation in &service.operations {
                 let mut cells = vec![operation.name.clone()];
                 cells.extend(request_cells(&operation.requests));
-                cells.push(table::duration(operation.requests.total_ns));
+                cells.push(table::format_duration(operation.requests.total_ns));
                 table.row(cells);
             }
             table.print()?;
         }
         if args.buckets {
             println!();
-            println!("every {}", table::duration(service.step_ns));
+            println!("every {}", table::format_duration(service.step_ns));
             print_steps(&service.buckets)?;
         }
     } else if args.buckets {
         print_json(&service)?;
     } else {
-        print_json(&ServiceTotals::of(&service))?;
+        print_json(&ServiceWithoutBuckets::of(&service))?;
     }
     note_cut(
         service.truncated,
@@ -185,16 +173,11 @@ pub struct CallsArgs {
     client: Client,
 }
 
-/// Runs `siner calls`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
     let mut params = args.range.params();
     params.push(("step", args.step.clone()));
     let answer: Calls = args.client.get(
-        &format!("/api/services/{}/calls", path_segment(&args.name)),
+        &format!("/api/services/{}/calls", escape_path_segment(&args.name)),
         &params,
     )?;
     if args.client.wants_table() {
@@ -203,7 +186,7 @@ pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
             answer.service,
             answer.calls.count,
             answer.calls.errors,
-            table::duration(answer.calls.total_ns),
+            table::format_duration(answer.calls.total_ns),
         );
         if !answer.targets.is_empty() {
             println!();
@@ -212,7 +195,7 @@ pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
             for target in &answer.targets {
                 let mut cells = vec![target_label(&target.key)];
                 cells.extend(request_cells(&target.calls));
-                cells.push(table::duration(target.calls.total_ns));
+                cells.push(table::format_duration(target.calls.total_ns));
                 table.row(cells);
             }
             table.print()?;
@@ -230,20 +213,20 @@ pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
             for (key, operation) in operations {
                 let mut cells = vec![target_label(key), operation.summary.clone()];
                 cells.extend(request_cells(&operation.calls));
-                cells.push(table::duration(operation.calls.total_ns));
+                cells.push(table::format_duration(operation.calls.total_ns));
                 table.row(cells);
             }
             table.print()?;
         }
         if args.buckets {
             println!();
-            println!("every {}", table::duration(answer.step_ns));
+            println!("every {}", table::format_duration(answer.step_ns));
             print_call_steps(&answer.buckets)?;
         }
     } else if args.buckets {
         print_json(&answer)?;
     } else {
-        print_json(&CallsTotals::of(&answer))?;
+        print_json(&CallsWithoutBuckets::of(&answer))?;
     }
     note_cut(
         answer.truncated,
@@ -252,8 +235,6 @@ pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A target as the system or the type, and the name, such as
-/// `postgresql app` or `http api.stripe.com`.
 fn target_label(key: &TargetKey) -> String {
     let kind = key.system.clone().unwrap_or_else(|| {
         match key.target_type {
@@ -271,25 +252,22 @@ fn target_label(key: &TargetKey) -> String {
     }
 }
 
-/// The calls of each step.
 fn print_call_steps(buckets: &[RequestBucket]) -> io::Result<()> {
     let mut table = Table::new(&["TIME (UTC)", "CALLS", "ERRORS", "P50", "P95", "P99"]);
     for bucket in buckets {
-        let mut cells = vec![table::time(bucket.time)];
+        let mut cells = vec![table::format_utc_time(bucket.start_at)];
         cells.extend(request_cells(&bucket.requests));
         table.row(cells);
     }
     table.print()
 }
 
-/// The count, the errors, and the percentiles of requests, with dashes for
-/// the percentiles when there are none.
 fn request_cells(requests: &Requests) -> [String; 5] {
-    let percentile = |pick: fn(&siner_telemetry::query::Latency) -> i64| {
-        requests
-            .latency
-            .as_ref()
-            .map_or_else(|| "-".into(), |latency| table::duration(pick(latency)))
+    let percentile = |pick: fn(&siner_storage::query::Latency) -> i64| {
+        requests.latency.as_ref().map_or_else(
+            || "-".into(),
+            |latency| table::format_duration(pick(latency)),
+        )
     };
     [
         requests.count.to_string(),
@@ -300,7 +278,6 @@ fn request_cells(requests: &Requests) -> [String; 5] {
     ]
 }
 
-/// The requests and the logs of each step.
 fn print_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
     let mut table = Table::new(&[
         "TIME (UTC)",
@@ -313,7 +290,7 @@ fn print_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
         "ERROR LOGS",
     ]);
     for bucket in buckets {
-        let mut cells = vec![table::time(bucket.time)];
+        let mut cells = vec![table::format_utc_time(bucket.start_at)];
         cells.extend(request_cells(&bucket.requests));
         cells.extend([bucket.logs.to_string(), bucket.error_logs.to_string()]);
         table.row(cells);
@@ -321,32 +298,30 @@ fn print_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
     table.print()
 }
 
-/// The services over the range without their steps, which `--buckets` adds,
-/// so the JSON stays short.
 #[derive(Serialize)]
-struct ServicesTotals<'a> {
-    since: Timestamp,
-    until: Timestamp,
-    services: Vec<ServiceSummaryTotals<'a>>,
+struct ServicesWithoutBuckets<'a> {
+    start_at: Timestamp,
+    end_at: Timestamp,
+    services: Vec<ServiceSummaryWithoutBuckets<'a>>,
     truncated: bool,
 }
 
 #[derive(Serialize)]
-struct ServiceSummaryTotals<'a> {
+struct ServiceSummaryWithoutBuckets<'a> {
     service: &'a str,
     resource: &'a Attributes,
     stats: &'a ServiceStats,
 }
 
-impl<'a> ServicesTotals<'a> {
+impl<'a> ServicesWithoutBuckets<'a> {
     fn of(list: &'a Services) -> Self {
         Self {
-            since: list.since,
-            until: list.until,
+            start_at: list.start_at,
+            end_at: list.end_at,
             services: list
                 .services
                 .iter()
-                .map(|service| ServiceSummaryTotals {
+                .map(|service| ServiceSummaryWithoutBuckets {
                     service: &service.service,
                     resource: &service.resource,
                     stats: &service.stats,
@@ -357,25 +332,24 @@ impl<'a> ServicesTotals<'a> {
     }
 }
 
-/// One service over the range without its steps, which `--buckets` adds.
 #[derive(Serialize)]
-struct ServiceTotals<'a> {
+struct ServiceWithoutBuckets<'a> {
     service: &'a str,
     resource: &'a Attributes,
-    since: Timestamp,
-    until: Timestamp,
+    start_at: Timestamp,
+    end_at: Timestamp,
     stats: &'a ServiceStats,
     operations: &'a [Operation],
     truncated: bool,
 }
 
-impl<'a> ServiceTotals<'a> {
+impl<'a> ServiceWithoutBuckets<'a> {
     fn of(service: &'a Service) -> Self {
         Self {
             service: &service.service,
             resource: &service.resource,
-            since: service.since,
-            until: service.until,
+            start_at: service.start_at,
+            end_at: service.end_at,
             stats: &service.stats,
             operations: &service.operations,
             truncated: service.truncated,
@@ -383,19 +357,18 @@ impl<'a> ServiceTotals<'a> {
     }
 }
 
-/// The calls over the range without their steps, which `--buckets` adds.
 #[derive(Serialize)]
-struct CallsTotals<'a> {
+struct CallsWithoutBuckets<'a> {
     service: &'a str,
-    since: Timestamp,
-    until: Timestamp,
+    start_at: Timestamp,
+    end_at: Timestamp,
     calls: &'a Requests,
-    targets: Vec<TargetTotals<'a>>,
+    targets: Vec<TargetWithoutBuckets<'a>>,
     truncated: bool,
 }
 
 #[derive(Serialize)]
-struct TargetTotals<'a> {
+struct TargetWithoutBuckets<'a> {
     #[serde(flatten)]
     key: &'a TargetKey,
     query: &'a str,
@@ -403,17 +376,17 @@ struct TargetTotals<'a> {
     operations: &'a [CallOperation],
 }
 
-impl<'a> CallsTotals<'a> {
+impl<'a> CallsWithoutBuckets<'a> {
     fn of(calls: &'a Calls) -> Self {
         Self {
             service: &calls.service,
-            since: calls.since,
-            until: calls.until,
+            start_at: calls.start_at,
+            end_at: calls.end_at,
             calls: &calls.calls,
             targets: calls
                 .targets
                 .iter()
-                .map(|target: &'a Target| TargetTotals {
+                .map(|target: &'a Target| TargetWithoutBuckets {
                     key: &target.key,
                     query: &target.query,
                     calls: &target.calls,

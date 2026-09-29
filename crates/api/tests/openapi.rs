@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-/// The web UI generates the types of the API from this file, so a change of
-/// the Rust types has to reach it.
 #[test]
 fn the_web_ui_has_the_spec_of_the_api() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/api/openapi.json");

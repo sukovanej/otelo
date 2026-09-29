@@ -1,12 +1,11 @@
-//! Runs the OTLP receiver in the test process, on a writer of its own.
-
 #![allow(dead_code, reason = "each test file uses a part")]
 
 use std::net::SocketAddr;
 use std::path::Path;
 
 use rusqlite::Connection;
-use siner_telemetry::{Config, Day, Inbox, Sender, Writer, channel};
+use siner_storage::{Inbox, Sender, batch_channel};
+use siner_storage_sqlite::{Config, Day, Writer};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
@@ -23,17 +22,15 @@ pub struct Receiver {
 }
 
 impl Receiver {
-    /// Serves both transports on free ports and writes into `dir`.
-    pub fn start(dir: &Path) -> Self {
-        let (sender, inbox) = channel(64);
+    pub fn start_writing_into(dir: &Path) -> Self {
+        let (sender, inbox) = batch_channel(64);
         let writer = Writer::spawn(Config::new(dir.to_owned()), inbox).unwrap();
         Self::serve(sender, Some(writer))
     }
 
-    /// Serves both transports with a channel of one batch that nothing reads,
-    /// so the second batch finds it full.
-    pub fn full() -> (Self, Inbox) {
-        let (sender, inbox) = channel(1);
+    // Nothing reads the channel of one batch, so the second batch finds it full.
+    pub fn start_with_full_queue() -> (Self, Inbox) {
+        let (sender, inbox) = batch_channel(1);
         (Self::serve(sender, None), inbox)
     }
 
@@ -76,8 +73,7 @@ impl Receiver {
         format!("http://{}{path}", self.http)
     }
 
-    /// Stops the servers and waits until the writer wrote what they took.
-    pub fn stop(self) {
+    pub fn stop_and_wait_for_writer(self) {
         self.shutdown.cancel();
         for server in self.servers {
             self.runtime.block_on(server).unwrap().unwrap();
@@ -89,8 +85,7 @@ impl Receiver {
     }
 }
 
-/// Today's day file in `dir`.
-pub fn today(dir: &Path) -> Connection {
+pub fn open_todays_day_file(dir: &Path) -> Connection {
     Connection::open(dir.join(Day::today().file_name())).unwrap()
 }
 

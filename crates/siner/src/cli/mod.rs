@@ -1,6 +1,3 @@
-//! The CLI commands that read telemetry through the API of a daemon, each in
-//! the module of what it reads, and the client and the tables they share.
-
 mod catalog;
 pub mod client;
 mod logs;
@@ -50,12 +47,10 @@ impl Range {
     }
 }
 
-/// A query given as one argument or as several words.
-fn joined(words: &[String]) -> Option<String> {
+fn join_query_words(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-/// Tells on stderr which attributes of the query have no index.
 fn note_unindexed(signal: Signal, keys: &[String]) {
     if let Some(first) = keys.first() {
         let verb = if keys.len() == 1 { "has" } else { "have" };

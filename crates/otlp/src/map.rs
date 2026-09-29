@@ -1,6 +1,3 @@
-//! The one mapping from OTLP to the rows of the store, which both transports
-//! call.
-
 use std::collections::BTreeSet;
 
 use base64::Engine;
@@ -16,88 +13,84 @@ use opentelemetry_proto::tonic::metrics::v1::{
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
-use siner_telemetry::{
+use siner_storage::{
     AttributeValue, Attributes, Batch, Histogram, Log, Metric, MetricKind, Point, Records,
-    Resource, Span, SpanEvent, now,
+    Resource, Severity, Span, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId, now_unix_nanos,
 };
 
-/// The service of a resource without `service.name`, as the OpenTelemetry SDKs name it.
-const UNKNOWN_SERVICE: &str = "unknown_service";
+// The name the OpenTelemetry SDKs give a resource without `service.name`.
+const UNKNOWN_SERVICE_NAME: &str = "unknown_service";
 
-/// The rows of one export request, and what the mapping rejected.
 #[derive(Debug, Default)]
-pub struct Mapped {
+pub struct MappedExport {
     pub batch: Batch,
-    /// The log records, spans, or data points the request held.
-    pub items: i64,
-    pub rejected: i64,
-    /// Why the rejected items were rejected, one reason each kind.
-    pub reasons: BTreeSet<String>,
+    pub item_count: i64,
+    pub rejected_count: i64,
+    pub rejection_reasons: BTreeSet<String>,
 }
 
-impl Mapped {
-    /// Keeps the records of a resource that has any.
-    fn push(&mut self, records: Records) {
+impl MappedExport {
+    fn push_records_if_any(&mut self, records: Records) {
         if !(records.logs.is_empty() && records.spans.is_empty() && records.metrics.is_empty()) {
             self.batch.push(records);
         }
     }
 
-    fn reject(&mut self, count: usize, reason: impl Into<String>) {
-        self.rejected += i64::try_from(count).unwrap_or(i64::MAX);
-        self.reasons.insert(reason.into());
+    fn reject_items(&mut self, count: usize, reason: impl Into<String>) {
+        self.rejected_count += i64::try_from(count).unwrap_or(i64::MAX);
+        self.rejection_reasons.insert(reason.into());
     }
 }
 
 #[must_use]
-pub fn logs(request: ExportLogsServiceRequest) -> Mapped {
-    let mut mapped = Mapped::default();
+pub fn logs(request: ExportLogsServiceRequest) -> MappedExport {
+    let mut mapped = MappedExport::default();
     for resource_logs in request.resource_logs {
         let mut records = records(resource_logs.resource);
         for scope_logs in resource_logs.scope_logs {
-            let scope = scope(scope_logs.scope);
+            let scope = scope_attributes(scope_logs.scope);
             for record in scope_logs.log_records {
-                mapped.items += 1;
+                mapped.item_count += 1;
                 records.logs.push(log(record, &scope));
             }
         }
-        mapped.push(records);
+        mapped.push_records_if_any(records);
     }
     mapped
 }
 
 #[must_use]
-pub fn spans(request: ExportTraceServiceRequest) -> Mapped {
-    let mut mapped = Mapped::default();
+pub fn spans(request: ExportTraceServiceRequest) -> MappedExport {
+    let mut mapped = MappedExport::default();
     for resource_spans in request.resource_spans {
         let mut records = records(resource_spans.resource);
         for scope_spans in resource_spans.scope_spans {
-            let scope = scope(scope_spans.scope);
+            let scope = scope_attributes(scope_spans.scope);
             for span in scope_spans.spans {
-                mapped.items += 1;
-                match self::span(span, &scope) {
+                mapped.item_count += 1;
+                match valid_span(span, &scope) {
                     Some(span) => records.spans.push(span),
-                    None => mapped.reject(
+                    None => mapped.reject_items(
                         1,
                         "a span needs a 16-byte trace ID and an 8-byte span ID, not all zeros",
                     ),
                 }
             }
         }
-        mapped.push(records);
+        mapped.push_records_if_any(records);
     }
     mapped
 }
 
 #[must_use]
-pub fn metrics(request: ExportMetricsServiceRequest) -> Mapped {
-    let mut mapped = Mapped::default();
+pub fn metrics(request: ExportMetricsServiceRequest) -> MappedExport {
+    let mut mapped = MappedExport::default();
     for resource_metrics in request.resource_metrics {
         let mut records = records(resource_metrics.resource);
         for scope_metrics in resource_metrics.scope_metrics {
-            let scope = scope(scope_metrics.scope);
+            let scope = scope_attributes(scope_metrics.scope);
             for otlp in scope_metrics.metrics {
-                let series = Series {
+                let descriptor = MetricDescriptor {
                     name: otlp.name,
                     unit: otlp.unit,
                     scope: &scope,
@@ -107,7 +100,7 @@ pub fn metrics(request: ExportMetricsServiceRequest) -> Mapped {
                         numbers(
                             &mut mapped,
                             &mut records,
-                            &series,
+                            &descriptor,
                             MetricKind::Gauge,
                             gauge.data_points,
                         );
@@ -116,7 +109,7 @@ pub fn metrics(request: ExportMetricsServiceRequest) -> Mapped {
                         numbers(
                             &mut mapped,
                             &mut records,
-                            &series,
+                            &descriptor,
                             MetricKind::Sum,
                             sum.data_points,
                         );
@@ -125,29 +118,29 @@ pub fn metrics(request: ExportMetricsServiceRequest) -> Mapped {
                         let cumulative = histogram.aggregation_temporality
                             == AggregationTemporality::Cumulative as i32;
                         for point in histogram.data_points {
-                            mapped.items += 1;
-                            match series.histogram(point, cumulative) {
+                            mapped.item_count += 1;
+                            match descriptor.histogram_metric(point, cumulative) {
                                 Ok(Some(metric)) => records.metrics.push(metric),
                                 Ok(None) => {}
-                                Err(error) => mapped.reject(1, format!("{error:#}")),
+                                Err(error) => mapped.reject_items(1, format!("{error:#}")),
                             }
                         }
                     }
                     Some(metric::Data::ExponentialHistogram(histogram)) => {
                         let count = histogram.data_points.len();
-                        mapped.items += i64::try_from(count).unwrap_or(i64::MAX);
-                        mapped.reject(count, "siner does not store exponential histograms");
+                        mapped.item_count += i64::try_from(count).unwrap_or(i64::MAX);
+                        mapped.reject_items(count, "siner does not store exponential histograms");
                     }
                     Some(metric::Data::Summary(summary)) => {
                         let count = summary.data_points.len();
-                        mapped.items += i64::try_from(count).unwrap_or(i64::MAX);
-                        mapped.reject(count, "siner does not store summaries");
+                        mapped.item_count += i64::try_from(count).unwrap_or(i64::MAX);
+                        mapped.reject_items(count, "siner does not store summaries");
                     }
                     None => {}
                 }
             }
         }
-        mapped.push(records);
+        mapped.push_records_if_any(records);
     }
     mapped
 }
@@ -156,7 +149,7 @@ fn records(resource: Option<OtlpResource>) -> Records {
     let attributes = attributes(resource.map(|r| r.attributes).unwrap_or_default());
     let service = match attributes.get("service.name") {
         Some(AttributeValue::String(name)) if !name.is_empty() => name.clone(),
-        _ => UNKNOWN_SERVICE.into(),
+        _ => UNKNOWN_SERVICE_NAME.into(),
     };
     Records {
         resource: Resource {
@@ -169,9 +162,8 @@ fn records(resource: Option<OtlpResource>) -> Records {
     }
 }
 
-/// The attributes that name the instrumentation scope, which each record of
-/// the scope carries, as the OpenTelemetry spec maps a scope to formats without one.
-fn scope(scope: Option<InstrumentationScope>) -> Attributes {
+// The OpenTelemetry spec maps a scope to formats without one as attributes on each record.
+fn scope_attributes(scope: Option<InstrumentationScope>) -> Attributes {
     let mut attributes = Attributes::new();
     if let Some(scope) = scope {
         if !scope.name.is_empty() {
@@ -184,41 +176,39 @@ fn scope(scope: Option<InstrumentationScope>) -> Attributes {
     attributes
 }
 
-/// The scope attributes, then the record's own, which win a clash.
-fn with_scope(scope: &Attributes, own: Vec<KeyValue>) -> Attributes {
+fn overlay_on_scope_attributes(scope: &Attributes, own: Vec<KeyValue>) -> Attributes {
     let mut attributes = scope.clone();
     attributes.extend(self::attributes(own));
     attributes
 }
 
 fn log(record: LogRecord, scope: &Attributes) -> Log {
-    let ts = [record.time_unix_nano, record.observed_time_unix_nano]
+    let logged_at = [record.time_unix_nano, record.observed_time_unix_nano]
         .into_iter()
-        .find(|&ts| ts != 0)
-        .map_or_else(now, nanos);
+        .find(|&unix_nanos| unix_nanos != 0)
+        .map_or_else(now_unix_nanos, signed_nanos);
     let body = match record.body.and_then(|body| body.value) {
         Some(any_value::Value::StringValue(body)) => body,
         None => String::new(),
-        Some(other) => value(other).to_string(),
+        Some(other) => attribute_value(other).to_string(),
     };
-    let mut attributes = with_scope(scope, record.attributes);
+    let mut attributes = overlay_on_scope_attributes(scope, record.attributes);
     if !record.event_name.is_empty() {
         attributes.insert("event.name", record.event_name);
     }
     Log {
-        ts,
-        severity: record.severity_number,
+        logged_at,
+        severity: Severity::from_number(record.severity_number),
         body,
-        trace_id: id(&record.trace_id),
-        span_id: id(&record.span_id),
+        trace_id: valid_id_bytes(&record.trace_id).map(TraceId),
+        span_id: valid_id_bytes(&record.span_id).map(SpanId),
         attributes,
         source: "otlp",
     }
 }
 
-/// `None` when the span has no valid trace or span ID.
-fn span(span: OtlpSpan, scope: &Attributes) -> Option<Span> {
-    let mut attributes = with_scope(scope, span.attributes);
+fn valid_span(span: OtlpSpan, scope: &Attributes) -> Option<Span> {
+    let mut attributes = overlay_on_scope_attributes(scope, span.attributes);
     let status = span.status.unwrap_or_default();
     if !status.message.is_empty() {
         attributes.insert("otel.status_description", status.message);
@@ -227,58 +217,55 @@ fn span(span: OtlpSpan, scope: &Attributes) -> Option<Span> {
         .events
         .into_iter()
         .map(|event| SpanEvent {
-            ts: nanos(event.time_unix_nano),
+            occurred_at: signed_nanos(event.time_unix_nano),
             name: event.name,
             attributes: self::attributes(event.attributes),
         })
         .collect();
     Some(Span {
-        trace_id: id(&span.trace_id)?,
-        span_id: id(&span.span_id)?,
-        parent_span_id: id(&span.parent_span_id),
+        trace_id: TraceId(valid_id_bytes(&span.trace_id)?),
+        span_id: SpanId(valid_id_bytes(&span.span_id)?),
+        parent_span_id: valid_id_bytes(&span.parent_span_id).map(SpanId),
         name: span.name,
-        kind: span.kind,
-        start_ts: nanos(span.start_time_unix_nano),
-        duration_ns: nanos(
+        kind: SpanKind::from_number(span.kind),
+        started_at: signed_nanos(span.start_time_unix_nano),
+        duration_ns: signed_nanos(
             span.end_time_unix_nano
                 .saturating_sub(span.start_time_unix_nano),
         ),
-        status: status.code,
+        status: SpanStatus::from_number(status.code),
         attributes,
         events,
     })
 }
 
-/// What the data points of one OTLP metric share.
-struct Series<'a> {
+struct MetricDescriptor<'a> {
     name: String,
     unit: String,
     scope: &'a Attributes,
 }
 
-impl Series<'_> {
-    /// One series of one point. The writer finds the series of equal labels.
-    fn metric(&self, kind: MetricKind, labels: Vec<KeyValue>, point: Point) -> Metric {
+impl MetricDescriptor<'_> {
+    // The writer merges the metrics of equal labels into one series.
+    fn single_point_metric(&self, kind: MetricKind, labels: Vec<KeyValue>, point: Point) -> Metric {
         Metric {
             name: self.name.clone(),
             kind,
             unit: self.unit.clone(),
-            labels: with_scope(self.scope, labels),
+            labels: overlay_on_scope_attributes(self.scope, labels),
             points: vec![point],
         }
     }
 
-    /// `Ok(None)` for a point that says it has no value. A histogram point
-    /// stores its sum as the value.
-    fn histogram(
+    fn histogram_metric(
         &self,
         point: HistogramDataPoint,
         cumulative: bool,
     ) -> anyhow::Result<Option<Metric>> {
-        if no_value(point.flags) {
+        if has_no_recorded_value(point.flags) {
             return Ok(None);
         }
-        // A point without buckets has one bucket without bounds.
+        // The store needs one more count than bounds, and OTLP allows a point without buckets.
         let counts = if point.bucket_counts.is_empty() && point.explicit_bounds.is_empty() {
             vec![point.count]
         } else {
@@ -295,11 +282,11 @@ impl Series<'_> {
         };
         histogram.check()?;
         let stored = Point {
-            ts: nanos(point.time_unix_nano),
+            recorded_at: signed_nanos(point.time_unix_nano),
             value: histogram.sum.unwrap_or(0.0),
             histogram: Some(histogram),
         };
-        Ok(Some(self.metric(
+        Ok(Some(self.single_point_metric(
             MetricKind::Histogram,
             point.attributes,
             stored,
@@ -308,15 +295,15 @@ impl Series<'_> {
 }
 
 fn numbers(
-    mapped: &mut Mapped,
+    mapped: &mut MappedExport,
     records: &mut Records,
-    series: &Series,
+    descriptor: &MetricDescriptor,
     kind: MetricKind,
     points: Vec<NumberDataPoint>,
 ) {
     for point in points {
-        mapped.items += 1;
-        if no_value(point.flags) {
+        mapped.item_count += 1;
+        if has_no_recorded_value(point.flags) {
             continue;
         }
         #[expect(clippy::cast_precision_loss, reason = "a store of f64 values")]
@@ -324,33 +311,31 @@ fn numbers(
             Some(number_data_point::Value::AsDouble(value)) => value,
             Some(number_data_point::Value::AsInt(value)) => value as f64,
             None => {
-                mapped.reject(1, "a number data point needs a value");
+                mapped.reject_items(1, "a number data point needs a value");
                 continue;
             }
         };
         let stored = Point {
-            ts: nanos(point.time_unix_nano),
+            recorded_at: signed_nanos(point.time_unix_nano),
             value,
             histogram: None,
         };
         records
             .metrics
-            .push(series.metric(kind, point.attributes, stored));
+            .push(descriptor.single_point_metric(kind, point.attributes, stored));
     }
 }
 
-/// The point marks a gap in its series and holds no value.
-const fn no_value(flags: u32) -> bool {
+const fn has_no_recorded_value(flags: u32) -> bool {
     flags & DataPointFlags::NoRecordedValueMask as u32 != 0
 }
 
-fn nanos(ts: u64) -> i64 {
-    i64::try_from(ts).unwrap_or(i64::MAX)
+fn signed_nanos(unix_nanos: u64) -> i64 {
+    i64::try_from(unix_nanos).unwrap_or(i64::MAX)
 }
 
-/// A trace or span ID: `None` when it is empty, of the wrong length, or all
-/// zeros, which OTLP counts as invalid.
-fn id<const N: usize>(bytes: &[u8]) -> Option<[u8; N]> {
+// OTLP counts an all-zero trace or span ID as invalid.
+fn valid_id_bytes<const N: usize>(bytes: &[u8]) -> Option<[u8; N]> {
     let id: [u8; N] = bytes.try_into().ok()?;
     id.iter().any(|&byte| byte != 0).then_some(id)
 }
@@ -361,29 +346,29 @@ fn attributes(list: Vec<KeyValue>) -> Attributes {
             let value = kv
                 .value
                 .and_then(|v| v.value)
-                .map_or(AttributeValue::Null, value);
+                .map_or(AttributeValue::Null, attribute_value);
             (kv.key, value)
         })
         .collect()
 }
 
-/// An attribute value. Bytes are base64, as OTLP/JSON writes them, and a
-/// double that JSON cannot hold, such as NaN, is its text.
-fn value(value: any_value::Value) -> AttributeValue {
+fn attribute_value(value: any_value::Value) -> AttributeValue {
     match value {
         any_value::Value::StringValue(s) => AttributeValue::String(s),
         any_value::Value::BoolValue(b) => AttributeValue::Bool(b),
         any_value::Value::IntValue(i) => AttributeValue::Int(i),
         any_value::Value::DoubleValue(d) if d.is_finite() => AttributeValue::Double(d),
+        // JSON cannot hold NaN or an infinity.
         any_value::Value::DoubleValue(d) => AttributeValue::String(d.to_string()),
         any_value::Value::ArrayValue(array) => AttributeValue::Array(
             array
                 .values
                 .into_iter()
-                .map(|v: AnyValue| v.value.map_or(AttributeValue::Null, self::value))
+                .map(|v: AnyValue| v.value.map_or(AttributeValue::Null, attribute_value))
                 .collect(),
         ),
         any_value::Value::KvlistValue(list) => AttributeValue::Map(attributes(list.values)),
+        // OTLP/JSON writes bytes as base64.
         any_value::Value::BytesValue(bytes) => AttributeValue::String(STANDARD.encode(bytes)),
         // Only profiles use the string table.
         any_value::Value::StringValueStrindex(_) => AttributeValue::Null,

@@ -1,10 +1,7 @@
-//! The endpoints of the indexed attributes: which have an index, and adding
-//! and dropping one.
-
 use axum::Json;
 use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
-use siner_telemetry::IndexedKey;
+use siner_storage::{IndexedAttribute, IndexedSignal};
 use utoipa::ToSchema;
 
 use crate::Api;
@@ -25,39 +22,52 @@ pub struct IndexBody {
     pub key: String,
 }
 
+#[derive(Clone, Copy)]
+enum IndexChange {
+    Add,
+    Remove,
+}
+
 impl Api {
     fn index_list(&self) -> IndexList {
         IndexList {
             indexes: self
-                .indexes
-                .get()
+                .storage
+                .indexed_attributes()
                 .into_iter()
-                .map(|key| IndexBody {
-                    signal: key.signal.into(),
-                    key: key.key,
+                .map(|attribute| IndexBody {
+                    signal: attribute.signal().signal().into(),
+                    key: attribute.key().to_owned(),
                 })
                 .collect(),
         }
     }
 
-    /// Stores a change to the indexed attributes and hands the new set to the
-    /// writer.
-    async fn change_index(&self, signal: &str, key: &str, add: bool) -> ApiResult<IndexList> {
-        let key =
-            IndexedKey::new(parse_signal(signal)?, key).map_err(|e| ApiError::bad_request(&e))?;
+    async fn change_index(
+        &self,
+        signal: &str,
+        key: &str,
+        change: IndexChange,
+    ) -> ApiResult<IndexList> {
+        let attribute = IndexedSignal::try_from(parse_signal(signal)?)
+            .and_then(|signal| IndexedAttribute::new(signal, key))
+            .map_err(|e| ApiError::bad_request(&e))?;
         let api = self.clone();
         let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || -> Result<IndexList, ApiError> {
             let _entered = span.enter();
-            if add {
-                api.state.add_index(&key)?;
-            } else if !api.state.remove_index(&key)? {
-                return Err(ApiError::not_found(format!(
-                    "{} {} has no index",
-                    key.signal, key.key
-                )));
+            match change {
+                IndexChange::Add => api.storage.add_index(&attribute)?,
+                IndexChange::Remove => {
+                    if !api.storage.remove_index(&attribute)? {
+                        return Err(ApiError::not_found(format!(
+                            "{} {} has no index",
+                            attribute.signal(),
+                            attribute.key()
+                        )));
+                    }
+                }
             }
-            api.indexes.set(api.state.indexes()?);
             Ok(api.index_list())
         })
         .await
@@ -95,7 +105,7 @@ pub async fn add_index(
     State(api): State<Api>,
     Path((signal, key)): Path<(String, String)>,
 ) -> ApiResult<IndexList> {
-    api.change_index(&signal, &key, true).await
+    api.change_index(&signal, &key, IndexChange::Add).await
 }
 
 /// Drops the index of an attribute from every day file.
@@ -116,5 +126,5 @@ pub async fn remove_index(
     State(api): State<Api>,
     Path((signal, key)): Path<(String, String)>,
 ) -> ApiResult<IndexList> {
-    api.change_index(&signal, &key, false).await
+    api.change_index(&signal, &key, IndexChange::Remove).await
 }

@@ -11,14 +11,14 @@ axum = { workspace = true }
 jiff = { workspace = true }
 serde = { workspace = true }
 siner-query = { workspace = true }
-siner-state = { workspace = true }
-siner-telemetry = { workspace = true }
+siner-storage = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { workspace = true }
 
 [dev-dependencies]
+siner-storage-sqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]
