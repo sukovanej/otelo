@@ -84,6 +84,8 @@ fn routes() -> OpenApiRouter<Api> {
         .routes(routes!(services::services))
         .routes(routes!(services::service))
         .routes(routes!(services::operation))
+        .routes(routes!(services::calls))
+        .routes(routes!(services::call))
         .routes(routes!(sql::sql))
         .routes(routes!(catalog::attributes))
         .routes(routes!(catalog::complete))

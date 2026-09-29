@@ -134,6 +134,38 @@ fn span(row: &Row) -> anyhow::Result<TraceSpan> {
     })
 }
 
+impl Reader {
+    /// The spans at `rows`, each by its day file and its row there, newest
+    /// first, read with one statement per day file.
+    pub(super) fn spans_at(&self, rows: &[(String, i64)]) -> anyhow::Result<Vec<TraceSpan>> {
+        let mut by_day: HashMap<&str, Vec<String>> = HashMap::new();
+        for (day, rowid) in rows {
+            by_day.entry(day).or_default().push(rowid.to_string());
+        }
+        let mut spans = Vec::with_capacity(rows.len());
+        for (day, rowids) in by_day {
+            let sql = format!(
+                "SELECT {SPAN_COLUMNS}
+                 FROM \"{day}\".spans s JOIN \"{day}\".resources r ON r.id = s.resource_id
+                 WHERE s.rowid IN ({})",
+                rowids.join(", ")
+            );
+            let statement = super::statement_span(&sql);
+            let _entered = statement.enter();
+            let mut stmt = self.conn().prepare(&sql)?;
+            let mut read = stmt.query([])?;
+            let mut count = 0_i64;
+            while let Some(row) = read.next()? {
+                count += 1;
+                spans.push(span(row)?);
+            }
+            statement.record("db.response.returned_rows", count);
+        }
+        spans.sort_by_key(|span| std::cmp::Reverse(span.time));
+        Ok(spans)
+    }
+}
+
 /// The conditions of a span query, and the attributes it compares that have
 /// no index.
 fn span_filter(reader: &Reader, query: &Query) -> anyhow::Result<(Filter, Vec<String>)> {

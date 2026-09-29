@@ -2,6 +2,7 @@ import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { createMemo, For, Show } from "solid-js";
 
 import {
+  getCalls,
   getLogGroups,
   getService,
   getTraces,
@@ -28,35 +29,70 @@ import Service from "../Service";
 import KindBadge from "../traces/KindBadge";
 import SpanTitle from "../traces/SpanTitle";
 import TraceList from "../traces/TraceList";
+import CallsSection, { type CallRow } from "./CallsSection";
 import { timeFrame } from "./frame";
 import OperationModal from "./OperationModal";
 import { createRangeFetch, useRange } from "./range";
 import { errorRateSeries, latencySeries, PERCENTILES, requestSeries } from "./series";
 import { rate, seconds, share } from "./stats";
+import { parseTarget, sameTarget } from "./target";
 import Toolbar from "./Toolbar";
+
+/** The search parameters of a closed modal. */
+const closed = {
+  op: undefined,
+  kind: undefined,
+  call: undefined,
+  system: undefined,
+  target: undefined,
+};
+
+/** The search parameters of the modal of a call. */
+const callParams = (row: CallRow) => ({
+  op: row.operation.summary,
+  kind: String(row.operation.kind),
+  call: row.target.type,
+  system: row.target.system ?? undefined,
+  target: row.target.name ?? undefined,
+});
 
 /**
  * One service in the range: its requests, error rate, latency, and logs as
- * numbers and over time, its requests by operation, and its newest failed
- * traces and error logs. Dragging across a chart zooms the range to that
- * stretch. The range and live mode live in the URL.
+ * numbers and over time, its requests by operation, the calls it makes by
+ * target and by span name, and its newest failed traces and error logs.
+ * Dragging across a chart zooms the range to that stretch. The range and
+ * live mode live in the URL.
  */
 export default function ServicePage() {
   const params = useParams<{ name: string }>();
   const range = useRange();
   const navigate = useNavigate();
-  // The operation open in the modal, in the URL, so Back closes it and a
-  // link opens it.
-  const [modal, setParams] = useSearchParams<{ op?: string; kind?: string }>();
+  // The operation or the call open in the modal, in the URL, so Back closes
+  // it and a link opens it. A call has the type, the system, and the name of
+  // its target too.
+  const [modal, setParams] = useSearchParams<{
+    op?: string;
+    kind?: string;
+    call?: string;
+    system?: string;
+    target?: string;
+  }>();
   const openOperation = createMemo(
     () => {
       const kind = Number(modal.kind);
       return modal.op !== undefined && Number.isInteger(kind)
-        ? { name: modal.op, kind }
+        ? { name: modal.op, kind, target: parseTarget(modal.call, modal.system, modal.target) }
         : undefined;
     },
     undefined,
-    { equals: (a, b) => a?.name === b?.name && a?.kind === b?.kind },
+    {
+      equals: (a, b) =>
+        a?.name === b?.name &&
+        a?.kind === b?.kind &&
+        (a?.target === undefined || b?.target === undefined
+          ? a?.target === b?.target
+          : sameTarget(a.target, b.target)),
+    },
   );
   const name = () => params.name;
   const term = () => `service = ${quote(name())}`;
@@ -65,6 +101,11 @@ export default function ServicePage() {
     range,
     () => ({ name: name() }),
     ({ name: service, ...query }, signal) => getService(service, query, signal),
+  );
+  const calls = createRangeFetch(
+    range,
+    () => ({ name: name() }),
+    ({ name: service, ...query }, signal) => getCalls(service, query, signal),
   );
   const errorTraces = createRangeFetch(
     range,
@@ -139,9 +180,25 @@ export default function ServicePage() {
                     })}`
                   }
                   onOpenOperation={(operation) =>
-                    setParams({ op: operation.name, kind: String(operation.kind) })
+                    setParams({ ...closed, op: operation.name, kind: String(operation.kind) })
                   }
                 />
+
+                <Show when={calls.data()}>
+                  {(body) => (
+                    <Show when={body().service === name() && body().calls.count > 0}>
+                      <CallsSection
+                        calls={body()}
+                        loading={calls.loading()}
+                        onZoom={zoom}
+                        callHref={(row) =>
+                          `/services/${encodeURIComponent(name())}${range.search(callParams(row))}`
+                        }
+                        onOpenCall={(row) => setParams(callParams(row))}
+                      />
+                    </Show>
+                  )}
+                </Show>
 
                 <Panel
                   title="Failed traces"
@@ -206,8 +263,9 @@ export default function ServicePage() {
             service={name()}
             name={operation.name}
             kind={operation.kind}
+            target={operation.target}
             range={range}
-            onClose={() => setParams({ op: undefined, kind: undefined })}
+            onClose={() => setParams(closed)}
           />
         )}
       </Show>

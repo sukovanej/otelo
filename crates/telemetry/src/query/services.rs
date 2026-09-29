@@ -130,8 +130,9 @@ pub struct RequestBucket {
     pub requests: Requests,
 }
 
-/// Spans that enter a service: roots, and spans of the server or the
-/// consumer kind.
+/// Spans counted together: the requests that enter a service, which are
+/// roots and spans of the server or the consumer kind, or the calls it makes
+/// to a database.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct Requests {
     pub count: u64,
@@ -207,22 +208,22 @@ impl Sketch {
 
 /// Adds up requests.
 #[derive(Default)]
-struct Tally {
+pub(super) struct Tally {
     count: u64,
     errors: u64,
-    total_ns: i64,
+    pub(super) total_ns: i64,
     sketch: Sketch,
 }
 
 impl Tally {
-    fn add(&mut self, duration_ns: i64, error: bool) {
+    pub(super) fn add(&mut self, duration_ns: i64, error: bool) {
         self.count += 1;
         self.errors += u64::from(error);
         self.total_ns = self.total_ns.saturating_add(duration_ns);
         self.sketch.add(duration_ns);
     }
 
-    fn finish(&self) -> Requests {
+    pub(super) fn finish(&self) -> Requests {
         Requests {
             count: self.count,
             errors: self.errors,
@@ -308,13 +309,26 @@ struct Entry {
 }
 
 /// A span by its day file and its row there.
-type SpanRow = (String, i64);
+pub(super) type SpanRow = (String, i64);
 
 /// The requests of an operation, and the newest of them by its start.
 #[derive(Default)]
-struct OperationTally {
-    requests: Tally,
-    newest: Option<(i64, SpanRow)>,
+pub(super) struct OperationTally {
+    pub(super) requests: Tally,
+    pub(super) newest: Option<(i64, SpanRow)>,
+}
+
+impl OperationTally {
+    pub(super) fn add(&mut self, start: i64, duration_ns: i64, error: bool, row: &SpanRow) {
+        self.requests.add(duration_ns, error);
+        if self
+            .newest
+            .as_ref()
+            .is_none_or(|(newest, _)| start >= *newest)
+        {
+            self.newest = Some((start, row.clone()));
+        }
+    }
 }
 
 impl Reader {
@@ -366,17 +380,10 @@ impl Reader {
         self.check_step(step_ns)?;
         let mut operations: HashMap<(String, i32), OperationTally> = HashMap::new();
         let mut tallies = self.tally(Scope::Service(service), step_ns, |entry| {
-            let operation = operations
+            operations
                 .entry((entry.name.clone(), entry.kind))
-                .or_default();
-            operation.requests.add(entry.duration_ns, entry.error);
-            if operation
-                .newest
-                .as_ref()
-                .is_none_or(|(start, _)| entry.start >= *start)
-            {
-                operation.newest = Some((entry.start, entry.row.clone()));
-            }
+                .or_default()
+                .add(entry.start, entry.duration_ns, entry.error, &entry.row);
         })?;
         let tally = tallies.remove(service).unwrap_or_default();
         let mut operations: Vec<_> = operations.into_iter().collect();
@@ -424,7 +431,7 @@ impl Reader {
 
     /// The attributes of the spans at `rows`, read with one statement per
     /// day file.
-    fn span_attributes<'a>(
+    pub(super) fn span_attributes<'a>(
         &self,
         rows: impl Iterator<Item = &'a SpanRow>,
     ) -> anyhow::Result<HashMap<SpanRow, Attributes>> {
@@ -514,7 +521,7 @@ impl Reader {
         })
     }
 
-    fn check_step(&self, step_ns: i64) -> anyhow::Result<()> {
+    pub(super) fn check_step(&self, step_ns: i64) -> anyhow::Result<()> {
         ensure!(step_ns > 0, "the step has to be longer than zero");
         ensure!(
             (self.until() - self.since()) / step_ns <= MAX_BUCKETS,

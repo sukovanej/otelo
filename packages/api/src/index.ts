@@ -11,6 +11,9 @@ export type AttributeKeys = Schemas["AttributeKeys"];
 export type AttributeValue = Schemas["AttributeValue"];
 export type Attributes = Schemas["Attributes"];
 export type Bucket = Schemas["Bucket"];
+export type CallDetail = Schemas["CallDetail"];
+export type CallOperation = Schemas["CallOperation"];
+export type Calls = Schemas["Calls"];
 export type CompletionKind = Schemas["CompletionKind"];
 export type Completions = Schemas["Completions"];
 export type Distribution = Schemas["Distribution"];
@@ -42,6 +45,9 @@ export type SqlRequest = Schemas["SqlRequest"];
 export type SqlResult = Schemas["SqlResult"];
 export type SqlValue = Schemas["SqlValue"];
 export type SuggestionBody = Schemas["SuggestionBody"];
+export type Target = Schemas["Target"];
+export type TargetKey = Schemas["TargetKey"];
+export type TargetType = Schemas["TargetType"];
 export type Trace = Schemas["Trace"];
 export type TraceSpan = Schemas["TraceSpan"];
 export type TraceSummary = Schemas["TraceSummary"];
@@ -157,6 +163,30 @@ export const getOperation = (
   request<Ok<"/api/services/{name}/operation", "get">>(
     "GET",
     `/api/services/${encodeURIComponent(service)}/operation${search(query)}`,
+    signal,
+  );
+
+/** The calls a service makes, by target and by operation. */
+export const getCalls = (
+  service: string,
+  query: QueryOf<"/api/services/{name}/calls">,
+  signal?: AbortSignal,
+) =>
+  request<Ok<"/api/services/{name}/calls", "get">>(
+    "GET",
+    `/api/services/${encodeURIComponent(service)}/calls${search(query)}`,
+    signal,
+  );
+
+/** The calls of a service to one target that do one thing, of one kind. */
+export const getCall = (
+  service: string,
+  query: QueryOf<"/api/services/{name}/call">,
+  signal?: AbortSignal,
+) =>
+  request<Ok<"/api/services/{name}/call", "get">>(
+    "GET",
+    `/api/services/${encodeURIComponent(service)}/call${search(query)}`,
     signal,
   );
 
