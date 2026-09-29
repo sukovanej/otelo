@@ -112,7 +112,7 @@ export default function OperationModal(props: {
   return (
     <Modal label={`${props.target ? "Call" : "Operation"} ${props.name}`} onClose={props.onClose}>
       <div class="relative z-20 flex shrink-0 items-center gap-3 bg-surface px-4 py-2.5 shadow-(--raised)">
-        <h1 class="m-0 min-w-0 font-mono text-md font-semibold">
+        <h1 class="m-0 min-w-0 max-w-[60ch] font-mono text-md font-semibold">
           <SpanTitle
             name={props.name}
             attributes={titleAttributes()}
