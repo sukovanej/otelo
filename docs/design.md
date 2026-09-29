@@ -35,9 +35,9 @@ The Rust workspace in `crates/` has one crate per part, and the `siner` binary p
 | Crate | What it holds |
 |---|---|
 | `siner-query` | the query language: its parser and its completion |
-| `siner-telemetry` | the day files: the model of the records, the writer, and the queries |
+| `siner-storage` | the storage interface: the model of the records, what the queries return, the channel to the writer, and the `Storage` and `Read` traits |
+| `siner-storage-sqlite` | the SQLite backend: the day files, the writer, the queries, and the indexed attributes in the state file, `state.sqlite` |
 | `siner-otlp` | the OTLP receiver over HTTP and gRPC |
-| `siner-state` | the state file, `state.sqlite` |
 | `siner-api` | the HTTP API, its errors, and its OpenAPI spec |
 | `siner` | the binary: `siner serve`, the daemon's own telemetry, the web UI, and the CLI commands in `cli/` |
 
