@@ -7,6 +7,6 @@ dependencies:
 tags:
 - feature
 ---
-# Print a debugging guide with siner guide
+# Print a debugging guide with otelo guide
 
-`siner guide` prints one page that tells an agent how to debug with siner: which command to run first, how to narrow a result, and how to go from a log line to its trace. It is the text a person would paste into an agent's prompt, so it stays under 100 lines. A test checks that every command the guide names exists.
+`otelo guide` prints one page that tells an agent how to debug with otelo: which command to run first, how to narrow a result, and how to go from a log line to its trace. It is the text a person would paste into an agent's prompt, so it stays under 100 lines. A test checks that every command the guide names exists.
