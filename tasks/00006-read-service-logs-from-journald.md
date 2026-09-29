@@ -31,3 +31,9 @@ Logs of apps that do not speak OTel, Caddy and the backup script among them, com
 - The `source` column is `service`.
 - Which services to read comes from a flag for now. Later the app config gives it.
 - Tests: the Linux parser reads a recorded `journalctl` JSON fixture, and the `launchctl print` parser reads a recorded output. These run on any machine. A macOS integration test starts an agent in the user domain (`gui/<uid>`) and reads its log and its events. A Linux one does the same with `systemd-run --user`.
+
+## Comments
+
+### 2026-09-29T11:09:32Z by Milan Suk via claude-code
+
+> Cancelled: otelo takes OTLP only. Logs of apps without OTel, such as Caddy, reach it through an OTel collector.
