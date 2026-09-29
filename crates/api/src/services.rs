@@ -1,9 +1,11 @@
-//! The endpoints of the services, of one service, and of one of its
-//! operations.
+//! The endpoints of the services, of one service, of one of its
+//! operations, and of the calls it makes.
 
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
-use siner_telemetry::query::{OperationDetail, Service, Services};
+use siner_telemetry::query::{
+    CallDetail, Calls, OperationDetail, Service, Services, TargetKey, TargetType,
+};
 use utoipa::IntoParams;
 
 use crate::Api;
@@ -132,6 +134,107 @@ pub async fn operation(
     api.run([params.since, params.until], None, (None, 1), move |r| {
         let step_ns = check_step(&r, step, 120)?;
         Ok(r.reader.operation(&name, &operation, kind, step_ns)?)
+    })
+    .await
+}
+
+/// The calls a service makes, by what they go to: a span of the client or
+/// the producer kind, or of a database system. A target is a database, a
+/// host, an RPC service, or a message destination, read from the
+/// OpenTelemetry attributes of the call. Each target has its calls over the
+/// range and in buckets of one step, and by span name and kind, the most time
+/// first. What a call does is its query with the values taken out, the
+/// method and the path of an HTTP request with its ids taken out, or else
+/// its span name.
+#[utoipa::path(
+    get,
+    path = "/api/services/{name}/calls",
+    params(
+        ("name" = String, Path, description = "The name of the service"),
+        ServiceParams,
+    ),
+    responses(
+        (status = 200, body = Calls),
+        (status = 400, body = ErrorBody),
+    ),
+)]
+pub async fn calls(
+    State(api): State<Api>,
+    Path(name): Path<String>,
+    Query(params): Query<ServiceParams>,
+) -> ApiResult<Calls> {
+    let step = parse_step(params.step.as_deref())?;
+    api.run(
+        [params.since, params.until],
+        None,
+        (params.limit, 50),
+        move |r| {
+            let step_ns = check_step(&r, step, 120)?;
+            Ok(r.reader.calls(&name, step_ns, r.limit)?)
+        },
+    )
+    .await
+}
+
+/// The range, the step, the target, and what one call does.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CallParams {
+    /// What the target is.
+    #[serde(rename = "type")]
+    #[param(rename = "type", inline)]
+    target_type: TargetType,
+    /// The system of the target, such as `postgresql`. Missing for a
+    /// target without one.
+    system: Option<String>,
+    /// The name of the target, such as a database or a host. Missing for a
+    /// target without one.
+    target: Option<String>,
+    /// What the calls do, such as `SELECT * FROM users WHERE id = ?`, as
+    /// `/api/services/{name}/calls` names it.
+    summary: String,
+    /// The OpenTelemetry span kind of the call, such as 3 for client.
+    kind: i32,
+    /// The start of the range: a duration before now, such as `1h`, or an
+    /// RFC 3339 timestamp. One hour before `until` when missing.
+    since: Option<String>,
+    /// The end of the range, in the form of `since`. Now when missing.
+    until: Option<String>,
+    /// The length of a bucket, such as `1m`. One that makes 120 buckets at
+    /// most when missing.
+    step: Option<String>,
+}
+
+/// The calls of a service to one target that do one thing, of one kind:
+/// over the range and in buckets of one step, the attributes of the newest
+/// one, and the newest 50. A call without spans in the range has none.
+#[utoipa::path(
+    get,
+    path = "/api/services/{name}/call",
+    params(
+        ("name" = String, Path, description = "The name of the service"),
+        CallParams,
+    ),
+    responses(
+        (status = 200, body = CallDetail),
+        (status = 400, body = ErrorBody),
+    ),
+)]
+pub async fn call(
+    State(api): State<Api>,
+    Path(name): Path<String>,
+    Query(params): Query<CallParams>,
+) -> ApiResult<CallDetail> {
+    let step = parse_step(params.step.as_deref())?;
+    let target = TargetKey {
+        target_type: params.target_type,
+        system: params.system,
+        name: params.target,
+    };
+    let (summary, kind) = (params.summary, params.kind);
+    api.run([params.since, params.until], None, (None, 1), move |r| {
+        let step_ns = check_step(&r, step, 120)?;
+        Ok(r.reader.call(&name, &target, &summary, kind, step_ns)?)
     })
     .await
 }

@@ -7,6 +7,7 @@ import { Badge, Level, type Tone, Tooltip } from "@siner/ui";
 import {
   databaseId,
   type DbSpan,
+  dbTitle,
   type HttpSpan,
   nameRest,
   routeParts,
@@ -69,43 +70,30 @@ function Http(props: { meaning: HttpSpan; rest: string }) {
   );
 }
 
-function Db(props: { meaning: DbSpan; rest: string }) {
+function Db(props: { meaning: DbSpan; name: string }) {
   const id = () => databaseId(props.meaning.system);
   const system = () => databaseName(id());
+  const title = () => dbTitle(props.meaning, props.name);
   return (
     <>
       <Tooltip content={`Database call to ${system()}`} class="self-center">
         <DatabaseSystemIcon system={id()} title={`Database call to ${system()}`} />
       </Tooltip>
-      <Show when={props.meaning.operation}>
-        {(operation) => <Badge tone="database">{operation()}</Badge>}
-      </Show>
-      {/* A name that the badge already says gives way to the query. */}
-      <Show
-        when={props.rest}
-        fallback={
-          <Show when={props.meaning.query}>
-            {(query) => (
-              <span class="truncate text-muted" title={query()}>
-                {query()}
-              </span>
-            )}
-          </Show>
-        }
-      >
-        <span class="truncate">{props.rest}</span>
-      </Show>
+      <Show when={title().keyword}>{(keyword) => <Badge tone="database">{keyword()}</Badge>}</Show>
+      <span class="truncate" title={title().text}>
+        {title().rest}
+      </span>
     </>
   );
 }
 
 /**
  * The name of a span, told by what it is. An HTTP request shows its method,
- * route, and status, each on a badge. A database call shows the icon of its
- * system and the keyword of its query on a badge. Any other span shows its
- * name. Each starts with an icon of what it is, so the names of a list line
- * up. The words of the name that the badges say are left out. A failed span
- * starts with ERROR.
+ * route, and status, each on a badge, and the words of its name that the
+ * badges say are left out. A database call shows the icon of its system and
+ * its query as the span has it, or its name without a query, with the first
+ * word on a badge, as `dbTitle` splits it. Any other span shows its name. Each starts with an icon of what it is, so the names of a
+ * list line up. A failed span starts with ERROR.
  */
 export default function SpanTitle(props: {
   name: string;
@@ -144,7 +132,7 @@ export default function SpanTitle(props: {
         }
       >
         <Match when={http()}>{(shown) => <Http meaning={shown()} rest={rest()} />}</Match>
-        <Match when={db()}>{(shown) => <Db meaning={shown()} rest={rest()} />}</Match>
+        <Match when={db()}>{(shown) => <Db meaning={shown()} name={props.name} />}</Match>
       </Switch>
     </span>
   );

@@ -17,9 +17,7 @@ export interface DbSpan {
   type: "db";
   /** Such as `postgresql` or `sqlite`. */
   system: string;
-  /** Such as `SELECT`, upper case. */
-  operation: string | undefined;
-  /** The query, with its whitespace folded. */
+  /** The query as the span has it. */
   query: string | undefined;
 }
 
@@ -45,12 +43,6 @@ function path(url: string | undefined): string | undefined {
   }
 }
 
-/** The SQL keyword a query starts with, such as `SELECT`. */
-function keyword(query: string | undefined): string | undefined {
-  const word = /^\s*(?:\(\s*)?([a-z]+)/i.exec(query ?? "")?.[1];
-  return word?.toUpperCase();
-}
-
 /** What a span with these attributes is. */
 export function spanMeaning(attributes: Attributes): SpanMeaning {
   const method = text(attributes, "http.request.method", "http.method");
@@ -68,14 +60,7 @@ export function spanMeaning(attributes: Attributes): SpanMeaning {
   }
   const system = text(attributes, "db.system.name", "db.system");
   if (system !== undefined) {
-    const query = text(attributes, "db.query.text", "db.statement");
-    return {
-      type: "db",
-      system,
-      operation:
-        text(attributes, "db.operation.name", "db.operation")?.toUpperCase() ?? keyword(query),
-      query: query?.replace(/\s+/g, " ").trim(),
-    };
+    return { type: "db", system, query: text(attributes, "db.query.text", "db.statement") };
   }
   return { type: "other" };
 }
@@ -104,17 +89,39 @@ export function routeParts(route: string): RoutePart[] {
   return parts;
 }
 
-/** The part of a span name that a badge of its meaning does not already
- * say: `SELECT carts` is `carts` after a `SELECT` badge, and `GET /users`
- * is nothing after a badge of `GET` and `/users`. */
+/** What a database span shows, split for its badge. */
+export interface DbTitle {
+  /** The first word of the text, such as `SELECT`, when it is letters
+   * alone. */
+  keyword: string | undefined;
+  /** The text after the keyword, or all of it without one. */
+  rest: string;
+  /** The query as the span has it, or its name without a query. */
+  text: string;
+}
+
+/** What a database span with the name `name` shows: its query as the span
+ * has it, or its name without a query, with the first word on a badge when
+ * it is letters alone, such as `SELECT` in `SELECT * FROM users`. */
+export function dbTitle(meaning: DbSpan, name: string): DbTitle {
+  const shown = meaning.query ?? name;
+  const first = /^\s*([A-Za-z]+)(?:\s+|$)/.exec(shown);
+  return first
+    ? { keyword: first[1], rest: shown.slice(first[0].length), text: shown }
+    : { keyword: undefined, rest: shown, text: shown };
+}
+
+/** The part of the name of an HTTP span that its badges do not already
+ * say: `GET /users` is nothing after a badge of `GET` and `/users`. Any
+ * other span keeps its name. */
 export function nameRest(name: string, meaning: SpanMeaning): string {
-  if (meaning.type === "other") return name;
-  const lead = meaning.type === "http" ? meaning.method : meaning.operation;
+  if (meaning.type !== "http") return name;
+  const lead = meaning.method;
   let rest = name.trim();
   if (lead && rest.toUpperCase().startsWith(lead) && /^\s|^$/.test(rest.slice(lead.length))) {
     rest = rest.slice(lead.length).trim();
   }
-  if (meaning.type === "http" && rest === meaning.route) return "";
+  if (rest === meaning.route) return "";
   return rest;
 }
 

@@ -1,10 +1,11 @@
-//! The queries behind the HTTP API: logs, traces, metrics, services, and SQL
-//! over the day files a [`Reader`] attached.
+//! The queries behind the HTTP API: logs, traces, metrics, services, calls,
+//! and SQL over the day files a [`Reader`] attached.
 //!
 //! A query that filters reads each day file on its own and joins the parts
 //! with `UNION ALL`, because FTS5 and the ids only work within one file. Every
 //! query takes a row limit and says when it cut the result.
 
+mod calls;
 mod catalog;
 mod compile;
 mod logs;
@@ -19,6 +20,9 @@ use jiff::Timestamp;
 use rusqlite::types::Value;
 use rusqlite::{Row, ToSql};
 
+pub use calls::{
+    CallDetail, CallOperation, Calls, Target, TargetKey, TargetType, path_template, query_template,
+};
 pub use catalog::{Attribute, AttributeKeys, ReaderCatalog};
 pub use compile::InvalidQuery;
 pub use logs::{GROUP_SCAN_LIMIT, LogGroup, LogGroups, LogLine, Logs};

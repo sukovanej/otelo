@@ -1,7 +1,15 @@
 import { A, useNavigate } from "@solidjs/router";
 import { createMemo, For, Show } from "solid-js";
 
-import { getOperation, getSpans, search } from "@siner/api";
+import {
+  getCall,
+  getOperation,
+  getSpans,
+  type OperationDetail,
+  search,
+  type TargetKey,
+  type TraceSpan,
+} from "@siner/api";
 import { Callout } from "@siner/ui";
 import { ChartPanel, formatValue, Panel, Stat } from "@siner/viz";
 
@@ -18,6 +26,8 @@ import { timeFrame } from "./frame";
 import { createRangeFetch, type Range } from "./range";
 import { errorRateSeries, latencySeries, PERCENTILES, requestSeries } from "./series";
 import { rate, seconds, share } from "./stats";
+import { summaryAttributes, targetParams } from "./target";
+import TargetName from "./TargetName";
 
 /** How many of the newest spans of the operation the modal lists. */
 const SPANS = 50;
@@ -33,29 +43,61 @@ export function operationQuery(service: string, name: string, kind: number): str
   return `service = ${quote(service)} name = ${quote(name)}${kindTerm}${root}`;
 }
 
+/** An operation or a call over a range, its newest spans, and the span
+ * query of the traces page that shows them all. */
+interface Shown {
+  detail: OperationDetail;
+  spans: TraceSpan[];
+  query: string;
+}
+
 /**
- * One operation of a service over the page it was opened from: its numbers
- * over the range, its requests and latency over time, and its newest spans,
- * which open their traces. It follows the range of the page, and dragging
- * across a chart zooms that range.
+ * One operation of a service over the page it was opened from, or with a
+ * `target`, the calls of the service to it that do `name`, the summary of
+ * the calls API: its numbers over the range, its requests or calls and
+ * latency over time, and its newest spans, which open their traces. It
+ * follows the range of the page, and dragging across a chart zooms that
+ * range.
  */
 export default function OperationModal(props: {
   service: string;
   name: string;
   kind: number;
+  target?: TargetKey | undefined;
   range: Range;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const query = () => operationQuery(props.service, props.name, props.kind);
+  const noun = () => (props.target ? "Calls" : "Requests");
+  const what = () => (props.target ? "call" : "operation");
   const fetched = createRangeFetch(
     props.range,
-    () => ({ service: props.service, operation: props.name, kind: props.kind }),
-    ({ service, ...params }, signal) => getOperation(service, params, signal),
+    () => ({ service: props.service, name: props.name, kind: props.kind, target: props.target }),
+    async ({ service, name, kind, target, since, until }, signal): Promise<Shown> => {
+      if (target) {
+        const call = await getCall(
+          service,
+          { summary: name, kind, since, until, ...targetParams(target) },
+          signal,
+        );
+        const kindTerm = kind === 0 ? "" : ` kind = ${kindName(kind)}`;
+        const query = `service = ${quote(service)}${kindTerm} ${call.query}`.trim();
+        return { detail: call, spans: call.spans, query };
+      }
+      const query = operationQuery(service, name, kind);
+      const [detail, list] = await Promise.all([
+        getOperation(service, { operation: name, kind, since, until }, signal),
+        getSpans({ q: query, limit: SPANS, since, until }, signal),
+      ]);
+      return { detail, spans: list.spans, query };
+    },
   );
-  const spans = createRangeFetch(props.range, () => ({ q: query(), limit: SPANS }), getSpans);
 
-  const data = () => fetched.data();
+  const data = () => fetched.data()?.detail;
+  const titleAttributes = () => {
+    const attributes = data()?.attributes ?? {};
+    return props.target ? summaryAttributes(props.target.type, props.name, attributes) : attributes;
+  };
   const frame = createMemo(() => {
     const operation = data();
     return operation && timeFrame(operation);
@@ -68,27 +110,34 @@ export default function OperationModal(props: {
     props.range.setRange(new Date(start).toISOString(), new Date(end).toISOString());
 
   return (
-    <Modal label={`Operation ${props.name}`} onClose={props.onClose}>
+    <Modal label={`${props.target ? "Call" : "Operation"} ${props.name}`} onClose={props.onClose}>
       <div class="relative z-20 flex shrink-0 items-center gap-3 bg-surface px-4 py-2.5 shadow-(--raised)">
         <h1 class="m-0 min-w-0 font-mono text-md font-semibold">
           <SpanTitle
             name={props.name}
-            attributes={data()?.attributes ?? {}}
+            attributes={titleAttributes()}
             error={false}
             status={false}
           />
         </h1>
         <KindBadge kind={props.kind} />
+        <Show when={props.target}>
+          {(target) => (
+            <span class="flex max-w-64 shrink-0 items-baseline gap-1.5 text-muted">
+              to <TargetName target={target()} />
+            </span>
+          )}
+        </Show>
         <span class="flex-1" />
         <Show when={fetched.loading()}>
-          <span class="text-muted" aria-live="polite">
+          <span class="shrink-0 whitespace-nowrap text-muted" aria-live="polite">
             Loading…
           </span>
         </Show>
         <A
-          href={`/traces${search({ view: "spans", q: query(), since: props.range.since(), until: props.range.until() || undefined })}`}
-          class={link}
-          title="Every span of the operation on the traces page"
+          href={`/traces${search({ view: "spans", q: fetched.data()?.query, since: props.range.since(), until: props.range.until() || undefined })}`}
+          class={`shrink-0 whitespace-nowrap ${link}`}
+          title={`Every span of the ${what()} on the traces page`}
         >
           Open in Traces
         </A>
@@ -106,7 +155,7 @@ export default function OperationModal(props: {
         <div class="flex flex-col gap-4">
           <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
             <Stat
-              label="Requests"
+              label={noun()}
               value={requests()?.count}
               unit="count"
               detail={formatValue(
@@ -141,7 +190,7 @@ export default function OperationModal(props: {
             {(shown) => (
               <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <ChartPanel
-                  title="Requests"
+                  title={noun()}
                   description="By step"
                   kind="bar"
                   unit="count"
@@ -159,7 +208,7 @@ export default function OperationModal(props: {
                   series={latencyChart()}
                   loading={fetched.loading()}
                   onZoom={zoom}
-                  empty="No requests in this range"
+                  empty={`No ${noun().toLowerCase()} in this range`}
                 />
                 <ChartPanel
                   title="Error rate"
@@ -170,7 +219,7 @@ export default function OperationModal(props: {
                   series={errorRateChart()}
                   loading={fetched.loading()}
                   onZoom={zoom}
-                  empty="No requests in this range"
+                  empty={`No ${noun().toLowerCase()} in this range`}
                 />
               </div>
             )}
@@ -178,14 +227,14 @@ export default function OperationModal(props: {
 
           <Panel
             title="Spans"
-            description={`The newest ${SPANS} spans of the operation; a span opens its trace`}
+            description={`The newest ${SPANS} spans of the ${what()}; a span opens its trace`}
             flush
           >
-            <Show when={spans.data()}>
+            <Show when={fetched.data()}>
               {(body) => (
                 <Show
                   when={body().spans.length > 0}
-                  fallback={<Empty>The operation has no spans in this range.</Empty>}
+                  fallback={<Empty>The {what()} has no spans in this range.</Empty>}
                 >
                   <SpanList
                     spans={body().spans}

@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 
-import { databaseId, language, nameRest, routeParts, spanMeaning } from "../src/semantics";
+import {
+  databaseId,
+  type DbSpan,
+  dbTitle,
+  language,
+  nameRest,
+  routeParts,
+  spanMeaning,
+} from "../src/semantics";
 
 test("an HTTP server span has its method, route, and status", () => {
   expect(
@@ -23,7 +31,7 @@ test("an HTTP client span takes the path of its URL, and the old names count", (
   ).toEqual({ type: "http", method: "POST", route: "/v1/charges", status: 402 });
 });
 
-test("a database span has its system and the keyword of its query", () => {
+test("a database span has its system and its query as it is", () => {
   expect(
     spanMeaning({
       "db.system.name": "sqlite",
@@ -32,30 +40,41 @@ test("a database span has its system and the keyword of its query", () => {
   ).toEqual({
     type: "db",
     system: "sqlite",
-    operation: "SELECT",
-    query: "SELECT l.ts, r.service FROM logs",
+    query: "  SELECT l.ts,\n   r.service FROM logs",
   });
-  expect(spanMeaning({ "db.system": "redis", "db.operation": "hget" })).toEqual({
+  expect(spanMeaning({ "db.system": "redis", "db.statement": "HGET k f" })).toEqual({
     type: "db",
     system: "redis",
-    operation: "HGET",
-    query: undefined,
+    query: "HGET k f",
   });
+});
+
+const dbSpan = (query?: string): DbSpan => ({ type: "db", system: "sqlite", query });
+
+test("dbTitle puts the first word of the query or the name on a badge", () => {
+  expect(dbTitle(dbSpan("SELECT *\n  FROM users"), "SELECT")).toEqual({
+    keyword: "SELECT",
+    rest: "*\n  FROM users",
+    text: "SELECT *\n  FROM users",
+  });
+  expect(dbTitle(dbSpan(), "SELECT users")).toMatchObject({ keyword: "SELECT", rest: "users" });
+  expect(dbTitle(dbSpan(), "SELECT")).toMatchObject({ keyword: "SELECT", rest: "" });
+  // A first word that is not letters alone stays in the text.
+  expect(dbTitle(dbSpan("(SELECT 1) UNION SELECT 2"), "x")).toMatchObject({ keyword: undefined });
+  expect(dbTitle(dbSpan(), "users.find")).toMatchObject({ keyword: undefined, rest: "users.find" });
 });
 
 test("a span without either is other", () => {
   expect(spanMeaning({ "code.function": "open" })).toEqual({ type: "other" });
 });
 
-test("nameRest drops what the badge says", () => {
+test("nameRest drops what the badges of an HTTP span say", () => {
   const http = spanMeaning({ "http.request.method": "GET", "http.route": "/users" });
   expect(nameRest("GET /users", http)).toBe("");
   expect(nameRest("GET", http)).toBe("");
   expect(nameRest("list users", http)).toBe("list users");
-  const db = spanMeaning({ "db.system": "postgresql", "db.operation.name": "SELECT" });
-  expect(nameRest("SELECT carts", db)).toBe("carts");
-  expect(nameRest("SELECT", db)).toBe("");
-  expect(nameRest("SELECTIVE cache", db)).toBe("SELECTIVE cache");
+  const db = spanMeaning({ "db.system": "postgresql", "db.query.text": "SELECT * FROM carts" });
+  expect(nameRest("SELECT carts", db)).toBe("SELECT carts");
 });
 
 test("language reads the SDK language of a resource", () => {

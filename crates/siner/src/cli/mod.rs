@@ -15,7 +15,7 @@ use siner_query::Signal;
 pub use catalog::{AttributesArgs, CompleteArgs, IndexArgs, attributes, complete, index};
 pub use logs::{LogsArgs, logs};
 pub use metrics::{MetricArgs, MetricsArgs, metric, metrics};
-pub use services::{ServiceArgs, ServicesArgs, service, services};
+pub use services::{CallsArgs, ServiceArgs, ServicesArgs, calls, service, services};
 pub use sql::{SqlArgs, sql};
 pub use traces::{SpansArgs, TraceArgs, TracesArgs, spans, trace, traces};
 

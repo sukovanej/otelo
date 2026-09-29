@@ -28,6 +28,8 @@ enum Command {
     Services(cli::ServicesArgs),
     /// Print the requests, errors, latency, and logs of one service, by operation
     Service(cli::ServiceArgs),
+    /// Print the calls one service makes, by database, host, or other target, and by operation
+    Calls(cli::CallsArgs),
     /// Run a read-only SQL query over the telemetry
     Sql(cli::SqlArgs),
     /// List the attributes a query can read, with their types
@@ -51,6 +53,7 @@ fn main() -> anyhow::Result<()> {
         Command::Metric(args) => cli::metric(&args),
         Command::Services(args) => cli::services(&args),
         Command::Service(args) => cli::service(&args),
+        Command::Calls(args) => cli::calls(&args),
         Command::Sql(args) => cli::sql(&args),
         Command::Attributes(args) => cli::attributes(&args),
         Command::Complete(args) => cli::complete(&args),

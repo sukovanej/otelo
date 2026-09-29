@@ -1,11 +1,14 @@
-//! `siner services` and `siner service`.
+//! `siner services`, `siner service`, and `siner calls`.
 
 use std::io;
 
 use jiff::Timestamp;
 use serde::Serialize;
 use siner_telemetry::Attributes;
-use siner_telemetry::query::{Operation, Requests, Service, ServiceBucket, ServiceStats, Services};
+use siner_telemetry::query::{
+    CallOperation, Calls, Operation, RequestBucket, Requests, Service, ServiceBucket, ServiceStats,
+    Services, Target, TargetKey, TargetType,
+};
 
 use super::Range;
 use super::client::{Client, note_cut, path_segment, print_json};
@@ -161,6 +164,124 @@ pub fn service(args: &ServiceArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(clap::Args)]
+pub struct CallsArgs {
+    /// The name of the service
+    name: String,
+
+    /// Print the calls of each step too
+    #[arg(long)]
+    buckets: bool,
+
+    /// The length of a step, such as 1m [default: one that makes 120 steps at
+    /// most]
+    #[arg(long)]
+    step: Option<String>,
+
+    #[command(flatten)]
+    range: Range,
+
+    #[command(flatten)]
+    client: Client,
+}
+
+/// Runs `siner calls`.
+///
+/// # Errors
+///
+/// When the daemon cannot be reached, or answers with an error.
+pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
+    let mut params = args.range.params();
+    params.push(("step", args.step.clone()));
+    let answer: Calls = args.client.get(
+        &format!("/api/services/{}/calls", path_segment(&args.name)),
+        &params,
+    )?;
+    if args.client.wants_table() {
+        println!(
+            "{}: {} calls, {} errors, {} in all",
+            answer.service,
+            answer.calls.count,
+            answer.calls.errors,
+            table::duration(answer.calls.total_ns),
+        );
+        if !answer.targets.is_empty() {
+            println!();
+            let mut table =
+                Table::new(&["TARGET", "CALLS", "ERRORS", "P50", "P95", "P99", "TOTAL"]);
+            for target in &answer.targets {
+                let mut cells = vec![target_label(&target.key)];
+                cells.extend(request_cells(&target.calls));
+                cells.push(table::duration(target.calls.total_ns));
+                table.row(cells);
+            }
+            table.print()?;
+
+            println!();
+            let mut table = Table::new(&[
+                "TARGET", "CALL", "CALLS", "ERRORS", "P50", "P95", "P99", "TOTAL",
+            ]);
+            let mut operations: Vec<_> = answer
+                .targets
+                .iter()
+                .flat_map(|t| t.operations.iter().map(move |o| (&t.key, o)))
+                .collect();
+            operations.sort_by_key(|(_, o)| std::cmp::Reverse(o.calls.total_ns));
+            for (key, operation) in operations {
+                let mut cells = vec![target_label(key), operation.summary.clone()];
+                cells.extend(request_cells(&operation.calls));
+                cells.push(table::duration(operation.calls.total_ns));
+                table.row(cells);
+            }
+            table.print()?;
+        }
+        if args.buckets {
+            println!();
+            println!("every {}", table::duration(answer.step_ns));
+            print_call_steps(&answer.buckets)?;
+        }
+    } else if args.buckets {
+        print_json(&answer)?;
+    } else {
+        print_json(&CallsTotals::of(&answer))?;
+    }
+    note_cut(
+        answer.truncated,
+        "The service makes more kinds of calls; raise --limit.",
+    );
+    Ok(())
+}
+
+/// A target as the system or the type, and the name, such as
+/// `postgresql app` or `http api.stripe.com`.
+fn target_label(key: &TargetKey) -> String {
+    let kind = key.system.clone().unwrap_or_else(|| {
+        match key.target_type {
+            TargetType::Database => "database",
+            TargetType::Http => "http",
+            TargetType::Rpc => "rpc",
+            TargetType::Messaging => "messaging",
+            TargetType::Other => "other",
+        }
+        .to_owned()
+    });
+    match &key.name {
+        Some(name) => format!("{kind} {name}"),
+        None => kind,
+    }
+}
+
+/// The calls of each step.
+fn print_call_steps(buckets: &[RequestBucket]) -> io::Result<()> {
+    let mut table = Table::new(&["TIME (UTC)", "CALLS", "ERRORS", "P50", "P95", "P99"]);
+    for bucket in buckets {
+        let mut cells = vec![table::time(bucket.time)];
+        cells.extend(request_cells(&bucket.requests));
+        table.row(cells);
+    }
+    table.print()
+}
+
 /// The count, the errors, and the percentiles of requests, with dashes for
 /// the percentiles when there are none.
 fn request_cells(requests: &Requests) -> [String; 5] {
@@ -258,6 +379,48 @@ impl<'a> ServiceTotals<'a> {
             stats: &service.stats,
             operations: &service.operations,
             truncated: service.truncated,
+        }
+    }
+}
+
+/// The calls over the range without their steps, which `--buckets` adds.
+#[derive(Serialize)]
+struct CallsTotals<'a> {
+    service: &'a str,
+    since: Timestamp,
+    until: Timestamp,
+    calls: &'a Requests,
+    targets: Vec<TargetTotals<'a>>,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+struct TargetTotals<'a> {
+    #[serde(flatten)]
+    key: &'a TargetKey,
+    query: &'a str,
+    calls: &'a Requests,
+    operations: &'a [CallOperation],
+}
+
+impl<'a> CallsTotals<'a> {
+    fn of(calls: &'a Calls) -> Self {
+        Self {
+            service: &calls.service,
+            since: calls.since,
+            until: calls.until,
+            calls: &calls.calls,
+            targets: calls
+                .targets
+                .iter()
+                .map(|target: &'a Target| TargetTotals {
+                    key: &target.key,
+                    query: &target.query,
+                    calls: &target.calls,
+                    operations: &target.operations,
+                })
+                .collect(),
+            truncated: calls.truncated,
         }
     }
 }

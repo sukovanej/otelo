@@ -203,6 +203,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/services/{name}/call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The calls of a service to one target that do one thing, of one kind:
+         *     over the range and in buckets of one step, the attributes of the newest
+         *     one, and the newest 50. A call without spans in the range has none.
+         */
+        get: operations["call"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/services/{name}/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The calls a service makes, by what they go to: a span of the client or
+         *     the producer kind, or of a database system. A target is a database, a
+         *     host, an RPC service, or a message destination, read from the
+         *     OpenTelemetry attributes of the call. Each target has its calls over the
+         *     range and in buckets of one step, and by span name and kind, the most time
+         *     first. What a call does is its query with the values taken out, the
+         *     method and the path of an HTTP request with its ids taken out, or else
+         *     its span name.
+         */
+        get: operations["calls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/services/{name}/operation": {
         parameters: {
             query?: never;
@@ -355,6 +402,67 @@ export interface components {
              * @description The start of the bucket.
              */
             time: string;
+        };
+        /** @description The calls of a service to one target that do one thing, over a range. */
+        CallDetail: components["schemas"]["OperationDetail"] & {
+            /**
+             * @description The terms of a span query that keep these calls, or more of them when
+             *     the summary comes from a query or a path with its values taken out.
+             *     Empty without calls in the range.
+             */
+            query: string;
+            /** @description The newest calls, newest first. */
+            spans: components["schemas"]["TraceSpan"][];
+            /** @description What the calls do, as [`CallOperation::summary`] says. */
+            summary: string;
+            target: components["schemas"]["TargetKey"];
+        };
+        /** @description The calls to a target that do the same thing. */
+        CallOperation: {
+            /** @description The attributes of its newest call. */
+            attributes: components["schemas"]["Attributes"];
+            calls: components["schemas"]["Requests"];
+            /**
+             * Format: int32
+             * @description The OpenTelemetry span kind.
+             */
+            kind: number;
+            /** @description The span name of its newest call. */
+            name: string;
+            /**
+             * @description What the calls do: `db.query.summary`, or the query with its values
+             *     as `?`, such as `SELECT * FROM users WHERE id = ?`, for a database;
+             *     the method and `url.template`, or the path with its ids as `{id}`,
+             *     such as `GET /users/{id}`, for HTTP; and the span name for the rest.
+             */
+            summary: string;
+        };
+        /** @description The calls a service made in a range, by what they went to. */
+        Calls: {
+            /** @description The calls of every step, oldest first. */
+            buckets: components["schemas"]["RequestBucket"][];
+            /** @description Every call of the service. */
+            calls: components["schemas"]["Requests"];
+            service: string;
+            /**
+             * Format: date-time
+             * @description The range, after the retention capped it.
+             */
+            since: string;
+            /**
+             * Format: int64
+             * @description The length of a bucket in nanoseconds.
+             */
+            step_ns: number;
+            /** @description What the service called, the most time first. */
+            targets: components["schemas"]["Target"][];
+            /**
+             * @description The targets have more operations than the limit let through, which
+             *     kept the ones with the most time.
+             */
+            truncated: boolean;
+            /** Format: date-time */
+            until: string;
         };
         /**
          * @description What the text of a suggestion is.
@@ -553,8 +661,9 @@ export interface components {
             time: string;
         };
         /**
-         * @description Spans that enter a service: roots, and spans of the server or the
-         *     consumer kind.
+         * @description Spans counted together: the requests that enter a service, which are
+         *     roots and spans of the server or the consumer kind, or the calls it makes
+         *     to a database.
          */
         Requests: {
             /** Format: int64 */
@@ -735,6 +844,43 @@ export interface components {
             /** @description The text to put in place of the characters from `start` to `end`. */
             text: string;
         };
+        /** @description The calls to one target. */
+        Target: components["schemas"]["TargetKey"] & {
+            /** @description The calls of every step, oldest first. */
+            buckets: components["schemas"]["RequestBucket"][];
+            calls: components["schemas"]["Requests"];
+            /** @description The calls by summary and kind, the most time first. */
+            operations: components["schemas"]["CallOperation"][];
+            /**
+             * @description The terms of a span query that keep the calls to the target, such as
+             *     `db.system.name = "postgresql"`, from the attributes of one of them.
+             *     Empty when no attribute tells the target.
+             */
+            query: string;
+        };
+        /**
+         * @description What a call goes to: a database, a host, an RPC service, or a message
+         *     destination.
+         */
+        TargetKey: {
+            /**
+             * @description The database, the host with a port that is not 80 or 443, the RPC
+             *     service, the destination, or the `peer.service` of other calls.
+             *     Null when the call does not say.
+             */
+            name: string | null;
+            /**
+             * @description Such as `postgresql`, `grpc`, or `kafka`. Null for HTTP, and for
+             *     a target of no known type.
+             */
+            system: string | null;
+            type: components["schemas"]["TargetType"];
+        };
+        /**
+         * @description What kind of thing a call goes to.
+         * @enum {string}
+         */
+        TargetType: "database" | "http" | "rpc" | "messaging" | "other";
         /** @description One trace: its spans by start time, and the logs that carry its ID. */
         Trace: {
             /** @description Newest first. */
@@ -1220,6 +1366,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Service"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    call: {
+        parameters: {
+            query: {
+                /** @description What the target is. */
+                type: "database" | "http" | "rpc" | "messaging" | "other";
+                /**
+                 * @description The system of the target, such as `postgresql`. Missing for a
+                 *     target without one.
+                 */
+                system?: string;
+                /**
+                 * @description The name of the target, such as a database or a host. Missing for a
+                 *     target without one.
+                 */
+                target?: string;
+                /**
+                 * @description What the calls do, such as `SELECT * FROM users WHERE id = ?`, as
+                 *     `/api/services/{name}/calls` names it.
+                 */
+                summary: string;
+                /** @description The OpenTelemetry span kind of the call, such as 3 for client. */
+                kind: number;
+                /**
+                 * @description The start of the range: a duration before now, such as `1h`, or an
+                 *     RFC 3339 timestamp. One hour before `until` when missing.
+                 */
+                since?: string;
+                /** @description The end of the range, in the form of `since`. Now when missing. */
+                until?: string;
+                /**
+                 * @description The length of a bucket, such as `1m`. One that makes 120 buckets at
+                 *     most when missing.
+                 */
+                step?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The name of the service */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallDetail"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    calls: {
+        parameters: {
+            query?: {
+                /**
+                 * @description The start of the range: a duration before now, such as `1h`, or an
+                 *     RFC 3339 timestamp. One hour before `until` when missing.
+                 */
+                since?: string;
+                /** @description The end of the range, in the form of `since`. Now when missing. */
+                until?: string;
+                /** @description The most services, or the most operations of one service, to return. */
+                limit?: number;
+                /**
+                 * @description The length of a bucket, such as `1m`. One that makes 60 buckets at
+                 *     most for the list and 120 for one service when missing.
+                 */
+                step?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The name of the service */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calls"];
                 };
             };
             400: {

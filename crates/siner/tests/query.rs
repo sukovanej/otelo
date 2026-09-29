@@ -87,6 +87,18 @@ fn json(addr: &str, args: &[&str]) -> (Value, String) {
     (serde_json::from_slice(&output.stdout).unwrap(), stderr)
 }
 
+/// `siner calls`, of a service whose spans are all server spans, which are
+/// no calls.
+fn check_calls(addr: &str) {
+    let (calls, _) = json(addr, &["calls", "api"]);
+    assert_eq!(calls["calls"]["count"], 0);
+    assert_eq!(calls["targets"], json!([]));
+    assert!(calls.get("buckets").is_none(), "{calls}");
+    let table = siner(addr, &["calls", "api", "--table"]);
+    let table = String::from_utf8(table.stdout).unwrap();
+    assert!(table.starts_with("api: 0 calls"), "{table}");
+}
+
 #[test]
 fn the_cli_reads_what_the_api_serves() {
     let dir = tempfile::tempdir().unwrap();
@@ -178,6 +190,7 @@ fn the_cli_reads_what_the_api_serves() {
     let table = siner(&addr, &["service", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.contains("GET /languages"), "{table}");
+    check_calls(&addr);
 
     let spec = get(&addr, "/api/openapi.json");
     for path in [
@@ -191,6 +204,8 @@ fn the_cli_reads_what_the_api_serves() {
         "/api/services",
         "/api/services/{name}",
         "/api/services/{name}/operation",
+        "/api/services/{name}/calls",
+        "/api/services/{name}/call",
         "/api/sql",
         "/api/attributes",
         "/api/complete",
