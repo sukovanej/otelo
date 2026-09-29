@@ -26,13 +26,13 @@ An OpenAPI spec comes out of the code, so the UI can generate its client later.
 
 ## CLI
 
-`siner logs`, `siner traces`, `siner trace <id>`, `siner metrics [name]`, and `siner sql`.
+`otelo logs`, `otelo traces`, `otelo trace <id>`, `otelo metrics [name]`, and `otelo sql`.
 
 - A table when stdout is a terminal, JSON otherwise. `--json` and `--table` override.
 - `--since 1h` style ranges, default 1 hour.
 - A cut result prints one line that names the flag that narrows it.
-- The daemon address comes from `--daemon` or `SINER_URL`, default `http://127.0.0.1:7070`.
-- `siner trace` prints the span tree with durations, and marks the error spans.
+- The daemon address comes from `--daemon` or `OTELO_URL`, default `http://127.0.0.1:7070`.
+- `otelo trace` prints the span tree with durations, and marks the error spans.
 
 ## Comments
 
