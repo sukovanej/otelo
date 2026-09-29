@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use serde_json::{Value, json};
-use siner_storage::query::Latency;
-use siner_storage::{
+use otelo_storage::query::Latency;
+use otelo_storage::{
     Attributes, Batch, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
     SpanStatus, TimeRange, TraceId, batch_channel,
 };
-use siner_storage_sqlite::{Config, Day, Reader, Writer};
+use otelo_storage_sqlite::{Config, Day, Reader, Writer};
+use serde_json::{Value, json};
 
 fn attributes_from_json(value: Value) -> Attributes {
     serde_json::from_value(value).unwrap()

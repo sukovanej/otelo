@@ -1,8 +1,8 @@
 import { type Accessor, createMemo, createSignal, type JSX, Match, Show, Switch } from "solid-js";
 
-import { getTrace, type LogLine, search } from "@siner/api";
-import { Button, Callout, Tabs } from "@siner/ui";
-import { Panel, Value } from "@siner/viz";
+import { getTrace, type LogLine, search } from "@otelo/api";
+import { Button, Callout, Tabs } from "@otelo/ui";
+import { Panel, Value } from "@otelo/viz";
 
 import { pageContent } from "../classes";
 import { createFetch } from "../fetch";

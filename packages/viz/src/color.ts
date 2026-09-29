@@ -1,5 +1,5 @@
 // The colors a series can take, by name, so a dashboard can name them in
-// JSON. Each is a color of the theme of `@siner/ui`.
+// JSON. Each is a color of the theme of `@otelo/ui`.
 
 /** `series-1` to `series-8` tell series apart, in this order. `error`,
  * `warn`, and `success` mean a state and never tell series apart. `muted` is

@@ -1,6 +1,6 @@
+use otelo_query::Signal;
+use otelo_storage::query;
 use serde::Deserialize;
-use siner_query::Signal;
-use siner_storage::query;
 use utoipa::IntoParams;
 
 use crate::Request;
@@ -62,6 +62,6 @@ pub fn parse_signal(text: &str) -> Result<Signal, ApiError> {
     text.parse().map_err(|e: String| ApiError::bad_request(&e))
 }
 
-pub fn parse_query(q: Option<&str>, signal: Signal) -> Result<siner_query::Query, ApiError> {
-    siner_query::parse(q.unwrap_or_default(), signal).map_err(|e| ApiError::bad_request(&e))
+pub fn parse_query(q: Option<&str>, signal: Signal) -> Result<otelo_query::Query, ApiError> {
+    otelo_query::parse(q.unwrap_or_default(), signal).map_err(|e| ApiError::bad_request(&e))
 }

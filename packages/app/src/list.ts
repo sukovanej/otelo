@@ -5,7 +5,7 @@
 import { useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 
-import type { ListQuery } from "@siner/api";
+import type { ListQuery } from "@otelo/api";
 
 import { createFetch, type Fetched } from "./fetch";
 import { addTerm } from "./query";

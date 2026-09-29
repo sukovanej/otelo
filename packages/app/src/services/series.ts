@@ -1,8 +1,8 @@
 // The series of the charts of requests, from the buckets of the services
 // API: of a service and of one of its operations alike.
 
-import type { Requests } from "@siner/api";
-import type { TimeSeries } from "@siner/viz";
+import type { Requests } from "@otelo/api";
+import type { TimeSeries } from "@otelo/viz";
 
 import { share } from "./stats";
 

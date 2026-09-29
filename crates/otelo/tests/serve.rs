@@ -16,7 +16,7 @@ fn health_answers_200() {
 #[test]
 fn makes_the_missing_data_directory() {
     let dir = tempfile::tempdir().unwrap();
-    let data = dir.path().join("var/siner");
+    let data = dir.path().join("var/otelo");
     let daemon = start_daemon(&data);
     assert!(data.is_dir());
     stop_daemon(daemon, "TERM");
@@ -55,7 +55,7 @@ fn receives_otlp_on_its_own_ports() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
     std::net::TcpStream::connect(&daemon.otlp_grpc).unwrap();
-    let ts = siner_storage::now_unix_nanos().to_string();
+    let ts = otelo_storage::now_unix_nanos().to_string();
     let body = format!(
         r#"{{"resourceLogs": [{{"scopeLogs": [{{"logRecords": [
             {{"timeUnixNano": "{ts}", "body": {{"stringValue": "cart is empty"}}}}
@@ -67,7 +67,7 @@ fn receives_otlp_on_its_own_ports() {
         .unwrap();
     assert_eq!(response.status(), 200);
     stop_daemon(daemon, "TERM");
-    let day = siner_storage_sqlite::Day::today().file_name();
+    let day = otelo_storage_sqlite::Day::today().file_name();
     let conn = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
     let body: String = conn
         .query_row("SELECT body FROM logs", [], |row| row.get(0))
@@ -84,13 +84,13 @@ fn traces_itself() {
     let response = get(&daemon.addr, "/api/logs?q=level%20%3E%3D%20warn");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     stop_daemon(daemon, "TERM");
-    let day = siner_storage_sqlite::Day::today().file_name();
+    let day = otelo_storage_sqlite::Day::today().file_name();
     let conn = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
     let request: (Vec<u8>, Vec<u8>, String) = conn
         .query_row(
             "SELECT trace_id, span_id, spans.attributes FROM spans
              JOIN resources ON resources.id = resource_id
-             WHERE service = 'siner' AND name = 'GET /api/logs' AND parent_span_id IS NULL",
+             WHERE service = 'otelo' AND name = 'GET /api/logs' AND parent_span_id IS NULL",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -112,7 +112,7 @@ fn traces_itself() {
     let bodies: Vec<String> = conn
         .prepare(
             "SELECT body FROM logs JOIN resources ON resources.id = resource_id
-             WHERE service = 'siner' ORDER BY ts",
+             WHERE service = 'otelo' ORDER BY ts",
         )
         .unwrap()
         .query_map([], |row| row.get(0))

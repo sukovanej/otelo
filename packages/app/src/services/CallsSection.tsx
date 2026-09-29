@@ -1,7 +1,7 @@
 import { createMemo } from "solid-js";
 
-import type { CallOperation, Calls, Target } from "@siner/api";
-import { ChartPanel, type Column, Panel, Table, type TimeSeries } from "@siner/viz";
+import type { CallOperation, Calls, Target } from "@otelo/api";
+import { ChartPanel, type Column, Panel, Table, type TimeSeries } from "@otelo/viz";
 
 import KindBadge from "../traces/KindBadge";
 import SpanTitle from "../traces/SpanTitle";

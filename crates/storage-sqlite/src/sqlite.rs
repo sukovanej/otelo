@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
-use siner_storage::{Inbox, IndexedAttribute, RangeQueries, Result, Storage, TimeRange};
+use otelo_storage::{Inbox, IndexedAttribute, RangeQueries, Result, Storage, TimeRange};
 
 use crate::day::Day;
 use crate::indexes::Indexes;

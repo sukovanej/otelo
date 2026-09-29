@@ -1,5 +1,5 @@
 // Writes src/schema.ts, the TypeScript types of openapi.json, which
-// `siner openapi` prints from the Rust types of the daemon. `mise run
+// `otelo openapi` prints from the Rust types of the daemon. `mise run
 // api:generate` runs both, and a test of each side fails when its file is
 // behind.
 

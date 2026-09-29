@@ -1,12 +1,12 @@
 use std::collections::{BTreeSet, HashMap};
 
 use anyhow::ensure;
-use rusqlite::Row;
-use siner_query::{Query, Signal};
-use siner_storage::Severity;
-use siner_storage::query::{
+use otelo_query::{Query, Signal};
+use otelo_storage::Severity;
+use otelo_storage::query::{
     GROUP_SCAN_LIMIT, LogGroup, LogGroups, LogLine, Logs, message_template,
 };
+use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{

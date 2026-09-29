@@ -12,7 +12,7 @@ const line = {
   "stroke-linejoin": "round",
 } as const;
 
-/** The mark of siner: three bars of log lines. It is filled, not stroked. */
+/** The mark of otelo: three bars of log lines. It is filled, not stroked. */
 export function LogoIcon(props: IconProps) {
   return (
     <Icon {...props}>

@@ -1,6 +1,6 @@
-import type { LogLine } from "@siner/api";
-import { Level } from "@siner/ui";
-import { type Column, Table } from "@siner/viz";
+import type { LogLine } from "@otelo/api";
+import { Level } from "@otelo/ui";
+import { type Column, Table } from "@otelo/viz";
 
 import Service from "../Service";
 import { formatTime, parseTime } from "../time";

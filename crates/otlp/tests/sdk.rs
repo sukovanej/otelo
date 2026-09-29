@@ -46,7 +46,7 @@ fn round_trip(transport: Transport) {
     let conn = open_todays_day_file(dir.path());
 
     let services: Vec<String> = rows(&conn, "SELECT service FROM resources ORDER BY id");
-    assert_eq!(services, ["shop", "siner"]);
+    assert_eq!(services, ["shop", "otelo"]);
     let host: Vec<String> = rows(
         &conn,
         "SELECT attributes ->> '$.\"host.name\"' FROM resources WHERE service = 'shop'",

@@ -19,7 +19,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use jiff::Timestamp;
-use siner_storage::{RangeQueries, Storage, TimeRange};
+use otelo_storage::{RangeQueries, Storage, TimeRange};
 use tracing::Instrument;
 use tracing::field::Empty;
 use utoipa::OpenApi;
@@ -43,8 +43,8 @@ const DEFAULT_SINCE: &str = "1h";
 
 #[derive(OpenApi)]
 #[openapi(info(
-    title = "siner",
-    description = "Query the logs, traces, and metrics that siner keeps."
+    title = "otelo",
+    description = "Query the logs, traces, and metrics that otelo keeps."
 ))]
 struct Spec;
 
@@ -169,7 +169,7 @@ impl Api {
         let oldest_retained_at = self.storage.oldest_retained_at();
         ensure!(
             oldest_retained_at < until,
-            "the range ends before the oldest telemetry siner keeps"
+            "the range ends before the oldest telemetry otelo keeps"
         );
         TimeRange::new(since.max(oldest_retained_at), until)
     }

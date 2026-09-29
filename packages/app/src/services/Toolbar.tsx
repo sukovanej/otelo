@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js";
 
-import { RangePicker } from "@siner/ui";
+import { RangePicker } from "@otelo/ui";
 
 import type { Fetched } from "../fetch";
 import PageBar, { LiveToggle } from "../PageBar";

@@ -1,6 +1,6 @@
 import { createSignal, createUniqueId, For, Show } from "solid-js";
 
-import { CheckIcon, ChevronIcon } from "@siner/icons";
+import { CheckIcon, ChevronIcon } from "@otelo/icons";
 
 import {
   activeOption,

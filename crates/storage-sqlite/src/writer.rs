@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 use std::{fs, io, ptr, thread};
 
 use anyhow::Context;
-use rusqlite::{Connection, Transaction, params};
-use siner_storage::{
+use otelo_storage::{
     AttributeValue, Attributes, Inbox, IndexedAttribute, Log, Metric, MetricKind, Point, Records,
     Resource, Span,
 };
+use rusqlite::{Connection, Transaction, params};
 use twox_hash::XxHash3_64;
 
 use crate::catalog::{CatalogCache, CatalogDelta, KeyGroup};
@@ -211,7 +211,7 @@ impl State {
             let result = match self.files.get(&day) {
                 Some(file) => apply_indexes_to_day_file(&file.conn, &wanted.attributes)
                     .map_err(anyhow::Error::from),
-                // A file from an older siner may lack the newer tables.
+                // A file from an older otelo may lack the newer tables.
                 None => Connection::open(self.config.dir.join(day.file_name()))
                     .and_then(|conn| {
                         conn.execute_batch(SCHEMA)?;
@@ -236,24 +236,24 @@ impl State {
         }
         #[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
         let point = Point {
-            recorded_at: siner_storage::now_unix_nanos(),
+            recorded_at: otelo_storage::now_unix_nanos(),
             value: dropped_batches as f64,
             histogram: None,
         };
         let metric = Metric {
-            name: "siner.telemetry.dropped_batches".into(),
+            name: "otelo.telemetry.dropped_batches".into(),
             kind: MetricKind::Sum,
             unit: "{batch}".into(),
             labels: Attributes::new(),
             points: Vec::new(),
         };
-        let siner = Resource {
-            service: "siner".into(),
+        let otelo = Resource {
+            service: "otelo".into(),
             attributes: Attributes::new(),
         };
         let mut part = ResourceDayRecords::default();
         part.push_point(&metric, &point);
-        if let Err(error) = self.write_day(Day::of(point.recorded_at), &[(&siner, part)]) {
+        if let Err(error) = self.write_day(Day::of(point.recorded_at), &[(&otelo, part)]) {
             tracing::error!("write the drop counter: {error:#}");
         }
     }

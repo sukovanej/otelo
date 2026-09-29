@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use serde_json::{Value, json};
-use siner_storage::query::{TargetKey, TargetType, path_template, query_template};
-use siner_storage::{
+use otelo_storage::query::{TargetKey, TargetType, path_template, query_template};
+use otelo_storage::{
     Attributes, Batch, RangeQueries, Records, Resource, Span, SpanId, SpanKind, SpanStatus,
     TimeRange, TraceId, batch_channel,
 };
-use siner_storage_sqlite::{Config, Day, Reader, Writer};
+use otelo_storage_sqlite::{Config, Day, Reader, Writer};
+use serde_json::{Value, json};
 
 const SECOND: i64 = 1_000_000_000;
 const MS: i64 = 1_000_000;

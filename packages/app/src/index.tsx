@@ -8,7 +8,7 @@ import ServicesPage from "./services/ServicesPage";
 import TracePage from "./traces/TracePage";
 import TracesPage from "./traces/TracesPage";
 
-import "@siner/ui/fonts.css";
+import "@otelo/ui/fonts.css";
 import "./app.css";
 
 function NotFound() {

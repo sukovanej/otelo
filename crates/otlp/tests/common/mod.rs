@@ -3,9 +3,9 @@
 use std::net::SocketAddr;
 use std::path::Path;
 
+use otelo_storage::{Inbox, Sender, batch_channel};
+use otelo_storage_sqlite::{Config, Day, Writer};
 use rusqlite::Connection;
-use siner_storage::{Inbox, Sender, batch_channel};
-use siner_storage_sqlite::{Config, Day, Writer};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
@@ -45,12 +45,12 @@ impl Receiver {
             let grpc = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addrs = (http.local_addr().unwrap(), grpc.local_addr().unwrap());
             let servers = vec![
-                tokio::spawn(siner_otlp::serve_http(
+                tokio::spawn(otelo_otlp::serve_http(
                     http,
                     sender.clone(),
                     shutdown.clone(),
                 )),
-                tokio::spawn(siner_otlp::serve_grpc(
+                tokio::spawn(otelo_otlp::serve_grpc(
                     grpc,
                     sender.clone(),
                     shutdown.clone(),

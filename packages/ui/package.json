@@ -1,5 +1,5 @@
 {
-  "name": "@siner/ui",
+  "name": "@otelo/ui",
   "private": true,
   "type": "module",
   "exports": {
@@ -10,7 +10,7 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "catalog:",
     "@fontsource/ibm-plex-sans": "catalog:",
-    "@siner/icons": "workspace:*"
+    "@otelo/icons": "workspace:*"
   },
   "devDependencies": {
     "solid-js": "catalog:",

@@ -1,6 +1,6 @@
 [package]
-name = "siner-storage"
-description = "The model of siner's telemetry, what its queries return, and the traits a storage backend implements"
+name = "otelo-storage"
+description = "The model of otelo's telemetry, what its queries return, and the traits a storage backend implements"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -10,7 +10,7 @@ anyhow = { workspace = true }
 jiff = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-siner-query = { workspace = true }
+otelo-query = { workspace = true }
 utoipa = { workspace = true }
 
 [lints]

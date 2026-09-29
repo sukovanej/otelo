@@ -1,8 +1,8 @@
 import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 
-import type { TraceSpan } from "@siner/api";
-import { Value } from "@siner/viz";
+import type { TraceSpan } from "@otelo/api";
+import { Value } from "@otelo/viz";
 
 import { heading, link, times } from "../classes";
 import FieldTable, { Fields } from "../FieldTable";

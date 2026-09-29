@@ -1,5 +1,5 @@
-import type { TraceSpan } from "@siner/api";
-import { type Column, Table } from "@siner/viz";
+import type { TraceSpan } from "@otelo/api";
+import { type Column, Table } from "@otelo/viz";
 
 import Service from "../Service";
 import { formatTime, parseTime } from "../time";

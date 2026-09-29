@@ -1,12 +1,12 @@
 {
-  "name": "@siner/app",
+  "name": "@otelo/app",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@siner/api": "workspace:*",
-    "@siner/icons": "workspace:*",
-    "@siner/ui": "workspace:*",
-    "@siner/viz": "workspace:*",
+    "@otelo/api": "workspace:*",
+    "@otelo/icons": "workspace:*",
+    "@otelo/ui": "workspace:*",
+    "@otelo/viz": "workspace:*",
     "@solidjs/router": "catalog:",
     "solid-js": "catalog:"
   },

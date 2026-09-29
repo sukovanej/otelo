@@ -8,8 +8,8 @@ import {
   getTraces,
   type Operation,
   type Service as ServiceBody,
-} from "@siner/api";
-import { Callout } from "@siner/ui";
+} from "@otelo/api";
+import { Callout } from "@otelo/ui";
 import {
   ChartPanel,
   type Column,
@@ -19,7 +19,7 @@ import {
   Table,
   type TimeFrame,
   type TimeSeries,
-} from "@siner/viz";
+} from "@otelo/viz";
 
 import { link, pageContent } from "../classes";
 import { Empty } from "../ListFrame";

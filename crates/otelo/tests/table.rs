@@ -1,4 +1,4 @@
-use siner::cli::table::{format_duration, format_number};
+use otelo::cli::table::{format_duration, format_number};
 
 #[test]
 fn formats_durations() {

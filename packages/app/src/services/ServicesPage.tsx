@@ -1,8 +1,8 @@
 import { Show } from "solid-js";
 
-import { getServices, type ServiceSummary } from "@siner/api";
-import { Callout } from "@siner/ui";
-import { type Column, Panel, Sparkline, Table } from "@siner/viz";
+import { getServices, type ServiceSummary } from "@otelo/api";
+import { Callout } from "@otelo/ui";
+import { type Column, Panel, Sparkline, Table } from "@otelo/viz";
 
 import { pageContent } from "../classes";
 import { count } from "../list";

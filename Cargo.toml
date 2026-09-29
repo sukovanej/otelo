@@ -25,11 +25,11 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
-siner-api = { path = "crates/api" }
-siner-otlp = { path = "crates/otlp" }
-siner-query = { path = "crates/query" }
-siner-storage = { path = "crates/storage" }
-siner-storage-sqlite = { path = "crates/storage-sqlite" }
+otelo-api = { path = "crates/api" }
+otelo-otlp = { path = "crates/otlp" }
+otelo-query = { path = "crates/query" }
+otelo-storage = { path = "crates/storage" }
+otelo-storage-sqlite = { path = "crates/storage-sqlite" }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-util = "0.7.19"

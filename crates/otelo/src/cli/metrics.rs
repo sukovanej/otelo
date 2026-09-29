@@ -1,6 +1,6 @@
 use std::io;
 
-use siner_storage::query::{Bucket, MetricList, MetricSeries};
+use otelo_storage::query::{Bucket, MetricList, MetricSeries};
 
 use super::client::{Client, escape_path_segment, note_cut, print_json};
 use super::table::{self, Table};

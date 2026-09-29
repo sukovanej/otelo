@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use otelo_storage::{IndexedAttribute, IndexedSignal};
 use rusqlite::Connection;
-use siner_storage::{IndexedAttribute, IndexedSignal};
 
 use crate::writer::hash_fields;
 

@@ -7,7 +7,7 @@ mod sql;
 pub mod table;
 mod traces;
 
-use siner_query::Signal;
+use otelo_query::Signal;
 
 pub use catalog::{AttributesArgs, CompleteArgs, IndexArgs, attributes, complete, index};
 pub use logs::{LogsArgs, logs};
@@ -56,7 +56,7 @@ fn note_unindexed(signal: Signal, keys: &[String]) {
         let verb = if keys.len() == 1 { "has" } else { "have" };
         eprintln!(
             "{} {verb} no index, so the query read every record in the range; \
-             `siner index add {signal} {first}` adds one.",
+             `otelo index add {signal} {first}` adds one.",
             keys.join(", ")
         );
     }

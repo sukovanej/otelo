@@ -7,7 +7,7 @@ export interface IconProps {
   class?: string | undefined;
   /** What the icon means, for a reader that cannot see it. An icon without
    * a title is decoration, and hidden from them. To show it on hover, put the
-   * icon in the `Tooltip` of `@siner/ui`; the icon draws no tooltip itself. */
+   * icon in the `Tooltip` of `@otelo/ui`; the icon draws no tooltip itself. */
   title?: string | undefined;
 }
 

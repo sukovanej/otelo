@@ -1,6 +1,6 @@
 // How the traces pages name the fields of a span.
 
-import type { TraceSpan } from "@siner/api";
+import type { TraceSpan } from "@otelo/api";
 
 import { attributes, builtin, resource, type Section } from "../FieldTable";
 

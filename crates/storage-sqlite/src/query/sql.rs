@@ -1,7 +1,7 @@
+use otelo_storage::query::{SqlResult, SqlValue};
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::limits::Limit;
 use rusqlite::types::ValueRef;
-use siner_storage::query::{SqlResult, SqlValue};
 
 use super::{hex_digits, new_statement_span, truncate_to_limit};
 use crate::Reader;

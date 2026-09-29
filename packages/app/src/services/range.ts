@@ -5,7 +5,7 @@
 import { useSearchParams } from "@solidjs/router";
 import { type Accessor, createEffect, createMemo, onCleanup } from "solid-js";
 
-import { search } from "@siner/api";
+import { search } from "@otelo/api";
 
 import { createFetch, type Fetched } from "../fetch";
 import { DEFAULT_SINCE, LIVE_MS } from "../list";

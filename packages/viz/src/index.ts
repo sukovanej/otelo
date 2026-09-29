@@ -1,6 +1,6 @@
-// The parts that show data in the siner UI: charts of values over time,
+// The parts that show data in the otelo UI: charts of values over time,
 // tables, and single numbers, each in a unit and in the colors of the theme
-// of `@siner/ui`, framed by a panel. Pages build on them, and so will
+// of `@otelo/ui`, framed by a panel. Pages build on them, and so will
 // dashboards: every prop but the callbacks is plain data, and units and
 // colors go by name. An app adds `@source` for this package's `src`.
 

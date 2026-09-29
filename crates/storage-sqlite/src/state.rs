@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use otelo_query::Signal;
+use otelo_storage::{IndexedAttribute, IndexedSignal};
 use rusqlite::Connection;
-use siner_query::Signal;
-use siner_storage::{IndexedAttribute, IndexedSignal};
 
 const SCHEMA: &str = "
 PRAGMA journal_mode = WAL;

@@ -1,8 +1,8 @@
 import { createSignal, For, Show } from "solid-js";
 
-import type { TraceSpan } from "@siner/api";
-import { ChevronIcon } from "@siner/icons";
-import { type Column, Table, Value } from "@siner/viz";
+import type { TraceSpan } from "@otelo/api";
+import { ChevronIcon } from "@otelo/icons";
+import { type Column, Table, Value } from "@otelo/viz";
 
 import Service from "../Service";
 import { spanFailed } from "./span";

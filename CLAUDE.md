@@ -1,4 +1,4 @@
-# siner
+# otelo
 
 Deploys, runs, and observes the apps on one Linux server, as one binary. The design and the
 work live in openplan docs and tasks in the git ref `refs/openplan/tasks`. Read and write

@@ -1,4 +1,4 @@
-// The HTTP API of the siner daemon: the types of its spec, which the Rust
+// The HTTP API of the otelo daemon: the types of its spec, which the Rust
 // types of the daemon make, by their names there, and a client of the
 // endpoints the UI reads.
 

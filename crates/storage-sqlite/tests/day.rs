@@ -1,4 +1,4 @@
-use siner_storage_sqlite::Day;
+use otelo_storage_sqlite::Day;
 
 #[test]
 fn names_the_file_by_the_utc_date() {

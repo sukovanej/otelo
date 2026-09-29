@@ -1,8 +1,8 @@
 import { For, Match, Show, Switch } from "solid-js";
 
-import type { Attributes } from "@siner/api";
-import { databaseName, DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@siner/icons";
-import { Badge, Level, type Tone, Tooltip } from "@siner/ui";
+import type { Attributes } from "@otelo/api";
+import { databaseName, DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@otelo/icons";
+import { Badge, Level, type Tone, Tooltip } from "@otelo/ui";
 
 import {
   databaseId,

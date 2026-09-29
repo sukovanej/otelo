@@ -2,7 +2,7 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "printWidth": 100,
   "sortImports": {
-    "internalPattern": ["@siner/"]
+    "internalPattern": ["@otelo/"]
   },
   "ignorePatterns": [
     "**/dist/**",

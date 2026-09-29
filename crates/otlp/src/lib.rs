@@ -11,9 +11,9 @@ use opentelemetry_proto::tonic::collector::metrics::v1::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
+use otelo_storage::Sender;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use siner_storage::Sender;
 
 pub use grpc::serve_grpc;
 pub use http::serve_http;
@@ -82,7 +82,7 @@ fn send_rows_to_writer(sender: &Sender, mapped: MappedExport) -> Option<(i64, St
         rejection_reasons,
     } = mapped;
     if !batch.is_empty() && !sender.send(batch) {
-        let message = "the telemetry queue of siner is full, so it dropped the whole request";
+        let message = "the telemetry queue of otelo is full, so it dropped the whole request";
         return Some((item_count, message.into()));
     }
     (rejected_count > 0).then(|| {

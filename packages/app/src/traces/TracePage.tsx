@@ -1,6 +1,6 @@
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 
-import { search } from "@siner/api";
+import { search } from "@otelo/api";
 
 import { link } from "../classes";
 import { usePageKeys } from "../list";

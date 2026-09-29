@@ -9,9 +9,9 @@ import {
   search,
   type TargetKey,
   type TraceSpan,
-} from "@siner/api";
-import { Callout } from "@siner/ui";
-import { ChartPanel, formatValue, Panel, Stat } from "@siner/viz";
+} from "@otelo/api";
+import { Callout } from "@otelo/ui";
+import { ChartPanel, formatValue, Panel, Stat } from "@otelo/viz";
 
 import { link, pageContent } from "../classes";
 import { Empty } from "../ListFrame";

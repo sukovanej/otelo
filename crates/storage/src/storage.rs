@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use siner_query::{Catalog, Query, Signal};
+use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
     AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,

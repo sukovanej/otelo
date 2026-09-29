@@ -1,6 +1,6 @@
 // The spans of one trace as a tree, laid out on the time of the trace.
 
-import type { TraceSpan } from "@siner/api";
+import type { TraceSpan } from "@otelo/api";
 
 import { nanosBetween } from "../time";
 

@@ -4,8 +4,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, ensure};
+use otelo_storage::{IndexedAttribute, TimeRange};
 use rusqlite::Connection;
-use siner_storage::{IndexedAttribute, TimeRange};
 
 use crate::day::Day;
 use crate::writer::SCHEMA;

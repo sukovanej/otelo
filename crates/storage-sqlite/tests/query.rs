@@ -2,16 +2,16 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::Connection;
-use serde_json::{Value, json};
-use siner_query::{Signal, complete, parse};
-use siner_storage::query::{MetricFilter, SqlValue, default_step};
-use siner_storage::{
+use otelo_query::{Signal, complete, parse};
+use otelo_storage::query::{MetricFilter, SqlValue, default_step};
+use otelo_storage::{
     AttributeValue, Attributes, Batch, Error, IndexedAttribute, IndexedSignal, Log, Metric,
     MetricKind, Point, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
     SpanStatus, TimeRange, TraceId, batch_channel,
 };
-use siner_storage_sqlite::{Config, Day, Indexes, Reader, Writer};
+use otelo_storage_sqlite::{Config, Day, Indexes, Reader, Writer};
+use rusqlite::Connection;
+use serde_json::{Value, json};
 
 fn attributes_from_json(value: Value) -> Attributes {
     serde_json::from_value(value).unwrap()
@@ -640,7 +640,7 @@ fn a_day_file_from_before_the_catalog_gets_its_tables() {
 fn a_histogram_returns_the_bucket_counts_of_each_step() {
     let dir = tempfile::tempdir().unwrap();
     let start = Day::today().start();
-    let histogram = |counts: [u64; 3], sum: f64| siner_storage::Histogram {
+    let histogram = |counts: [u64; 3], sum: f64| otelo_storage::Histogram {
         bounds: vec![0.1, 1.0],
         counts: counts.to_vec(),
         count: counts.iter().sum(),

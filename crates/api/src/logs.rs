@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
-use siner_query::Signal;
-use siner_storage::query::{LogGroups, Logs};
+use otelo_query::Signal;
+use otelo_storage::query::{LogGroups, Logs};
 
 use crate::Api;
 use crate::error::{ApiResult, ErrorBody};

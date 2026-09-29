@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, Transaction, params};
 
-use siner_storage::{AttributeValue, Attributes};
+use otelo_storage::{AttributeValue, Attributes};
 
 pub const MAX_VALUES_PER_KEY: usize = 200;
 

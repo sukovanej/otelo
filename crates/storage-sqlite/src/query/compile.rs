@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use otelo_query::{Builtin, Expr, Field, Op, Query, Signal, Value};
 use rusqlite::types::Value as Sql;
-use siner_query::{Builtin, Expr, Field, Op, Query, Signal, Value};
 
-use siner_storage::{IndexedAttribute, IndexedSignal, Severity, SpanId, SpanStatus, TraceId};
+use otelo_storage::{IndexedAttribute, IndexedSignal, Severity, SpanId, SpanStatus, TraceId};
 
 use super::WhereClause;
 use crate::indexes::attribute_json_path;

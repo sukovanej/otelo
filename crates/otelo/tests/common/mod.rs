@@ -27,7 +27,7 @@ pub fn start_daemon(data: &std::path::Path) -> Daemon {
 }
 
 pub fn start_daemon_with(data: &std::path::Path, args: &[&str]) -> Daemon {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_siner"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_otelo"))
         .args([
             "serve",
             "--listen",

@@ -2,7 +2,7 @@
 // attributes and its resource: an HTTP request, a database call, and the
 // language of the service. The older names of each attribute count too.
 
-import type { Attributes } from "@siner/api";
+import type { Attributes } from "@otelo/api";
 
 export interface HttpSpan {
   type: "http";
@@ -125,18 +125,18 @@ export function nameRest(name: string, meaning: SpanMeaning): string {
   return rest;
 }
 
-/** The ids of `@siner/icons` for the values of `db.system.name` and of the
+/** The ids of `@otelo/icons` for the values of `db.system.name` and of the
  * older `db.system` that are not the id itself. */
 const DATABASE_IDS: Record<string, string> = {
   "microsoft.sql_server": "mssql",
   "oracle.db": "oracle",
 };
 
-/** A database system as an id of the database icons of `@siner/icons`, such
+/** A database system as an id of the database icons of `@otelo/icons`, such
  * as `postgresql` or `mssql`. */
 export const databaseId = (system: string) => DATABASE_IDS[system] ?? system;
 
-/** The ids of `@siner/icons` for the values of `telemetry.sdk.language`
+/** The ids of `@otelo/icons` for the values of `telemetry.sdk.language`
  * that name a runtime or a platform, not the language. */
 const LANGUAGE_IDS: Record<string, string> = {
   nodejs: "javascript",
@@ -146,7 +146,7 @@ const LANGUAGE_IDS: Record<string, string> = {
 };
 
 /** The language of the service that sent a resource, as an id of the
- * language icons of `@siner/icons`, such as `rust` or `javascript`. */
+ * language icons of `@otelo/icons`, such as `rust` or `javascript`. */
 export function language(resource: Attributes): string | undefined {
   const name = text(resource, "telemetry.sdk.language", "process.runtime.name")?.toLowerCase();
   return name === undefined ? undefined : (LANGUAGE_IDS[name] ?? name);

@@ -1,5 +1,5 @@
-use siner_storage::{IndexedAttribute, IndexedSignal, Storage};
-use siner_storage_sqlite::Sqlite;
+use otelo_storage::{IndexedAttribute, IndexedSignal, Storage};
+use otelo_storage_sqlite::Sqlite;
 
 #[test]
 fn the_indexed_attributes_outlive_the_storage() {
