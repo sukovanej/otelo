@@ -1,5 +1,3 @@
-//! Starts and stops `siner serve` for the tests.
-
 #![allow(dead_code, reason = "each test file uses a part")]
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -15,23 +13,20 @@ pub struct Daemon {
     pub otlp_grpc: String,
 }
 
-/// Kills a daemon that a failed test left running. Its stdout is the test's,
-/// so a live daemon would keep open a pipe that reads the test's output.
 impl Drop for Daemon {
     fn drop(&mut self) {
+        // A daemon left by a failed test would hold open the pipe of the test's output.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
 
-/// Starts `siner serve` on a free port and waits for it to listen. It keeps
-/// its own telemetry to stderr, so a test finds only what it wrote.
-pub fn start(data: &std::path::Path) -> Daemon {
-    start_with(data, &["--own-telemetry", "off"])
+pub fn start_daemon(data: &std::path::Path) -> Daemon {
+    // So a test finds only the telemetry it wrote.
+    start_daemon_with(data, &["--own-telemetry", "off"])
 }
 
-/// Starts `siner serve` with `args` added, like [`start`].
-pub fn start_with(data: &std::path::Path, args: &[&str]) -> Daemon {
+pub fn start_daemon_with(data: &std::path::Path, args: &[&str]) -> Daemon {
     let mut child = Command::new(env!("CARGO_BIN_EXE_siner"))
         .args([
             "serve",
@@ -86,8 +81,7 @@ pub fn get(addr: &str, path: &str) -> String {
     response
 }
 
-/// Sends `signal` and returns the rest of stderr once the daemon exits.
-pub fn stop(mut daemon: Daemon, signal: &str) -> String {
+pub fn stop_daemon(mut daemon: Daemon, signal: &str) -> String {
     let pid = daemon.child.id().to_string();
     assert!(
         Command::new("kill")

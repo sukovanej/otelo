@@ -5,6 +5,7 @@ import { ChevronIcon } from "@siner/icons";
 import { type Column, Table, Value } from "@siner/viz";
 
 import Service from "../Service";
+import { spanFailed } from "./span";
 import SpanTitle from "./SpanTitle";
 import { traceLength, type TreeRow, visibleRows } from "./tree";
 
@@ -74,7 +75,7 @@ export default function Waterfall(props: {
             <SpanTitle
               name={item.span.name}
               attributes={item.span.attributes}
-              error={item.span.error}
+              error={spanFailed(item.span)}
             />
             <Show when={isCollapsed()}>
               <span class="shrink-0 text-muted">+{item.children}</span>
@@ -120,7 +121,7 @@ export default function Waterfall(props: {
         <span class="relative h-[1lh] w-full self-center" style={grid}>
           <span
             class={`absolute inset-y-1 min-w-0.5 rounded-sm ${
-              item.span.error ? "bg-error" : "bg-accent"
+              spanFailed(item.span) ? "bg-error" : "bg-accent"
             }`}
             style={{ left: share(item.offset), width: share(item.span.duration_ns) }}
           />
@@ -139,7 +140,7 @@ export default function Waterfall(props: {
         expanded: item.children > 0 ? !collapsed().has(item.span.span_id) : undefined,
       })}
       selected={(item) => props.selected === item.span.span_id}
-      tone={(item) => (item.span.error ? "error" : undefined)}
+      tone={(item) => (spanFailed(item.span) ? "error" : undefined)}
       onRowClick={(item) =>
         props.onSelect(props.selected === item.span.span_id ? undefined : item.span)
       }

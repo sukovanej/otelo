@@ -10,11 +10,11 @@ const COLUMNS: Column<TraceSummary>[] = [
     id: "time",
     label: "Time",
     width: "max-content",
-    value: (trace) => trace.time,
+    value: (trace) => trace.started_at,
     tone: () => "muted",
     cell: (trace) => (
-      <time class="whitespace-nowrap" datetime={trace.time}>
-        {formatTime(parseTime(trace.time))}
+      <time class="whitespace-nowrap" datetime={trace.started_at}>
+        {formatTime(parseTime(trace.started_at))}
       </time>
     ),
   },

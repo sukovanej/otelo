@@ -1,14 +1,11 @@
 use std::fmt;
 
-use crate::lexer::{Tok, Token, is_keyword, lex};
+use crate::lexer::{Tok, Token, is_keyword, lex_tokens};
 use crate::{Builtin, Expr, Field, Op, Query, Signal, Value};
 
-/// Why a query does not parse, and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParseError {
-    /// The byte offset in the query.
     pub position: usize,
-    /// The 1-based column of the character at `position`.
     pub column: usize,
     pub message: String,
 }
@@ -21,14 +18,8 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Parses `input` as a query over `signal`. Whitespace alone is the query
-/// that keeps every record.
-///
-/// # Errors
-///
-/// When `input` is not a query.
 pub fn parse(input: &str, signal: Signal) -> Result<Query, ParseError> {
-    let tokens = lex(input);
+    let tokens = lex_tokens(input);
     let mut parser = Parser {
         input,
         tokens: &tokens,
@@ -72,13 +63,16 @@ impl<'a> Parser<'a> {
 
     fn error_at(&self, token: &Token, message: &str) -> ParseError {
         let message = match &token.tok {
-            Tok::Bad(why) => why.clone(),
+            Tok::Unreadable(reason) => reason.clone(),
             Tok::Quoted { closed: false, .. } | Tok::Backticked { closed: false, .. } => {
                 "the string has no closing quote".into()
             }
-            _ => format!("{message}, found {:?}", &self.input[token.span.clone()]),
+            _ => format!(
+                "{message}, found {:?}",
+                &self.input[token.byte_range.clone()]
+            ),
         };
-        self.error(token.span.start, message)
+        self.error(token.byte_range.start, message)
     }
 
     fn error(&self, position: usize, message: String) -> ParseError {
@@ -89,8 +83,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// An error at the next token, or at the end of the input.
-    fn expected(&self, what: &str) -> ParseError {
+    fn error_at_next_token(&self, what: &str) -> ParseError {
         self.peek().map_or_else(
             || {
                 self.error(
@@ -120,7 +113,7 @@ impl<'a> Parser<'a> {
         loop {
             if self.keyword("and") {
                 self.bump();
-            } else if !self.starts_term() {
+            } else if !self.next_starts_term() {
                 break;
             }
             terms.push(self.not()?);
@@ -132,9 +125,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Whether the next token starts a term, so it joins the one before with
-    /// `AND`.
-    fn starts_term(&self) -> bool {
+    fn next_starts_term(&self) -> bool {
         match self.peek().map(|token| &token.tok) {
             Some(Tok::Word(word)) => !word.eq_ignore_ascii_case("or"),
             Some(Tok::Backticked { .. } | Tok::LParen) => true,
@@ -152,7 +143,7 @@ impl<'a> Parser<'a> {
 
     fn primary(&mut self) -> Result<Expr, ParseError> {
         let Some(token) = self.peek() else {
-            return Err(self.expected("expected a field"));
+            return Err(self.error_at_next_token("expected a field"));
         };
         if token.tok == Tok::LParen {
             self.bump();
@@ -161,7 +152,7 @@ impl<'a> Parser<'a> {
                 self.bump();
                 return Ok(expr);
             }
-            return Err(self.expected("expected )"));
+            return Err(self.error_at_next_token("expected )"));
         }
         if self.keyword("has")
             && self
@@ -175,11 +166,11 @@ impl<'a> Parser<'a> {
                 self.bump();
                 return Ok(Expr::Has(field));
             }
-            return Err(self.expected("expected )"));
+            return Err(self.error_at_next_token("expected )"));
         }
         let field = self.field()?;
         let Some(token) = self.bump() else {
-            return Err(self.expected(&format!("expected an operator after {field}")));
+            return Err(self.error_at_next_token(&format!("expected an operator after {field}")));
         };
         match &token.tok {
             Tok::Op(op) => Ok(Expr::Compare {
@@ -189,12 +180,12 @@ impl<'a> Parser<'a> {
             }),
             Tok::Tilde => match self.value()? {
                 Value::String(text) => Ok(Expr::Contains { field, text }),
-                _ => Err(self.error(token.span.end, "~ takes a string".into())),
+                _ => Err(self.error(token.byte_range.end, "~ takes a string".into())),
             },
             Tok::Word(word) if word.eq_ignore_ascii_case("in") => {
                 if self.bump().is_none_or(|t| t.tok != Tok::LParen) {
                     self.next -= 1;
-                    return Err(self.expected("expected ( after in"));
+                    return Err(self.error_at_next_token("expected ( after in"));
                 }
                 let mut values = vec![self.value()?];
                 loop {
@@ -203,7 +194,7 @@ impl<'a> Parser<'a> {
                         Some(Tok::RParen) => break,
                         _ => {
                             self.next -= 1;
-                            return Err(self.expected("expected , or )"));
+                            return Err(self.error_at_next_token("expected , or )"));
                         }
                     }
                 }
@@ -211,7 +202,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 self.next -= 1;
-                Err(self.expected(&format!(
+                Err(self.error_at_next_token(&format!(
                     "expected an operator after {field}: =, !=, <, <=, >, >=, ~, or in"
                 )))
             }
@@ -224,10 +215,10 @@ impl<'a> Parser<'a> {
                 if !is_keyword(word)
                     && !word.starts_with(|c: char| c.is_ascii_digit() || c == '-') =>
             {
-                resolve(self.signal, word)
+                resolve_field(self.signal, word)
             }
             Some(Tok::Backticked { text, closed: true }) => Field::Attribute(text.clone()),
-            _ => return Err(self.expected("expected a field")),
+            _ => return Err(self.error_at_next_token("expected a field")),
         };
         self.bump();
         Ok(field)
@@ -241,16 +232,15 @@ impl<'a> Parser<'a> {
             Some(Tok::Word(word)) if !is_keyword(word) => Value::String(word.clone()),
             Some(Tok::Int(n)) => Value::Int(*n),
             Some(Tok::Float(x)) => Value::Float(*x),
-            Some(Tok::Duration(ns)) => Value::Duration(*ns),
-            _ => return Err(self.expected("expected a value")),
+            Some(Tok::DurationNanos(ns)) => Value::Duration(*ns),
+            _ => return Err(self.error_at_next_token("expected a value")),
         };
         self.bump();
         Ok(value)
     }
 }
 
-/// The field a word names in a query over `signal`.
-pub fn resolve(signal: Signal, word: &str) -> Field {
+pub fn resolve_field(signal: Signal, word: &str) -> Field {
     if let Some(key) = word.strip_prefix("resource.") {
         return Field::Resource(key.to_owned());
     }
@@ -261,7 +251,6 @@ pub fn resolve(signal: Signal, word: &str) -> Field {
 }
 
 impl Op {
-    /// The operator that holds when this one does not.
     #[must_use]
     pub const fn negate(self) -> Self {
         match self {

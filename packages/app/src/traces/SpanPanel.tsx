@@ -11,7 +11,7 @@ import { plainClick } from "../row";
 import Service from "../Service";
 import { formatDateTime, formatTime, nanosAfter, parseTime } from "../time";
 import KindBadge from "./KindBadge";
-import { spanSections } from "./span";
+import { spanFailed, spanSections } from "./span";
 import SpanTitle from "./SpanTitle";
 
 /** One span in full, in a panel beside a list, with a link to its trace
@@ -31,7 +31,7 @@ export default function SpanPanel(props: {
       header={
         <>
           <KindBadge kind={props.span.kind} />
-          <span class="font-mono text-sm">{formatTime(parseTime(props.span.time))}</span>
+          <span class="font-mono text-sm">{formatTime(parseTime(props.span.started_at))}</span>
           <span class="min-w-0 font-mono text-sm text-muted">
             <Service name={props.span.service} resource={props.span.resource} />
           </span>
@@ -56,12 +56,12 @@ export default function SpanPanel(props: {
           <SpanTitle
             name={props.span.name}
             attributes={props.span.attributes}
-            error={props.span.error}
+            error={spanFailed(props.span)}
           />
         </div>
         <div class={times}>
           <Value value={props.span.duration_ns} unit="duration" /> from{" "}
-          {formatDateTime(parseTime(props.span.time))} local · {props.span.time}
+          {formatDateTime(parseTime(props.span.started_at))} local · {props.span.started_at}
         </div>
         <FieldTable sections={spanSections(props.span)} noun="spans" onFilter={props.onFilter} />
         <Show when={props.span.events.length > 0}>
@@ -72,7 +72,11 @@ export default function SpanPanel(props: {
                 <div class="mb-2">
                   <div>
                     <span class="text-muted">
-                      +<Value value={nanosAfter(props.span.time, event.ts)} unit="duration" />
+                      +
+                      <Value
+                        value={nanosAfter(props.span.started_at, event.occurred_at)}
+                        unit="duration"
+                      />
                     </span>{" "}
                     {event.name}
                   </div>

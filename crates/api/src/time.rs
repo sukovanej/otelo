@@ -1,5 +1,3 @@
-//! The times, durations, and limits that the endpoints take.
-
 use anyhow::{Context, ensure};
 use jiff::{SpanRelativeTo, Timestamp};
 
@@ -14,17 +12,11 @@ pub fn check_limit(limit: Option<usize>, default: usize) -> anyhow::Result<usize
     Ok(limit)
 }
 
-/// A timestamp in unix nanoseconds, capped at the largest `i64`.
 #[must_use]
 pub fn nanos(ts: Timestamp) -> i64 {
     i64::try_from(ts.as_nanosecond()).unwrap_or(i64::MAX)
 }
 
-/// A duration before `now`, such as `1h`, or an RFC 3339 timestamp.
-///
-/// # Errors
-///
-/// When `text` is neither.
 pub fn parse_time(text: &str, now: i64) -> anyhow::Result<i64> {
     if let Ok(ts) = text.parse::<Timestamp>() {
         return Ok(nanos(ts));
@@ -35,11 +27,6 @@ pub fn parse_time(text: &str, now: i64) -> anyhow::Result<i64> {
     Ok(now.saturating_sub(ago))
 }
 
-/// A duration such as `500ms`, `1h`, or `2d`, in nanoseconds.
-///
-/// # Errors
-///
-/// When `text` is not a duration, or is negative.
 pub fn parse_duration(text: &str) -> anyhow::Result<i64> {
     let span: jiff::Span = text
         .parse()

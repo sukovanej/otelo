@@ -13,6 +13,7 @@ import LogLines, { lineKey } from "../logs/LogLines";
 import PageBar from "../PageBar";
 import Service from "../Service";
 import { formatDateTime, formatTime, parseTime } from "../time";
+import { spanFailed } from "./span";
 import SpanPanel from "./SpanPanel";
 import SpanTitle from "./SpanTitle";
 import { spanTree, traceLength } from "./tree";
@@ -92,7 +93,7 @@ export default function TraceView(props: {
   };
   const rows = createMemo(() => spanTree(trace()?.spans ?? []));
   const root = () => rows()[0]?.span;
-  const errors = () => trace()?.spans.filter((span) => span.error).length ?? 0;
+  const errors = () => trace()?.spans.filter(spanFailed).length ?? 0;
 
   const selectedSpan = () => trace()?.spans.find((span) => span.span_id === state().span());
   const selectedLineKey = () => {
@@ -151,8 +152,11 @@ export default function TraceView(props: {
           {(span) => (
             <span>
               <Value value={traceLength(rows())} unit="duration" /> from{" "}
-              <time datetime={span().time} title={formatDateTime(parseTime(span().time))}>
-                {formatTime(parseTime(span().time))}
+              <time
+                datetime={span().started_at}
+                title={formatDateTime(parseTime(span().started_at))}
+              >
+                {formatTime(parseTime(span().started_at))}
               </time>
               <Show when={errors() > 0}>, {count(errors(), "failed span")}</Show>
             </span>

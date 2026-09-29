@@ -14,7 +14,7 @@ opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-siner-telemetry = { workspace = true }
+siner-storage = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
@@ -25,6 +25,7 @@ opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = ["metrics", "grpc-tonic", "http-json", "gzip-tonic", "gzip-http"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics"] }
 rusqlite = { workspace = true }
+siner-storage-sqlite = { workspace = true }
 tempfile = { workspace = true }
 ureq = { workspace = true }
 

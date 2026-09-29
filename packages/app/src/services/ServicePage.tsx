@@ -289,7 +289,7 @@ function Overview(props: {
   const buckets = () => props.service.buckets;
   const stats = () => props.service.stats;
   const requests = () => stats().requests;
-  const rangeSeconds = () => seconds(props.service.since, props.service.until);
+  const rangeSeconds = () => seconds(props.service.start_at, props.service.end_at);
 
   const requestChart = createMemo(() => requestSeries(buckets()));
   const latencyChart = createMemo(() => latencySeries(buckets()));

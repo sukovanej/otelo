@@ -1,17 +1,18 @@
-//! Tables for a terminal, and the formats of the values in them.
-
 use std::fmt::Write as _;
 use std::io::{self, Write};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use siner_telemetry::{AttributeValue, Attributes};
+use siner_storage::{AttributeValue, Attributes};
 
-/// Rows under a header, each column as wide as its widest cell. A row can
-/// have lines under it that the columns do not align.
 pub struct Table {
     header: Vec<String>,
-    rows: Vec<(Vec<String>, Vec<String>)>,
+    rows: Vec<Row>,
+}
+
+struct Row {
+    cells: Vec<String>,
+    unaligned_lines_under: Vec<String>,
 }
 
 impl Table {
@@ -24,27 +25,27 @@ impl Table {
     }
 
     pub fn row(&mut self, cells: impl IntoIterator<Item = String>) {
-        let cells = cells.into_iter().map(|cell| one_line(&cell)).collect();
-        self.rows.push((cells, Vec::new()));
+        let cells = cells
+            .into_iter()
+            .map(|cell| flatten_to_one_line(&cell))
+            .collect();
+        self.rows.push(Row {
+            cells,
+            unaligned_lines_under: Vec::new(),
+        });
     }
 
-    /// Adds a line under the last row.
-    pub fn under(&mut self, line: &str) {
-        if let Some((_, lines)) = self.rows.last_mut() {
-            lines.push(one_line(line));
+    pub fn add_line_under_last_row(&mut self, line: &str) {
+        if let Some(row) = self.rows.last_mut() {
+            row.unaligned_lines_under.push(flatten_to_one_line(line));
         }
     }
 
-    /// Prints the table on stdout.
-    ///
-    /// # Errors
-    ///
-    /// When stdout cannot be written.
     pub fn print(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
         let mut widths: Vec<usize> = self.header.iter().map(|h| h.chars().count()).collect();
-        for (cells, _) in &self.rows {
-            for (width, cell) in widths.iter_mut().zip(cells) {
+        for row in &self.rows {
+            for (width, cell) in widths.iter_mut().zip(&row.cells) {
                 *width = (*width).max(cell.chars().count());
             }
         }
@@ -60,9 +61,9 @@ impl Table {
             writeln!(out, "{}", text.trim_end())
         };
         line(&mut out, &self.header)?;
-        for (cells, lines) in &self.rows {
-            line(&mut out, cells)?;
-            for text in lines {
+        for row in &self.rows {
+            line(&mut out, &row.cells)?;
+            for text in &row.unaligned_lines_under {
                 writeln!(out, "    {text}")?;
             }
         }
@@ -70,33 +71,29 @@ impl Table {
     }
 }
 
-/// `text` on one line, so a cell never breaks a row.
-fn one_line(text: &str) -> String {
+fn flatten_to_one_line(text: &str) -> String {
     text.trim_end()
         .replace('\n', " ↵ ")
         .replace(['\r', '\t'], " ")
 }
 
-/// A time in UTC to the millisecond.
 #[must_use]
-pub fn time(ts: Timestamp) -> String {
+pub fn format_utc_time(ts: Timestamp) -> String {
     ts.to_zoned(TimeZone::UTC)
         .strftime("%Y-%m-%d %H:%M:%S%.3f")
         .to_string()
 }
 
-/// A duration in the unit that suits it: `820µs`, `35ms`, `1.25s`, `3m05s`,
-/// `2h30m`.
 #[must_use]
-pub fn duration(nanos: i64) -> String {
+pub fn format_duration(nanos: i64) -> String {
     #[expect(clippy::cast_precision_loss, reason = "a display rounds anyway")]
     let n = nanos as f64;
     match nanos.unsigned_abs() {
         0 => "0s".into(),
         1..1_000 => format!("{nanos}ns"),
-        1_000..1_000_000 => format!("{}µs", round(n / 1e3)),
-        1_000_000..1_000_000_000 => format!("{}ms", round(n / 1e6)),
-        1_000_000_000..60_000_000_000 => format!("{}s", round(n / 1e9)),
+        1_000..1_000_000 => format!("{}µs", round_to_three_decimals(n / 1e3)),
+        1_000_000..1_000_000_000 => format!("{}ms", round_to_three_decimals(n / 1e6)),
+        1_000_000_000..60_000_000_000 => format!("{}s", round_to_three_decimals(n / 1e9)),
         60_000_000_000..3_600_000_000_000 => {
             let seconds = nanos / 1_000_000_000;
             match seconds % 60 {
@@ -114,20 +111,18 @@ pub fn duration(nanos: i64) -> String {
     }
 }
 
-/// A number with at most three decimals, and none when it is whole.
 #[must_use]
-pub fn number(value: f64) -> String {
-    round(value).to_string()
+pub fn format_number(value: f64) -> String {
+    round_to_three_decimals(value).to_string()
 }
 
-fn round(value: f64) -> f64 {
+fn round_to_three_decimals(value: f64) -> f64 {
     let rounded = (value * 1000.0).round() / 1000.0;
     if rounded == 0.0 { 0.0 } else { rounded }
 }
 
-/// JSON labels as `name=value` pairs.
 #[must_use]
-pub fn labels(labels: &Attributes) -> String {
+pub fn format_labels(labels: &Attributes) -> String {
     labels
         .iter()
         .map(|(name, value)| match value {

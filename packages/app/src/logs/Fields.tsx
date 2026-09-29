@@ -3,15 +3,17 @@ import type { LogLine } from "@siner/api";
 import { body, times } from "../classes";
 import FieldTable, { attributes, builtin, resource } from "../FieldTable";
 import { formatDateTime, parseTime } from "../time";
+import { levelName } from "./level";
 
 /** The whole of one log line, with buttons that add a field to the query. */
 export default function Fields(props: { line: LogLine; onFilter: (term: string) => void }) {
+  const level = () => levelName(props.line.severity);
   const sections = () => [
     {
       title: "Line",
       fields: [
         builtin("service", props.line.service),
-        builtin("level", props.line.level, props.line.level.toLowerCase()),
+        builtin("level", level(), level().toLowerCase()),
         builtin("source", props.line.source),
         builtin("trace_id", props.line.trace_id),
         builtin("span_id", props.line.span_id),
@@ -24,7 +26,7 @@ export default function Fields(props: { line: LogLine; onFilter: (term: string) 
     <div class="font-mono">
       <pre class={body}>{props.line.body}</pre>
       <div class={times}>
-        {formatDateTime(parseTime(props.line.time))} local · {props.line.time}
+        {formatDateTime(parseTime(props.line.logged_at))} local · {props.line.logged_at}
       </div>
       <FieldTable sections={sections()} noun="lines" onFilter={props.onFilter} />
     </div>

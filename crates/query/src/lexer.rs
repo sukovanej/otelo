@@ -4,34 +4,24 @@ use crate::Op;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tok {
-    /// A name, a keyword, or a bare value.
     Word(String),
-    Quoted {
-        text: String,
-        closed: bool,
-    },
-    Backticked {
-        text: String,
-        closed: bool,
-    },
+    Quoted { text: String, closed: bool },
+    Backticked { text: String, closed: bool },
     Int(i64),
     Float(f64),
-    /// In nanoseconds.
-    Duration(i64),
+    DurationNanos(i64),
     LParen,
     RParen,
     Comma,
     Op(Op),
     Tilde,
-    /// Text the lexer cannot read, and why.
-    Bad(String),
+    Unreadable(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub tok: Tok,
-    /// Byte offsets in the input.
-    pub span: Range<usize>,
+    pub byte_range: Range<usize>,
 }
 
 const UNITS: [(&str, f64); 8] = [
@@ -45,13 +35,11 @@ const UNITS: [(&str, f64); 8] = [
     ("d", 86_400e9),
 ];
 
-/// A character that can be part of a word.
 pub fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || "_.-/:@".contains(c)
 }
 
-/// Whether `key` reads back as one word that is not a number.
-pub fn is_plain_key(key: &str) -> bool {
+pub fn needs_no_backticks(key: &str) -> bool {
     let mut chars = key.chars();
     chars
         .next()
@@ -65,9 +53,7 @@ pub fn is_keyword(word: &str) -> bool {
         .any(|keyword| word.eq_ignore_ascii_case(keyword))
 }
 
-/// Splits `input` into tokens. It never fails: text it cannot read becomes a
-/// [`Tok::Bad`], and a string without its closing quote is marked open.
-pub fn lex(input: &str) -> Vec<Token> {
+pub fn lex_tokens(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = input.char_indices().peekable();
     while let Some(&(start, c)) = chars.peek() {
@@ -105,7 +91,7 @@ pub fn lex(input: &str) -> Vec<Token> {
                 })
             }
             '"' | '\'' | '`' => {
-                let (text, closed) = quoted(&mut chars, c);
+                let (text, closed) = read_quoted_text(&mut chars, c);
                 if c == '`' {
                     Tok::Backticked { text, closed }
                 } else {
@@ -121,23 +107,22 @@ pub fn lex(input: &str) -> Vec<Token> {
                     end = i + c.len_utf8();
                     chars.next();
                 }
-                word(&input[start..end])
+                classify_word(&input[start..end])
             }
-            c => Tok::Bad(format!("unexpected {c:?}")),
+            c => Tok::Unreadable(format!("unexpected {c:?}")),
         };
         let end = chars.peek().map_or(input.len(), |&(i, _)| i);
         tokens.push(Token {
             tok,
-            span: start..end,
+            byte_range: start..end,
         });
     }
     tokens
 }
 
-/// The rest of a string that opened with `quote`, and whether it closed.
-fn quoted(
+fn read_quoted_text(
     chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-    quote: char,
+    closing_quote: char,
 ) -> (String, bool) {
     let mut text = String::new();
     while let Some((_, c)) = chars.next() {
@@ -148,23 +133,23 @@ fn quoted(
                 Some((_, c)) => text.push(c),
                 None => return (text, false),
             },
-            c if c == quote => return (text, true),
+            c if c == closing_quote => return (text, true),
             c => text.push(c),
         }
     }
     (text, false)
 }
 
-/// A number, a duration, or else a word.
-fn word(text: &str) -> Tok {
+fn classify_word(text: &str) -> Tok {
     let digits = text.strip_prefix('-').unwrap_or(text);
     if !digits.starts_with(|c: char| c.is_ascii_digit()) {
         return Tok::Word(text.to_owned());
     }
     if digits.bytes().all(|b| b.is_ascii_digit()) {
-        return text
-            .parse()
-            .map_or_else(|_| Tok::Bad(format!("{text} is too large")), Tok::Int);
+        return text.parse().map_or_else(
+            |_| Tok::Unreadable(format!("{text} is too large")),
+            Tok::Int,
+        );
     }
     let number_end = digits
         .find(|c: char| !c.is_ascii_digit() && c != '.')
@@ -183,7 +168,7 @@ fn word(text: &str) -> Tok {
                 reason = "rounded to whole nanoseconds"
             )]
             let ns = (value * factor).round() as i64;
-            Tok::Duration(ns)
+            Tok::DurationNanos(ns)
         }
         _ => Tok::Word(text.to_owned()),
     }

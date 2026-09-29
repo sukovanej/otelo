@@ -401,7 +401,7 @@ export interface components {
              * Format: date-time
              * @description The start of the bucket.
              */
-            time: string;
+            start_at: string;
         };
         /** @description The calls of a service to one target that do one thing, over a range. */
         CallDetail: components["schemas"]["OperationDetail"] & {
@@ -443,12 +443,14 @@ export interface components {
             buckets: components["schemas"]["RequestBucket"][];
             /** @description Every call of the service. */
             calls: components["schemas"]["Requests"];
+            /** Format: date-time */
+            end_at: string;
             service: string;
             /**
              * Format: date-time
              * @description The range, after the retention capped it.
              */
-            since: string;
+            start_at: string;
             /**
              * Format: int64
              * @description The length of a bucket in nanoseconds.
@@ -461,8 +463,6 @@ export interface components {
              *     kept the ones with the most time.
              */
             truncated: boolean;
-            /** Format: date-time */
-            until: string;
         };
         /**
          * @description What the text of a suggestion is.
@@ -522,10 +522,9 @@ export interface components {
             /** Format: int64 */
             count: number;
             /** Format: date-time */
-            first: string;
+            first_at: string;
             /** Format: date-time */
-            last: string;
-            level: string;
+            last_at: string;
             /** @description Up to three different bodies, newest first. */
             samples: string[];
             services: string[];
@@ -561,21 +560,20 @@ export interface components {
         LogLine: {
             attributes: components["schemas"]["Attributes"];
             body: string;
-            /** @description The name of the severity: TRACE, DEBUG, INFO, WARN, ERROR, or FATAL. */
-            level: string;
+            /** Format: date-time */
+            logged_at: string;
             /** @description The attributes of the resource that sent the line. */
             resource: components["schemas"]["Attributes"];
             service: string;
             /**
              * Format: int32
-             * @description The OpenTelemetry severity number.
+             * @description The OpenTelemetry severity number, from 1 (TRACE) to 24 (FATAL), or 0
+             *     when the source set none.
              */
             severity: number;
             /** @description `otlp`, or the service log source that read the line. */
             source: string;
             span_id: string | null;
-            /** Format: date-time */
-            time: string;
             trace_id: string | null;
         };
         /** @description Log lines, newest first. */
@@ -629,6 +627,8 @@ export interface components {
             attributes: components["schemas"]["Attributes"];
             /** @description Every step of the range, oldest first. */
             buckets: components["schemas"]["RequestBucket"][];
+            /** Format: date-time */
+            end_at: string;
             /**
              * Format: int32
              * @description The OpenTelemetry span kind.
@@ -642,14 +642,12 @@ export interface components {
              * Format: date-time
              * @description The range, after the retention capped it.
              */
-            since: string;
+            start_at: string;
             /**
              * Format: int64
              * @description The length of a bucket in nanoseconds.
              */
             step_ns: number;
-            /** Format: date-time */
-            until: string;
         };
         /** @description The requests of one step. */
         RequestBucket: {
@@ -658,12 +656,11 @@ export interface components {
              * Format: date-time
              * @description The start of the step.
              */
-            time: string;
+            start_at: string;
         };
         /**
-         * @description Spans counted together: the requests that enter a service, which are
-         *     roots and spans of the server or the consumer kind, or the calls it makes
-         *     to a database.
+         * @description Spans that enter a service: roots, and spans of the server or the
+         *     consumer kind.
          */
         Requests: {
             /** Format: int64 */
@@ -703,6 +700,8 @@ export interface components {
         Service: {
             /** @description Every step of the range, oldest first. */
             buckets: components["schemas"]["ServiceBucket"][];
+            /** Format: date-time */
+            end_at: string;
             /** @description The requests by span name, the most first. */
             operations: components["schemas"]["Operation"][];
             /**
@@ -715,7 +714,7 @@ export interface components {
              * Format: date-time
              * @description The range, after the retention capped it.
              */
-            since: string;
+            start_at: string;
             stats: components["schemas"]["ServiceStats"];
             /**
              * Format: int64
@@ -724,8 +723,6 @@ export interface components {
             step_ns: number;
             /** @description The service has more operations than the limit let through. */
             truncated: boolean;
-            /** Format: date-time */
-            until: string;
         };
         /** @description The requests and the logs of a service in one step. */
         ServiceBucket: {
@@ -738,7 +735,7 @@ export interface components {
              * Format: date-time
              * @description The start of the step.
              */
-            time: string;
+            start_at: string;
         };
         /** @description The requests and the logs of a service in a range. */
         ServiceStats: {
@@ -764,12 +761,14 @@ export interface components {
         };
         /** @description The services that sent spans or logs in a range, the busiest first. */
         Services: {
+            /** Format: date-time */
+            end_at: string;
             services: components["schemas"]["ServiceSummary"][];
             /**
              * Format: date-time
              * @description The range, after the retention capped it.
              */
-            since: string;
+            start_at: string;
             /**
              * Format: int64
              * @description The length of a bucket in nanoseconds.
@@ -777,8 +776,6 @@ export interface components {
             step_ns: number;
             /** @description More services sent telemetry than the limit let through. */
             truncated: boolean;
-            /** Format: date-time */
-            until: string;
         };
         /**
          * @description The kind of record a query reads, as the API names it.
@@ -793,7 +790,7 @@ export interface components {
              * Format: int64
              * @description Nanoseconds since the Unix epoch.
              */
-            ts: number;
+            occurred_at: number;
         };
         /** @description Spans, newest first. */
         Spans: {
@@ -894,7 +891,6 @@ export interface components {
             attributes: components["schemas"]["Attributes"];
             /** Format: int64 */
             duration_ns: number;
-            error: boolean;
             events: components["schemas"]["SpanEvent"][];
             /**
              * Format: int32
@@ -907,13 +903,13 @@ export interface components {
             resource: components["schemas"]["Attributes"];
             service: string;
             span_id: string;
+            /** Format: date-time */
+            started_at: string;
             /**
              * Format: int32
-             * @description The OpenTelemetry status code.
+             * @description The OpenTelemetry status code: 2 when the span failed.
              */
             status: number;
-            /** Format: date-time */
-            time: string;
             trace_id: string;
         };
         TraceSummary: {
@@ -939,7 +935,7 @@ export interface components {
              * Format: date-time
              * @description The start of the root span.
              */
-            time: string;
+            started_at: string;
             trace_id: string;
         };
         /** @description Traces by their root span, newest first. */

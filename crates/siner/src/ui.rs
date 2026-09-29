@@ -1,11 +1,3 @@
-//! The web UI: the build of `packages/app` in the repository, served from the
-//! binary.
-//!
-//! A release build embeds `packages/app/dist`. A debug build reads it from the
-//! disk on each request, so `mise run web:build` shows up without a new
-//! `cargo build`.
-//! Any path that is not a file gets `index.html`, and the UI routes it.
-
 use axum::Json;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -14,18 +6,17 @@ use rust_embed::{Embed, EmbeddedFile};
 
 use siner_api::ErrorBody;
 
+// A debug build reads these from disk per request, so a web build needs no new cargo build.
 #[derive(Embed)]
 #[folder = "../../packages/app/dist/"]
 #[allow_missing = true]
 struct Assets;
 
-/// Vite names the files under `assets/` by their content, so they never change.
-const ASSETS_DIR: &str = "assets/";
+const HASHED_ASSETS_PREFIX: &str = "assets/";
 
-/// The page when the binary was built without the UI.
-const NOT_BUILT: &str = "The UI is not built. Run `mise run web:build`, and build siner again.\n";
+const UI_NOT_BUILT_PAGE: &str =
+    "The UI is not built. Run `mise run web:build`, and build siner again.\n";
 
-/// Serves a file of the UI, or `index.html` for a path that is not one.
 pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
     if path == "api" || path.starts_with("api/") {
@@ -41,25 +32,25 @@ pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
     if let Some(file) = Assets::get(path).filter(|_| !path.is_empty()) {
-        let cache = if path.starts_with(ASSETS_DIR) {
+        // Vite names these files by their content, so they never change.
+        let cache = if path.starts_with(HASHED_ASSETS_PREFIX) {
             "public, max-age=31536000, immutable"
         } else {
             "no-cache"
         };
-        return file_response(&file, cache, &headers);
+        return respond_with_file(&file, cache, &headers);
     }
     // A missing file under assets/ is a stale page asking for an old build.
-    if path.starts_with(ASSETS_DIR) {
+    if path.starts_with(HASHED_ASSETS_PREFIX) {
         return StatusCode::NOT_FOUND.into_response();
     }
     Assets::get("index.html").map_or_else(
-        || (StatusCode::SERVICE_UNAVAILABLE, NOT_BUILT).into_response(),
-        |index| file_response(&index, "no-cache", &headers),
+        || (StatusCode::SERVICE_UNAVAILABLE, UI_NOT_BUILT_PAGE).into_response(),
+        |index| respond_with_file(&index, "no-cache", &headers),
     )
 }
 
-/// The file with its type, and a 304 when the client has this version.
-fn file_response(file: &EmbeddedFile, cache: &'static str, headers: &HeaderMap) -> Response {
+fn respond_with_file(file: &EmbeddedFile, cache: &'static str, headers: &HeaderMap) -> Response {
     let etag = format!("\"{}\"", hex(&file.metadata.sha256_hash()[..16]));
     let cache = (CACHE_CONTROL, HeaderValue::from_static(cache));
     if headers

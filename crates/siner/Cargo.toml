@@ -20,8 +20,8 @@ serde_json = { workspace = true }
 siner-api = { workspace = true }
 siner-otlp = { workspace = true }
 siner-query = { workspace = true }
-siner-state = { workspace = true }
-siner-telemetry = { workspace = true }
+siner-storage = { workspace = true }
+siner-storage-sqlite = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

@@ -1,8 +1,6 @@
-//! The parameters that several endpoints share, and how they are read.
-
 use serde::Deserialize;
 use siner_query::Signal;
-use siner_telemetry::query;
+use siner_storage::query;
 use utoipa::IntoParams;
 
 use crate::Request;
@@ -38,19 +36,20 @@ pub struct LookupParams {
     pub limit: Option<usize>,
 }
 
-/// A step in nanoseconds, or `None` when `text` is missing.
-pub fn parse_step(text: Option<&str>) -> Result<Option<i64>, ApiError> {
+pub fn parse_step_ns(text: Option<&str>) -> Result<Option<i64>, ApiError> {
     text.map(parse_duration)
         .transpose()
         .map_err(|e| ApiError::bad_request(&e))
 }
 
-/// The step, or the smallest round one that makes `buckets` buckets at most
-/// in the range, when it makes no more than [`query::MAX_BUCKETS`].
-pub fn check_step(r: &Request, step: Option<i64>, buckets: i64) -> Result<i64, ApiError> {
-    let (since, until) = (r.reader.since(), r.reader.until());
-    let step_ns = step.unwrap_or_else(|| query::step_for(since, until, buckets));
-    if step_ns <= 0 || (until - since) / step_ns > query::MAX_BUCKETS {
+pub fn resolve_step(
+    request: &Request,
+    requested_step_ns: Option<i64>,
+    default_max_buckets: i64,
+) -> Result<i64, ApiError> {
+    let step_ns =
+        requested_step_ns.unwrap_or_else(|| query::step_for(request.range, default_max_buckets));
+    if step_ns <= 0 || request.range.length() / step_ns > query::MAX_BUCKETS {
         return Err(ApiError::bad_request(&format!(
             "the step makes more than {} buckets in the range; raise the step",
             query::MAX_BUCKETS
@@ -63,7 +62,6 @@ pub fn parse_signal(text: &str) -> Result<Signal, ApiError> {
     text.parse().map_err(|e: String| ApiError::bad_request(&e))
 }
 
-/// Parses the query `q` over `signal`. A missing query keeps every record.
 pub fn parse_query(q: Option<&str>, signal: Signal) -> Result<siner_query::Query, ApiError> {
     siner_query::parse(q.unwrap_or_default(), signal).map_err(|e| ApiError::bad_request(&e))
 }

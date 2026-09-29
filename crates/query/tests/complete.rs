@@ -1,13 +1,9 @@
-//! Snapshots of the suggestions for each query in `complete/<signal>/*.txt`,
-//! one query per line, with `|` at the cursor.
-
 use std::fmt::Write;
 use std::path::Path;
 
 use siner_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo, complete};
 
-/// The attributes and values of a small app, the most common first.
-struct Fake;
+struct SmallAppCatalog;
 
 fn key(key: &str, kind: &str, count: u64) -> KeyInfo {
     KeyInfo {
@@ -21,7 +17,7 @@ const fn value(value: Value, count: u64) -> ValueInfo {
     ValueInfo { value, count }
 }
 
-impl Catalog for Fake {
+impl Catalog for SmallAppCatalog {
     fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo> {
         if resource {
             return vec![
@@ -72,8 +68,7 @@ impl Catalog for Fake {
     }
 }
 
-/// The signal of a case file: the name of its directory.
-fn signal(path: &Path) -> Signal {
+fn signal_of_case_file(path: &Path) -> Signal {
     let dir = path.parent().and_then(Path::file_name).unwrap();
     dir.to_str().unwrap().parse().unwrap()
 }
@@ -81,7 +76,7 @@ fn signal(path: &Path) -> Signal {
 #[test]
 fn suggestions() {
     insta::glob!("complete/**/*.txt", |path| {
-        let signal = signal(path);
+        let signal = signal_of_case_file(path);
         let mut out = String::new();
         for line in std::fs::read_to_string(path).unwrap().lines() {
             let cursor = line
@@ -89,7 +84,7 @@ fn suggestions() {
                 .unwrap_or_else(|| panic!("{}: {line:?} has no |", path.display()));
             let input = line.replacen('|', "", 1);
             writeln!(out, "> {line}").unwrap();
-            let suggestions = complete(&input, cursor, signal, &Fake);
+            let suggestions = complete(&input, cursor, signal, &SmallAppCatalog);
             if suggestions.is_empty() {
                 writeln!(out, "(none)").unwrap();
             }

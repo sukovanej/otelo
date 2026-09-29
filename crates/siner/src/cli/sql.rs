@@ -1,9 +1,7 @@
-//! `siner sql`: read-only SQL over the day files.
-
 use std::io::{self, Read};
 
 use siner_api::SqlRequest;
-use siner_telemetry::query::{SqlResult, SqlValue};
+use siner_storage::query::{SqlResult, SqlValue};
 
 use super::Range;
 use super::client::{Client, note_cut, print_json};
@@ -23,11 +21,6 @@ pub struct SqlArgs {
     client: Client,
 }
 
-/// Runs `siner sql`.
-///
-/// # Errors
-///
-/// When the daemon cannot be reached, or answers with an error.
 pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
     let sql = if args.query == "-" {
         let mut text = String::new();
@@ -44,9 +37,9 @@ pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
     };
     let result: SqlResult = args.client.post("/api/sql", &request)?;
     if args.client.wants_table() {
-        let columns: Vec<&str> = result.columns.iter().map(String::as_str).collect();
+        let columns: Vec<&str> = result.columns().iter().map(String::as_str).collect();
         let mut table = Table::new(&columns);
-        for row in &result.rows {
+        for row in result.rows() {
             table.row(row.iter().map(|value| match value {
                 SqlValue::Null => String::new(),
                 other => other.to_string(),
@@ -57,7 +50,7 @@ pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
         print_json(&result)?;
     }
     note_cut(
-        result.truncated,
+        result.truncated(),
         "The query returned more rows; narrow it with a WHERE, or raise --limit.",
     );
     Ok(())

@@ -1286,7 +1286,7 @@
         "type": "object",
         "description": "The points of one series in one step.",
         "required": [
-          "time",
+          "start_at",
           "count",
           "min",
           "max",
@@ -1328,7 +1328,7 @@
             "type": "number",
             "format": "double"
           },
-          "time": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The start of the bucket."
@@ -1411,8 +1411,8 @@
         "description": "The calls a service made in a range, by what they went to.",
         "required": [
           "service",
-          "since",
-          "until",
+          "start_at",
+          "end_at",
           "step_ns",
           "calls",
           "buckets",
@@ -1431,10 +1431,14 @@
             "$ref": "#/components/schemas/Requests",
             "description": "Every call of the service."
           },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "service": {
             "type": "string"
           },
-          "since": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The range, after the retention capped it."
@@ -1454,10 +1458,6 @@
           "truncated": {
             "type": "boolean",
             "description": "The targets have more operations than the limit let through, which\nkept the ones with the most time."
-          },
-          "until": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -1623,10 +1623,9 @@
           "template",
           "count",
           "severity",
-          "level",
           "services",
-          "first",
-          "last",
+          "first_at",
+          "last_at",
           "samples"
         ],
         "properties": {
@@ -1635,16 +1634,13 @@
             "format": "int64",
             "minimum": 0
           },
-          "first": {
+          "first_at": {
             "type": "string",
             "format": "date-time"
           },
-          "last": {
+          "last_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "level": {
-            "type": "string"
           },
           "samples": {
             "type": "array",
@@ -1713,10 +1709,9 @@
       "LogLine": {
         "type": "object",
         "required": [
-          "time",
+          "logged_at",
           "service",
           "severity",
-          "level",
           "body",
           "trace_id",
           "span_id",
@@ -1731,9 +1726,9 @@
           "body": {
             "type": "string"
           },
-          "level": {
+          "logged_at": {
             "type": "string",
-            "description": "The name of the severity: TRACE, DEBUG, INFO, WARN, ERROR, or FATAL."
+            "format": "date-time"
           },
           "resource": {
             "$ref": "#/components/schemas/Attributes",
@@ -1745,7 +1740,7 @@
           "severity": {
             "type": "integer",
             "format": "int32",
-            "description": "The OpenTelemetry severity number."
+            "description": "The OpenTelemetry severity number, from 1 (TRACE) to 24 (FATAL), or 0\nwhen the source set none."
           },
           "source": {
             "type": "string",
@@ -1756,10 +1751,6 @@
               "string",
               "null"
             ]
-          },
-          "time": {
-            "type": "string",
-            "format": "date-time"
           },
           "trace_id": {
             "type": [
@@ -1882,8 +1873,8 @@
           "name",
           "kind",
           "attributes",
-          "since",
-          "until",
+          "start_at",
+          "end_at",
           "step_ns",
           "requests",
           "buckets"
@@ -1900,6 +1891,10 @@
             },
             "description": "Every step of the range, oldest first."
           },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "kind": {
             "type": "integer",
             "format": "int32",
@@ -1915,7 +1910,7 @@
           "service": {
             "type": "string"
           },
-          "since": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The range, after the retention capped it."
@@ -1924,10 +1919,6 @@
             "type": "integer",
             "format": "int64",
             "description": "The length of a bucket in nanoseconds."
-          },
-          "until": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -1935,14 +1926,14 @@
         "type": "object",
         "description": "The requests of one step.",
         "required": [
-          "time",
+          "start_at",
           "requests"
         ],
         "properties": {
           "requests": {
             "$ref": "#/components/schemas/Requests"
           },
-          "time": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The start of the step."
@@ -1951,7 +1942,7 @@
       },
       "Requests": {
         "type": "object",
-        "description": "Spans counted together: the requests that enter a service, which are\nroots and spans of the server or the consumer kind, or the calls it makes\nto a database.",
+        "description": "Spans that enter a service: roots, and spans of the server or the\nconsumer kind.",
         "required": [
           "count",
           "errors",
@@ -2062,8 +2053,8 @@
         "required": [
           "service",
           "resource",
-          "since",
-          "until",
+          "start_at",
+          "end_at",
           "step_ns",
           "stats",
           "buckets",
@@ -2077,6 +2068,10 @@
               "$ref": "#/components/schemas/ServiceBucket"
             },
             "description": "Every step of the range, oldest first."
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
           },
           "operations": {
             "type": "array",
@@ -2092,7 +2087,7 @@
           "service": {
             "type": "string"
           },
-          "since": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The range, after the retention capped it."
@@ -2108,10 +2103,6 @@
           "truncated": {
             "type": "boolean",
             "description": "The service has more operations than the limit let through."
-          },
-          "until": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -2119,7 +2110,7 @@
         "type": "object",
         "description": "The requests and the logs of a service in one step.",
         "required": [
-          "time",
+          "start_at",
           "requests",
           "logs",
           "error_logs"
@@ -2138,7 +2129,7 @@
           "requests": {
             "$ref": "#/components/schemas/Requests"
           },
-          "time": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The start of the step."
@@ -2202,20 +2193,24 @@
         "type": "object",
         "description": "The services that sent spans or logs in a range, the busiest first.",
         "required": [
-          "since",
-          "until",
+          "start_at",
+          "end_at",
           "step_ns",
           "services",
           "truncated"
         ],
         "properties": {
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "services": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ServiceSummary"
             }
           },
-          "since": {
+          "start_at": {
             "type": "string",
             "format": "date-time",
             "description": "The range, after the retention capped it."
@@ -2228,10 +2223,6 @@
           "truncated": {
             "type": "boolean",
             "description": "More services sent telemetry than the limit let through."
-          },
-          "until": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -2248,7 +2239,7 @@
         "type": "object",
         "description": "Something that happened at one time in a span, such as an exception.",
         "required": [
-          "ts",
+          "occurred_at",
           "name",
           "attributes"
         ],
@@ -2259,7 +2250,7 @@
           "name": {
             "type": "string"
           },
-          "ts": {
+          "occurred_at": {
             "type": "integer",
             "format": "int64",
             "description": "Nanoseconds since the Unix epoch."
@@ -2533,10 +2524,9 @@
           "service",
           "name",
           "kind",
-          "time",
+          "started_at",
           "duration_ns",
           "status",
-          "error",
           "attributes",
           "events",
           "resource"
@@ -2548,9 +2538,6 @@
           "duration_ns": {
             "type": "integer",
             "format": "int64"
-          },
-          "error": {
-            "type": "boolean"
           },
           "events": {
             "type": "array",
@@ -2582,14 +2569,14 @@
           "span_id": {
             "type": "string"
           },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "status": {
             "type": "integer",
             "format": "int32",
-            "description": "The OpenTelemetry status code."
-          },
-          "time": {
-            "type": "string",
-            "format": "date-time"
+            "description": "The OpenTelemetry status code: 2 when the span failed."
           },
           "trace_id": {
             "type": "string"
@@ -2600,7 +2587,7 @@
         "type": "object",
         "required": [
           "trace_id",
-          "time",
+          "started_at",
           "service",
           "name",
           "kind",
@@ -2644,7 +2631,7 @@
             "format": "int64",
             "minimum": 0
           },
-          "time": {
+          "started_at": {
             "type": "string",
             "format": "date-time",
             "description": "The start of the root span."

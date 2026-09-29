@@ -1,10 +1,3 @@
-//! The OTLP receiver: logs, traces, and metrics over HTTP and gRPC.
-//!
-//! Both transports decode an export request, map it to the rows of the store
-//! with [`map`], and hand the rows to the telemetry writer in one batch. When
-//! the writer's channel is full, the whole batch is dropped, and the response
-//! says so in `partial_success`, as the OTLP spec asks.
-
 mod grpc;
 mod http;
 pub mod map;
@@ -20,82 +13,82 @@ use opentelemetry_proto::tonic::collector::trace::v1::{
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use siner_telemetry::Sender;
+use siner_storage::Sender;
 
-pub use grpc::serve as serve_grpc;
-pub use http::serve as serve_http;
+pub use grpc::serve_grpc;
+pub use http::serve_http;
 
-use crate::map::Mapped;
+use crate::map::MappedExport;
 
-/// The largest export request either transport takes, after gzip. It is the
-/// gRPC default, and an SDK batch is a few hundred kilobytes.
-const MAX_REQUEST: usize = 4 * 1024 * 1024;
+// The gRPC default, after gzip. An SDK batch is a few hundred kilobytes.
+const MAX_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 
-/// An export request of one signal.
-trait Export: prost::Message + DeserializeOwned + Default + 'static {
+trait ExportRequest: prost::Message + DeserializeOwned + Default + 'static {
     type Response: prost::Message + Serialize;
 
-    /// Maps the request, sends the rows to the writer, and answers.
-    fn receive(self, sender: &Sender) -> Self::Response;
+    fn store_and_respond(self, sender: &Sender) -> Self::Response;
 }
 
-impl Export for ExportLogsServiceRequest {
+impl ExportRequest for ExportLogsServiceRequest {
     type Response = ExportLogsServiceResponse;
 
-    fn receive(self, sender: &Sender) -> Self::Response {
+    fn store_and_respond(self, sender: &Sender) -> Self::Response {
         ExportLogsServiceResponse {
-            partial_success: send(sender, map::logs(self)).map(|(rejected, message)| {
-                ExportLogsPartialSuccess {
+            partial_success: send_rows_to_writer(sender, map::logs(self)).map(
+                |(rejected, message)| ExportLogsPartialSuccess {
                     rejected_log_records: rejected,
                     error_message: message,
-                }
-            }),
+                },
+            ),
         }
     }
 }
 
-impl Export for ExportTraceServiceRequest {
+impl ExportRequest for ExportTraceServiceRequest {
     type Response = ExportTraceServiceResponse;
 
-    fn receive(self, sender: &Sender) -> Self::Response {
+    fn store_and_respond(self, sender: &Sender) -> Self::Response {
         ExportTraceServiceResponse {
-            partial_success: send(sender, map::spans(self)).map(|(rejected, message)| {
-                ExportTracePartialSuccess {
+            partial_success: send_rows_to_writer(sender, map::spans(self)).map(
+                |(rejected, message)| ExportTracePartialSuccess {
                     rejected_spans: rejected,
                     error_message: message,
-                }
-            }),
+                },
+            ),
         }
     }
 }
 
-impl Export for ExportMetricsServiceRequest {
+impl ExportRequest for ExportMetricsServiceRequest {
     type Response = ExportMetricsServiceResponse;
 
-    fn receive(self, sender: &Sender) -> Self::Response {
+    fn store_and_respond(self, sender: &Sender) -> Self::Response {
         ExportMetricsServiceResponse {
-            partial_success: send(sender, map::metrics(self)).map(|(rejected, message)| {
-                ExportMetricsPartialSuccess {
+            partial_success: send_rows_to_writer(sender, map::metrics(self)).map(
+                |(rejected, message)| ExportMetricsPartialSuccess {
                     rejected_data_points: rejected,
                     error_message: message,
-                }
-            }),
+                },
+            ),
         }
     }
 }
 
-/// Sends the rows to the writer. Returns how many items were rejected and
-/// why, or `None` when every item was taken.
-fn send(sender: &Sender, mapped: Mapped) -> Option<(i64, String)> {
-    let Mapped {
+fn send_rows_to_writer(sender: &Sender, mapped: MappedExport) -> Option<(i64, String)> {
+    let MappedExport {
         batch,
-        items,
-        rejected,
-        reasons,
+        item_count,
+        rejected_count,
+        rejection_reasons,
     } = mapped;
     if !batch.is_empty() && !sender.send(batch) {
         let message = "the telemetry queue of siner is full, so it dropped the whole request";
-        return Some((items, message.into()));
+        return Some((item_count, message.into()));
     }
-    (rejected > 0).then(|| (rejected, reasons.into_iter().collect::<Vec<_>>().join("; ")))
+    (rejected_count > 0).then(|| {
+        (
+            rejected_count,
+            rejection_reasons.into_iter().collect::<Vec<_>>().join("; "),
+        )
+    })
 }

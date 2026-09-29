@@ -1,19 +1,3 @@
-//! The query language that filters logs, spans, and metric series.
-//!
-//! ```text
-//! http.route = "/matches" OR (user.id = 7 AND http.response.status_code = 200)
-//! level >= warn body ~ "payment failed"
-//! duration > 500ms AND NOT resource.host.name = "droplet" AND has(exception.message)
-//! ```
-//!
-//! A name is a built-in field of the signal (see [`Builtin`]), `resource.`
-//! and a resource attribute, `attr.` and a record attribute, or else a record
-//! attribute. A key with other characters goes in backticks. Terms next to
-//! each other join with `AND`.
-//!
-//! [`parse`] makes a [`Query`], and [`complete`] suggests what can come at a
-//! cursor, with the attributes and values of a [`Catalog`].
-
 mod complete;
 mod lexer;
 mod parser;
@@ -23,7 +7,6 @@ use std::fmt;
 pub use complete::{Catalog, KeyInfo, NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete};
 pub use parser::{ParseError, parse};
 
-/// The kind of record a query filters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Signal {
     Logs,
@@ -43,7 +26,6 @@ impl Signal {
         }
     }
 
-    /// The built-in fields of the signal.
     #[must_use]
     pub const fn builtins(self) -> &'static [Builtin] {
         use Builtin::{
@@ -77,33 +59,20 @@ impl fmt::Display for Signal {
     }
 }
 
-/// A field that every record of a signal has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Builtin {
-    /// The `service.name` of the resource.
     Service,
-    /// The severity of a log: `trace`, `debug`, `info`, `warn`, `error`,
-    /// `fatal`, or a number.
     Level,
-    /// The body of a log. `~` finds words in it.
     Body,
     TraceId,
     SpanId,
-    /// Where a log came from: `otlp`, or a service log source.
     Source,
-    /// The name of a span or of a metric.
     Name,
-    /// The kind of a span or of a metric.
     Kind,
-    /// The status of a span: `unset`, `ok`, or `error`.
     Status,
-    /// Whether a span failed.
     Error,
-    /// How long a span took, such as `500ms`.
     Duration,
-    /// Whether a span has no parent.
     Root,
-    /// The unit of a metric.
     Unit,
 }
 
@@ -127,7 +96,6 @@ impl Builtin {
         }
     }
 
-    /// The built-in field of `signal` called `name`.
     #[must_use]
     pub fn find(signal: Signal, name: &str) -> Option<Self> {
         signal
@@ -137,7 +105,6 @@ impl Builtin {
             .find(|builtin| builtin.name() == name)
     }
 
-    /// The values the field can have, when there is a fixed set.
     #[must_use]
     pub const fn values(self, signal: Signal) -> &'static [&'static str] {
         match (self, signal) {
@@ -152,26 +119,21 @@ impl Builtin {
         }
     }
 
-    /// Whether `<`, `<=`, `>`, and `>=` make sense on the field.
     #[must_use]
     pub const fn ordered(self) -> bool {
         matches!(self, Self::Level | Self::Duration)
     }
 
-    /// Whether `~` makes sense on the field.
     #[must_use]
     pub const fn text(self) -> bool {
         matches!(self, Self::Body | Self::Name | Self::Service | Self::Source)
     }
 }
 
-/// What a comparison reads.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Field {
     Builtin(Builtin),
-    /// An attribute of the log, the span, or the metric series.
     Attribute(String),
-    /// An attribute of the resource that sent the record.
     Resource(String),
 }
 
@@ -179,7 +141,7 @@ impl fmt::Display for Field {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Builtin(builtin) => f.write_str(builtin.name()),
-            Self::Attribute(key) if lexer::is_plain_key(key) => {
+            Self::Attribute(key) if lexer::needs_no_backticks(key) => {
                 if key.starts_with("resource.")
                     || key.starts_with("attr.")
                     || lexer::is_keyword(key)
@@ -222,12 +184,10 @@ impl Op {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
-    /// A quoted string, or a bare word such as `warn` or `/matches`.
     String(String),
     Int(i64),
     Float(f64),
     Bool(bool),
-    /// A duration such as `500ms`, in nanoseconds.
     Duration(i64),
 }
 
@@ -243,7 +203,6 @@ impl fmt::Display for Value {
     }
 }
 
-/// `text` in double quotes, with `"` and `\` escaped.
 #[must_use]
 pub fn quote(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
@@ -268,26 +227,13 @@ pub enum Expr {
     And(Vec<Self>),
     Or(Vec<Self>),
     Not(Box<Self>),
-    Compare {
-        field: Field,
-        op: Op,
-        value: Value,
-    },
-    In {
-        field: Field,
-        values: Vec<Value>,
-    },
-    /// `~`: the field contains the text. On a log body, it finds the words.
-    Contains {
-        field: Field,
-        text: String,
-    },
-    /// `has(field)`: the record has the attribute.
+    Compare { field: Field, op: Op, value: Value },
+    In { field: Field, values: Vec<Value> },
+    Contains { field: Field, text: String },
     Has(Field),
 }
 
 impl Expr {
-    /// Calls `each` on every field the expression reads.
     pub fn visit_fields<'a>(&'a self, each: &mut impl FnMut(&'a Field)) {
         match self {
             Self::And(terms) | Self::Or(terms) => {
@@ -344,7 +290,6 @@ impl fmt::Display for Expr {
     }
 }
 
-/// A parsed query. An empty query keeps every record.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Query {
     pub signal: Signal,
@@ -352,13 +297,11 @@ pub struct Query {
 }
 
 impl Query {
-    /// The query that keeps every record of `signal`.
     #[must_use]
     pub const fn all(signal: Signal) -> Self {
         Self { signal, expr: None }
     }
 
-    /// Every field the query reads, each once, in the order they appear.
     #[must_use]
     pub fn fields(&self) -> Vec<&Field> {
         let mut fields = Vec::new();
