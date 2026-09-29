@@ -13,13 +13,12 @@ The daemon runs on Linux and on macOS. The CLI runs anywhere, Windows included. 
 | What runs `otelo serve` | a systemd unit | a launchd daemon |
 | Host metrics | `sysinfo` crate | `sysinfo` crate |
 | Per-service CPU and memory | `sysinfo`, for the process tree under the PID from `systemctl show --property MainPID` | `sysinfo`, for the process tree under the PID from `launchctl print` |
-| Logs of apps without OTel, if [[../tasks/00006-read-service-logs-from-journald.md]] stays | journald, read with `journalctl --output=json --follow` | the log files launchd writes, tailed |
 | Root directory | `/var/lib/otelo` | `/usr/local/var/otelo` |
 
 ## One code path where it can
 
 - Metrics use `sysinfo` on both platforms, so there is no metrics code per platform. cgroup v2 numbers on Linux are more exact and can come later.
-- `#[cfg(target_os)]` appears only in the code that finds the PID of a service and, if [[../tasks/00006-read-service-logs-from-journald.md]] stays, in the service log source.
+- `#[cfg(target_os)]` appears only in the code that finds the PID of a service.
 
 ## Testing
 
