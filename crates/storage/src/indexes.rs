@@ -1,7 +1,7 @@
 use std::fmt;
 
 use anyhow::{bail, ensure};
-use siner_query::Signal;
+use otelo_query::Signal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IndexedSignal {

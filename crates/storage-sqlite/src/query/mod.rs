@@ -9,14 +9,14 @@ mod traces;
 
 use anyhow::bail;
 use jiff::Timestamp;
-use rusqlite::types::Value;
-use rusqlite::{Row, ToSql};
-use siner_query::{Query, Signal};
-use siner_storage::query::{
+use otelo_query::{Query, Signal};
+use otelo_storage::query::{
     AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
     OperationDetail, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
 };
-use siner_storage::{Error, RangeQueries, Result, SpanId, SpanKind, TraceId};
+use otelo_storage::{Error, RangeQueries, Result, SpanId, SpanKind, TraceId};
+use rusqlite::types::Value;
+use rusqlite::{Row, ToSql};
 
 pub use compile::InvalidQuery;
 

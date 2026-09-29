@@ -13,7 +13,7 @@ use opentelemetry_proto::tonic::metrics::v1::{
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
-use siner_storage::{
+use otelo_storage::{
     AttributeValue, Attributes, Batch, Histogram, Log, Metric, MetricKind, Point, Records,
     Resource, Severity, Span, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId, now_unix_nanos,
 };
@@ -129,12 +129,12 @@ pub fn metrics(request: ExportMetricsServiceRequest) -> MappedExport {
                     Some(metric::Data::ExponentialHistogram(histogram)) => {
                         let count = histogram.data_points.len();
                         mapped.item_count += i64::try_from(count).unwrap_or(i64::MAX);
-                        mapped.reject_items(count, "siner does not store exponential histograms");
+                        mapped.reject_items(count, "otelo does not store exponential histograms");
                     }
                     Some(metric::Data::Summary(summary)) => {
                         let count = summary.data_points.len();
                         mapped.item_count += i64::try_from(count).unwrap_or(i64::MAX);
-                        mapped.reject_items(count, "siner does not store summaries");
+                        mapped.reject_items(count, "otelo does not store summaries");
                     }
                     None => {}
                 }

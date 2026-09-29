@@ -17,7 +17,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use siner_storage::Sender;
+use otelo_storage::Sender;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tonic::codec::CompressionEncoding;

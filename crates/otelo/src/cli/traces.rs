@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use siner_query::Signal;
-use siner_storage::SpanId;
-use siner_storage::query::{Spans, Trace, TraceSpan, Traces};
+use otelo_query::Signal;
+use otelo_storage::SpanId;
+use otelo_storage::query::{Spans, Trace, TraceSpan, Traces};
 
 use super::client::{Client, escape_path_segment, note_cut, print_json};
 use super::table::{self, Table};

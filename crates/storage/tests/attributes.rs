@@ -1,4 +1,4 @@
-use siner_storage::{AttributeValue, Attributes};
+use otelo_storage::{AttributeValue, Attributes};
 
 #[test]
 fn attributes_keep_the_json_of_the_day_files() {

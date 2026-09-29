@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::State;
+use otelo_storage::query::SqlResult;
 use serde::{Deserialize, Serialize};
-use siner_storage::query::SqlResult;
 use utoipa::ToSchema;
 
 use crate::Api;

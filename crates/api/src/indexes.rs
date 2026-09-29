@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
+use otelo_storage::{IndexedAttribute, IndexedSignal};
 use serde::{Deserialize, Serialize};
-use siner_storage::{IndexedAttribute, IndexedSignal};
 use utoipa::ToSchema;
 
 use crate::Api;

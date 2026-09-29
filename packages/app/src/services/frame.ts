@@ -1,4 +1,4 @@
-import type { TimeFrame } from "@siner/viz";
+import type { TimeFrame } from "@otelo/viz";
 
 import { parseTime } from "../time";
 

@@ -1,6 +1,6 @@
-use siner_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo};
-use siner_storage::AttributeValue;
-use siner_storage::query::{Attribute, AttributeKeys};
+use otelo_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo};
+use otelo_storage::AttributeValue;
+use otelo_storage::query::{Attribute, AttributeKeys};
 
 use crate::Reader;
 

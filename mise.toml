@@ -18,7 +18,7 @@ sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/*/
 outputs = ["node_modules/.modules.yaml"]
 
 [tasks."web:build"]
-description = "Build the web UI into packages/app/dist, which the siner binary embeds"
+description = "Build the web UI into packages/app/dist, which the otelo binary embeds"
 depends = ["web:install"]
 dir = "packages/app"
 run = "pnpm exec vite build"

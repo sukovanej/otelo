@@ -1,5 +1,5 @@
 [package]
-name = "siner"
+name = "otelo"
 description = "Deploys, runs, and observes the apps on one Linux server: the daemon and the CLI"
 version.workspace = true
 edition.workspace = true
@@ -17,11 +17,11 @@ opentelemetry_sdk = { workspace = true }
 serde = { workspace = true }
 rust-embed = { workspace = true }
 serde_json = { workspace = true }
-siner-api = { workspace = true }
-siner-otlp = { workspace = true }
-siner-query = { workspace = true }
-siner-storage = { workspace = true }
-siner-storage-sqlite = { workspace = true }
+otelo-api = { workspace = true }
+otelo-otlp = { workspace = true }
+otelo-query = { workspace = true }
+otelo-storage = { workspace = true }
+otelo-storage-sqlite = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

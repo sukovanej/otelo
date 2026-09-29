@@ -1,8 +1,8 @@
 import { createSignal, For, type JSX, Show } from "solid-js";
 
-import { addIndex, complete, type Signal } from "@siner/api";
-import { Button, Callout, QueryInput, RangePicker, Tabs } from "@siner/ui";
-import { Panel } from "@siner/viz";
+import { addIndex, complete, type Signal } from "@otelo/api";
+import { Button, Callout, QueryInput, RangePicker, Tabs } from "@otelo/ui";
+import { Panel } from "@otelo/viz";
 
 import { pageContent } from "./classes";
 import type { List, ListResult } from "./list";

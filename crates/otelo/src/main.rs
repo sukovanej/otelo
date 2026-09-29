@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use siner::{cli, serve};
+use otelo::{cli, serve};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]
@@ -59,7 +59,7 @@ fn main() -> anyhow::Result<()> {
         Command::Complete(args) => cli::complete(&args),
         Command::Index(args) => cli::index(&args),
         Command::Openapi => {
-            println!("{}", siner_api::spec().to_pretty_json()?);
+            println!("{}", otelo_api::spec().to_pretty_json()?);
             Ok(())
         }
     }

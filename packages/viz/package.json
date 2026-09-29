@@ -1,12 +1,12 @@
 {
-  "name": "@siner/viz",
+  "name": "@otelo/viz",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@siner/ui": "workspace:*"
+    "@otelo/ui": "workspace:*"
   },
   "devDependencies": {
     "solid-js": "catalog:",

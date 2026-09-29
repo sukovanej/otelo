@@ -1,7 +1,7 @@
 use std::io::{self, Read};
 
-use siner_api::SqlRequest;
-use siner_storage::query::{SqlResult, SqlValue};
+use otelo_api::SqlRequest;
+use otelo_storage::query::{SqlResult, SqlValue};
 
 use super::Range;
 use super::client::{Client, note_cut, print_json};

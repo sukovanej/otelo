@@ -1,4 +1,4 @@
-use siner_storage::{Histogram, Merger};
+use otelo_storage::{Histogram, Merger};
 
 fn point(counts: &[u64], sum: f64, cumulative: bool) -> Histogram {
     Histogram {

@@ -1,5 +1,5 @@
-use siner_query::Signal;
-use siner_storage::query::{GROUP_SCAN_LIMIT, LogGroups, Logs};
+use otelo_query::Signal;
+use otelo_storage::query::{GROUP_SCAN_LIMIT, LogGroups, Logs};
 
 use super::client::{Client, note_cut, print_json};
 use super::table::{self, Table};

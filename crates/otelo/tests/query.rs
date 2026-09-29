@@ -6,12 +6,12 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use common::{get, start_daemon, stop_daemon};
-use serde_json::{Value, json};
-use siner_storage::{
+use otelo_storage::{
     Attributes, Log, Records, Resource, Severity, Span, SpanId, SpanKind, SpanStatus, TraceId,
     batch_channel, now_unix_nanos,
 };
-use siner_storage_sqlite::{Config, Writer};
+use otelo_storage_sqlite::{Config, Writer};
+use serde_json::{Value, json};
 
 fn attributes_from_json(value: Value) -> Attributes {
     serde_json::from_value(value).unwrap()
@@ -68,16 +68,16 @@ fn write_telemetry(data: &Path) {
     writer.join().unwrap();
 }
 
-fn siner(addr: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_siner"))
+fn otelo(addr: &str, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_otelo"))
         .args(args)
-        .env("SINER_URL", format!("http://{addr}"))
+        .env("OTELO_URL", format!("http://{addr}"))
         .output()
         .unwrap()
 }
 
 fn run_and_parse_json(addr: &str, args: &[&str]) -> (Value, String) {
-    let output = siner(addr, args);
+    let output = otelo(addr, args);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(output.status.success(), "{args:?} failed: {stderr}");
     (serde_json::from_slice(&output.stdout).unwrap(), stderr)
@@ -88,7 +88,7 @@ fn check_calls_of_a_service_without_calls(addr: &str) {
     assert_eq!(calls["calls"]["count"], 0);
     assert_eq!(calls["targets"], json!([]));
     assert!(calls.get("buckets").is_none(), "{calls}");
-    let table = siner(addr, &["calls", "api", "--table"]);
+    let table = otelo(addr, &["calls", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.starts_with("api: 0 calls"), "{table}");
 }
@@ -118,7 +118,7 @@ fn the_cli_reads_what_the_api_serves() {
     );
     assert_eq!(user["logs"][0]["body"], "user 7 signed in");
     assert_eq!(user["unindexed"], json!(["user.id"]));
-    assert!(stderr.contains("siner index add logs user.id"), "{stderr}");
+    assert!(stderr.contains("otelo index add logs user.id"), "{stderr}");
 
     let (traces, _) = run_and_parse_json(&addr, &["traces", "error = true"]);
     assert_eq!(
@@ -143,7 +143,7 @@ fn the_cli_reads_what_the_api_serves() {
     assert_eq!(trace["spans"].as_array().unwrap().len(), 2);
     assert_eq!(trace["logs"][0]["body"], "query failed");
 
-    let tree = siner(&addr, &["trace", TRACE, "--table"]);
+    let tree = otelo(&addr, &["trace", TRACE, "--table"]);
     let tree = String::from_utf8(tree.stdout).unwrap();
     assert!(tree.contains("GET /languages"), "{tree}");
     let child = tree
@@ -179,7 +179,7 @@ fn the_cli_reads_what_the_api_serves() {
     let (service, _) = run_and_parse_json(&addr, &["service", "api"]);
     assert_eq!(service["operations"][0]["name"], "GET /languages");
     assert_eq!(service["operations"][1]["requests"]["errors"], 1);
-    let table = siner(&addr, &["service", "api", "--table"]);
+    let table = otelo(&addr, &["service", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.contains("GET /languages"), "{table}");
     check_calls_of_a_service_without_calls(&addr);
@@ -271,7 +271,7 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     assert_eq!(indexed(), true);
 
     // The writer builds the index within a second or so.
-    let today = siner_storage_sqlite::Day::today();
+    let today = otelo_storage_sqlite::Day::today();
     let sql = format!("SELECT name FROM \"{today}\".sqlite_master WHERE name GLOB 'attr_*'");
     let index_names = || {
         let (rows, _) = run_and_parse_json(&addr, &["sql", &sql]);
@@ -286,7 +286,7 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
 
     let daemon = start_daemon(dir.path());
     let addr = daemon.addr.clone();
-    let listed = siner(&addr, &["index", "list", "--table"]);
+    let listed = otelo(&addr, &["index", "list", "--table"]);
     assert!(
         String::from_utf8(listed.stdout)
             .unwrap()
@@ -296,9 +296,9 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     assert_eq!(list["indexes"].as_array().unwrap().len(), 1);
     let (list, _) = run_and_parse_json(&addr, &["index", "remove", "logs", "user.id"]);
     assert_eq!(list["indexes"], json!([]));
-    let output = siner(&addr, &["index", "remove", "logs", "user.id"]);
+    let output = otelo(&addr, &["index", "remove", "logs", "user.id"]);
     assert!(!output.status.success());
-    let output = siner(&addr, &["index", "add", "metrics", "state"]);
+    let output = otelo(&addr, &["index", "add", "metrics", "state"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
         stderr.contains("only the attributes of logs and spans"),
@@ -313,7 +313,7 @@ fn a_bad_request_prints_the_reason() {
     let daemon = start_daemon(dir.path());
     let addr = daemon.addr.clone();
 
-    let output = siner(&addr, &["logs", "--since", "yesterday"]);
+    let output = otelo(&addr, &["logs", "--since", "yesterday"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
@@ -321,18 +321,18 @@ fn a_bad_request_prints_the_reason() {
         "{stderr}"
     );
 
-    let output = siner(&addr, &["logs", "user.id = = 7"]);
+    let output = otelo(&addr, &["logs", "user.id = = 7"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("column 11: expected a value"), "{stderr}");
 
-    let output = siner(&addr, &["logs", "level = loud"]);
+    let output = otelo(&addr, &["logs", "level = loud"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("not a severity"), "{stderr}");
 
-    let output = siner(&addr, &["sql", "DELETE FROM logs"]);
+    let output = otelo(&addr, &["sql", "DELETE FROM logs"]);
     assert!(!output.status.success());
 
-    let output = siner(&addr, &["trace", TRACE]);
+    let output = otelo(&addr, &["trace", TRACE]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("no spans or logs"), "{stderr}");
     stop_daemon(daemon, "TERM");
@@ -340,7 +340,7 @@ fn a_bad_request_prints_the_reason() {
 
 #[test]
 fn an_unreachable_daemon_is_named() {
-    let output = siner("127.0.0.1:1", &["traces"]);
+    let output = otelo("127.0.0.1:1", &["traces"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("http://127.0.0.1:1"), "{stderr}");

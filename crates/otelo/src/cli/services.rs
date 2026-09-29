@@ -1,12 +1,12 @@
 use std::io;
 
 use jiff::Timestamp;
-use serde::Serialize;
-use siner_storage::Attributes;
-use siner_storage::query::{
+use otelo_storage::Attributes;
+use otelo_storage::query::{
     CallOperation, Calls, Operation, RequestBucket, Requests, Service, ServiceBucket, ServiceStats,
     Services, Target, TargetKey, TargetType,
 };
+use serde::Serialize;
 
 use super::Range;
 use super::client::{Client, escape_path_segment, note_cut, print_json};
@@ -263,7 +263,7 @@ fn print_call_steps(buckets: &[RequestBucket]) -> io::Result<()> {
 }
 
 fn request_cells(requests: &Requests) -> [String; 5] {
-    let percentile = |pick: fn(&siner_storage::query::Latency) -> i64| {
+    let percentile = |pick: fn(&otelo_storage::query::Latency) -> i64| {
         requests.latency.as_ref().map_or_else(
             || "-".into(),
             |latency| table::format_duration(pick(latency)),

@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use siner_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo, complete};
+use otelo_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo, complete};
 
 struct SmallAppCatalog;
 

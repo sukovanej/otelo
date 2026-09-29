@@ -1,4 +1,4 @@
-use siner_storage::query::message_template;
+use otelo_storage::query::message_template;
 
 #[test]
 fn replaces_numbers_and_keeps_their_units() {

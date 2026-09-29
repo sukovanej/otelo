@@ -1,6 +1,6 @@
 use jiff::Timestamp;
+use otelo_query::Query;
 use serde::{Deserialize, Serialize};
-use siner_query::Query;
 use utoipa::ToSchema;
 
 use crate::{Attributes, Distribution, TimeRange};

@@ -1,8 +1,8 @@
 import { createSignal, For, Show } from "solid-js";
 
-import type { LogGroup } from "@siner/api";
-import { Button, Level } from "@siner/ui";
-import { type Column, Table } from "@siner/viz";
+import type { LogGroup } from "@otelo/api";
+import { Button, Level } from "@otelo/ui";
+import { type Column, Table } from "@otelo/viz";
 
 import { body, detail, heading, times } from "../classes";
 import { templateTerm } from "../query";

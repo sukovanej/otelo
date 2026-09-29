@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 
-import type { Attributes, AttributeValue } from "@siner/api";
-import { Button } from "@siner/ui";
+import type { Attributes, AttributeValue } from "@otelo/api";
+import { Button } from "@otelo/ui";
 
 import { heading } from "./classes";
 import { attributeField, literal, quote, resourceField } from "./query";

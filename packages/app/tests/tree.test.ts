@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import type { TraceSpan } from "@siner/api";
+import type { TraceSpan } from "@otelo/api";
 
 import { spanTree, traceLength, visibleRows } from "../src/traces/tree";
 

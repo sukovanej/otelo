@@ -3,7 +3,7 @@ import solid from "vite-plugin-solid";
 import { defineConfig } from "vitest/config";
 
 // `mise run web:dev` serves the UI here and sends the API to the daemon that
-// `siner serve` runs on its default address.
+// `otelo serve` runs on its default address.
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
   server: {

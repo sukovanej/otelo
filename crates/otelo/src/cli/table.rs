@@ -3,7 +3,7 @@ use std::io::{self, Write};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use siner_storage::{AttributeValue, Attributes};
+use otelo_storage::{AttributeValue, Attributes};
 
 pub struct Table {
     header: Vec<String>,

@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::Path;
 
-use rusqlite::Connection;
-use serde_json::{Value, json};
-use siner_storage::{
+use otelo_storage::{
     Attributes, Batch, Inbox, Log, Metric, MetricKind, Point, Records, Resource, Sender, Severity,
     Span, SpanEvent, SpanId, SpanKind, SpanStatus, TimeRange, TraceId, batch_channel,
 };
-use siner_storage_sqlite::{Config, Day, Reader, Writer};
+use otelo_storage_sqlite::{Config, Day, Reader, Writer};
+use rusqlite::Connection;
+use serde_json::{Value, json};
 
 fn attributes_from_json(value: Value) -> Attributes {
     serde_json::from_value(value).unwrap()
@@ -186,7 +186,7 @@ fn a_full_channel_drops_the_batch_and_the_writer_reports_it() {
         "SELECT s.unit, p.value FROM points p
          JOIN series s ON s.day = p.day AND s.id = p.series_id
          JOIN resources r ON r.day = s.day AND r.id = s.resource_id
-         WHERE r.service = 'siner' AND s.name = 'siner.telemetry.dropped_batches'",
+         WHERE r.service = 'otelo' AND s.name = 'otelo.telemetry.dropped_batches'",
     );
     assert_eq!(dropped, [("{batch}".into(), 1.0)]);
 }

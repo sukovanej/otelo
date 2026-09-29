@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::ensure;
-use siner_storage::query::{
+use otelo_storage::query::{
     Latency, MAX_BUCKETS, Operation, OperationDetail, RequestBucket, Requests, Service,
     ServiceBucket, ServiceStats, ServiceSummary, Services,
 };
-use siner_storage::{Attributes, Severity, SpanKind, SpanStatus};
+use otelo_storage::{Attributes, Severity, SpanKind, SpanStatus};
 
 use super::{WhereClause, new_statement_span, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;

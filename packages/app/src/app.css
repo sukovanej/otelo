@@ -1,7 +1,7 @@
 @import "tailwindcss";
-@import "@siner/ui/theme.css";
+@import "@otelo/ui/theme.css";
 
-/* The components of @siner/ui, @siner/viz, and @siner/icons carry their
+/* The components of @otelo/ui, @otelo/viz, and @otelo/icons carry their
    classes in their source. */
 @source "../../ui/src";
 @source "../../viz/src";

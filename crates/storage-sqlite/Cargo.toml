@@ -1,6 +1,6 @@
 [package]
-name = "siner-storage-sqlite"
-description = "The SQLite backend of siner's storage: the daily files of the logs, traces, and metrics, and the indexed attributes in the state file"
+name = "otelo-storage-sqlite"
+description = "The SQLite backend of otelo's storage: the daily files of the logs, traces, and metrics, and the indexed attributes in the state file"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -11,8 +11,8 @@ jiff = { workspace = true, features = ["serde"] }
 rusqlite = { workspace = true, features = ["hooks", "limits"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-siner-query = { workspace = true }
-siner-storage = { workspace = true }
+otelo-query = { workspace = true }
+otelo-storage = { workspace = true }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
 utoipa = { workspace = true }

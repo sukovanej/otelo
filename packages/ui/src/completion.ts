@@ -1,5 +1,5 @@
 // Edits of a text input by a completion. Servers that count positions in
-// characters, as siner's `/api/complete` does, and the DOM, which counts
+// characters, as otelo's `/api/complete` does, and the DOM, which counts
 // UTF-16 code units, meet here.
 
 /** Text to put in place of the characters from `start` to `end`. */

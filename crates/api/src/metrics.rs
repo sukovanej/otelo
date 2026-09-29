@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
+use otelo_query::Signal;
+use otelo_storage::query::{MetricFilter, MetricList, MetricSeries};
 use serde::Deserialize;
-use siner_query::Signal;
-use siner_storage::query::{MetricFilter, MetricList, MetricSeries};
 use utoipa::IntoParams;
 
 use crate::Api;

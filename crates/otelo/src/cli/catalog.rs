@@ -1,6 +1,6 @@
-use siner_api::{Completions, IndexList};
-use siner_query::Signal;
-use siner_storage::query::AttributeKeys;
+use otelo_api::{Completions, IndexList};
+use otelo_query::Signal;
+use otelo_storage::query::AttributeKeys;
 
 use super::client::{Client, escape_path_segment, print_json};
 use super::table::Table;
@@ -24,12 +24,12 @@ pub fn attributes(args: &AttributesArgs) -> anyhow::Result<()> {
         let rows = attributes
             .record
             .iter()
-            .map(|a| (siner_query::Field::Attribute(a.key.clone()), a))
+            .map(|a| (otelo_query::Field::Attribute(a.key.clone()), a))
             .chain(
                 attributes
                     .resource
                     .iter()
-                    .map(|a| (siner_query::Field::Resource(a.key.clone()), a)),
+                    .map(|a| (otelo_query::Field::Resource(a.key.clone()), a)),
             );
         for (field, attribute) in rows {
             table.row(vec![

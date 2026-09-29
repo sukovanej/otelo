@@ -11,13 +11,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::own::{self, Destination};
 use crate::ui;
-use siner_api::{self as api, Api};
-use siner_storage_sqlite::Sqlite;
+use otelo_api::{self as api, Api};
+use otelo_storage_sqlite::Sqlite;
 
 #[cfg(target_os = "macos")]
-const DEFAULT_DATA_DIR: &str = "/usr/local/var/siner";
+const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
 #[cfg(not(target_os = "macos"))]
-const DEFAULT_DATA_DIR: &str = "/var/lib/siner";
+const DEFAULT_DATA_DIR: &str = "/var/lib/otelo";
 
 // An OTLP batch can hold a few hundred kilobytes, so the queue stays at tens of megabytes.
 const TELEMETRY_QUEUE_BATCHES: usize = 64;
@@ -105,7 +105,7 @@ async fn run_daemon(
     std::fs::create_dir_all(&args.data)
         .with_context(|| format!("make the data directory {}", args.data.display()))?;
     let storage = Sqlite::open(&args.data)?;
-    let (telemetry, inbox) = siner_storage::batch_channel(TELEMETRY_QUEUE_BATCHES);
+    let (telemetry, inbox) = otelo_storage::batch_channel(TELEMETRY_QUEUE_BATCHES);
     let writer = storage.spawn_writer(inbox)?;
     let api = Api {
         storage: Arc::new(storage),
@@ -130,8 +130,8 @@ async fn run_daemon(
     };
     tokio::try_join!(
         api,
-        siner_otlp::serve_http(otlp_http, telemetry.clone(), shutdown.clone()),
-        siner_otlp::serve_grpc(otlp_grpc, telemetry.clone(), shutdown.clone()),
+        otelo_otlp::serve_http(otlp_http, telemetry.clone(), shutdown.clone()),
+        otelo_otlp::serve_grpc(otlp_grpc, telemetry.clone(), shutdown.clone()),
     )?;
     // The writer ends once the last sender is gone.
     drop(telemetry);

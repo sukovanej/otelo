@@ -1,4 +1,4 @@
-// The icons of the siner UI, in one place: the interface, the kinds of
+// The icons of the otelo UI, in one place: the interface, the kinds of
 // span, the languages of services, and the database systems. Each is a Solid component on a 16 by
 // 16 grid that takes a size, classes, and a title.
 

@@ -1,6 +1,6 @@
-// The components of the siner UI, styled with Tailwind. An app imports
-// `@siner/ui/theme.css` into its Tailwind CSS, adds `@source` for this
-// package's `src`, and imports `@siner/ui/fonts.css` once.
+// The components of the otelo UI, styled with Tailwind. An app imports
+// `@otelo/ui/theme.css` into its Tailwind CSS, adds `@source` for this
+// package's `src`, and imports `@otelo/ui/fonts.css` once.
 
 export { default as Badge, type Tone } from "./Badge";
 export { default as Button } from "./Button";

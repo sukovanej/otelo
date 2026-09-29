@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use anyhow::ensure;
-use siner_query::{Query, Signal};
-use siner_storage::query::{
+use otelo_query::{Query, Signal};
+use otelo_storage::query::{
     Bucket, MAX_BUCKETS, MetricFilter, MetricList, MetricSeries, Series, SeriesInfo,
 };
-use siner_storage::{Histogram, Merger};
+use otelo_storage::{Histogram, Merger};
 
 use super::compile::{TableAliases, compile_query};
 use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};

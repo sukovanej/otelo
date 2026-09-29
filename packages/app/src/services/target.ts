@@ -1,8 +1,8 @@
 // What the calls of a service go to, as the calls API names them: a
 // database, a host, an RPC service, or a message destination.
 
-import type { Attributes, TargetKey, TargetType } from "@siner/api";
-import { databaseName } from "@siner/icons";
+import type { Attributes, TargetKey, TargetType } from "@otelo/api";
+import { databaseName } from "@otelo/icons";
 
 import { databaseId } from "../semantics";
 

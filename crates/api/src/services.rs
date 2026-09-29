@@ -1,9 +1,9 @@
 use axum::extract::{Path, Query, State};
-use serde::Deserialize;
-use siner_storage::SpanKind;
-use siner_storage::query::{
+use otelo_storage::SpanKind;
+use otelo_storage::query::{
     CallDetail, Calls, OperationDetail, Service, Services, TargetKey, TargetType,
 };
+use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::Api;

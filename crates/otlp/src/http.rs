@@ -12,9 +12,9 @@ use flate2::read::GzDecoder;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use otelo_storage::Sender;
 use serde::Serialize;
 use serde_json::Value;
-use siner_storage::Sender;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 

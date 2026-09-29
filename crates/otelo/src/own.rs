@@ -82,7 +82,7 @@ impl Telemetry {
             Destination::OtherReceiver(url) => url.clone(),
         };
         let resource = Resource::builder()
-            .with_service_name("siner")
+            .with_service_name("otelo")
             .with_attribute(opentelemetry::KeyValue::new(
                 "service.version",
                 env!("CARGO_PKG_VERSION"),
@@ -135,7 +135,7 @@ pub fn init_logging(own: Option<&Telemetry>) {
     // A span on the path from the OTLP receiver to the day files would export itself forever.
     let traces = own.map(|own| {
         tracing_opentelemetry::layer()
-            .with_tracer(own.tracer.tracer("siner"))
+            .with_tracer(own.tracer.tracer("otelo"))
             .with_tracked_inactivity(false)
             .with_target(false)
             .with_filter(own.build_exporter_filter())

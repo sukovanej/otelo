@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use jiff::Timestamp;
-use siner_api::{Api, nanos, parse_duration, parse_time};
-use siner_storage_sqlite::{Day, Sqlite};
+use otelo_api::{Api, nanos, parse_duration, parse_time};
+use otelo_storage_sqlite::{Day, Sqlite};
 
 const HOUR: i64 = 3600 * 1_000_000_000;
 

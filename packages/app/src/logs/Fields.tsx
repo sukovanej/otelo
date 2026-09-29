@@ -1,4 +1,4 @@
-import type { LogLine } from "@siner/api";
+import type { LogLine } from "@otelo/api";
 
 import { body, times } from "../classes";
 import FieldTable, { attributes, builtin, resource } from "../FieldTable";

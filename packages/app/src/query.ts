@@ -1,8 +1,8 @@
-// Writes pieces of the query language of `siner-query`: field names, value
+// Writes pieces of the query language of `otelo-query`: field names, value
 // literals, and edits of a query as typed. The rules follow `Display for
 // Field` and `quote` in crates/query/src/lib.rs.
 
-import type { AttributeValue } from "@siner/api";
+import type { AttributeValue } from "@otelo/api";
 
 /** The built-in fields of every signal. An attribute with one of these names
  * is written as `attr.<key>`. */

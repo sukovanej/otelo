@@ -5,8 +5,8 @@ use std::io::Write;
 use common::{Receiver, open_todays_day_file, rows};
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use otelo_storage::now_unix_nanos;
 use serde_json::{Value, json};
-use siner_storage::now_unix_nanos;
 
 fn post(receiver: &Receiver, path: &str, headers: &[(&str, &str)], body: &[u8]) -> (u16, Value) {
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -140,13 +140,13 @@ fn rejects_the_metric_types_the_store_lacks() {
     assert_eq!(status, 200);
     assert_eq!(
         response["partialSuccess"],
-        json!({"rejectedDataPoints": 2, "errorMessage": "siner does not store summaries"})
+        json!({"rejectedDataPoints": 2, "errorMessage": "otelo does not store summaries"})
     );
     receiver.stop_and_wait_for_writer();
     let points: Vec<String> = rows(
         &open_todays_day_file(dir.path()),
         "SELECT s.name || ' ' || p.value FROM points p JOIN series s ON s.id = p.series_id
-         WHERE s.name != 'siner.telemetry.dropped_batches'",
+         WHERE s.name != 'otelo.telemetry.dropped_batches'",
     );
     assert_eq!(points, ["queue.depth 4.0"]);
 }

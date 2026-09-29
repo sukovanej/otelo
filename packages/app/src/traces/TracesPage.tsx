@@ -1,7 +1,7 @@
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { createSignal, Match, Show, Switch } from "solid-js";
 
-import { getSpans, getTraces, search, type TraceSpan, type Spans, type Traces } from "@siner/api";
+import { getSpans, getTraces, search, type TraceSpan, type Spans, type Traces } from "@otelo/api";
 
 import { count, createList, usePageKeys } from "../list";
 import { Empty, ListContent, QueryBar } from "../ListFrame";

@@ -1,8 +1,8 @@
 import { A } from "@solidjs/router";
 import { Show } from "solid-js";
 
-import type { LogLine } from "@siner/api";
-import { Level } from "@siner/ui";
+import type { LogLine } from "@otelo/api";
+import { Level } from "@otelo/ui";
 
 import { link } from "../classes";
 import Panel from "../Panel";

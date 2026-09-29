@@ -1,8 +1,8 @@
 import { Match, Switch } from "solid-js";
 
-import type { TargetKey } from "@siner/api";
-import { DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@siner/icons";
-import { Tooltip } from "@siner/ui";
+import type { TargetKey } from "@otelo/api";
+import { DatabaseSystemIcon, GlobeIcon, SpanIcon } from "@otelo/icons";
+import { Tooltip } from "@otelo/ui";
 
 import { databaseId } from "../semantics";
 import { targetSystem } from "./target";

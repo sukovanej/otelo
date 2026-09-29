@@ -4,16 +4,16 @@ use anyhow::{Context, bail};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use siner_api::ErrorBody;
+use otelo_api::ErrorBody;
 
 const MAX_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(clap::Args)]
 pub struct Client {
-    /// Address of the siner daemon
+    /// Address of the otelo daemon
     #[arg(
         long,
-        env = "SINER_URL",
+        env = "OTELO_URL",
         default_value = "http://127.0.0.1:7070",
         global = true
     )]
@@ -50,7 +50,7 @@ impl Client {
             .get(self.url(path))
             .query_pairs(pairs)
             .call()
-            .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
         read(response)
     }
 
@@ -62,7 +62,7 @@ impl Client {
         let response = Self::agent()
             .post(self.url(path))
             .send_json(body)
-            .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
         read(response)
     }
 
@@ -70,7 +70,7 @@ impl Client {
         let response = Self::agent()
             .put(self.url(path))
             .send_empty()
-            .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
         read(response)
     }
 
@@ -78,7 +78,7 @@ impl Client {
         let response = Self::agent()
             .delete(self.url(path))
             .call()
-            .with_context(|| format!("reach the siner daemon at {}", self.daemon))?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
         read(response)
     }
 

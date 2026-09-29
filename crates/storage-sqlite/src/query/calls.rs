@@ -1,13 +1,13 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
-use rusqlite::types::Value;
-use siner_query::quote;
-use siner_storage::query::{
+use otelo_query::quote;
+use otelo_storage::query::{
     CallDetail, CallOperation, Calls, OperationDetail, RequestBucket, Target, TargetKey,
     TargetType, path_template, query_template,
 };
-use siner_storage::{SpanKind, SpanStatus};
+use otelo_storage::{SpanKind, SpanStatus};
+use rusqlite::types::Value;
 
 use super::services::{OperationTally, RequestTally, SpanLocation};
 use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};

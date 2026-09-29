@@ -86,16 +86,16 @@ importers:
 
   packages/app:
     dependencies:
-      '@siner/api':
+      '@otelo/api':
         specifier: workspace:*
         version: link:../api
-      '@siner/icons':
+      '@otelo/icons':
         specifier: workspace:*
         version: link:../icons
-      '@siner/ui':
+      '@otelo/ui':
         specifier: workspace:*
         version: link:../ui
-      '@siner/viz':
+      '@otelo/viz':
         specifier: workspace:*
         version: link:../viz
       '@solidjs/router':
@@ -147,7 +147,7 @@ importers:
       '@fontsource/ibm-plex-sans':
         specifier: 'catalog:'
         version: 5.3.0
-      '@siner/icons':
+      '@otelo/icons':
         specifier: workspace:*
         version: link:../icons
     devDependencies:
@@ -169,7 +169,7 @@ importers:
 
   packages/viz:
     dependencies:
-      '@siner/ui':
+      '@otelo/ui':
         specifier: workspace:*
         version: link:../ui
     devDependencies:

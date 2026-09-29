@@ -1,6 +1,6 @@
 import { type JSX, Show } from "solid-js";
 
-import { Checkbox } from "@siner/ui";
+import { Checkbox } from "@otelo/ui";
 
 import type { Fetched } from "./fetch";
 import { LIVE_MS } from "./list";

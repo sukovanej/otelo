@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use siner_query::{Builtin, Expr, Field, Op, Query, Signal, Value, parse};
+use otelo_query::{Builtin, Expr, Field, Op, Query, Signal, Value, parse};
 
 fn signal_of_case_file(path: &Path) -> Signal {
     let dir = path.parent().and_then(Path::file_name).unwrap();

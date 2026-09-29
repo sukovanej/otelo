@@ -1,4 +1,4 @@
-import { Badge, type Tone } from "@siner/ui";
+import { Badge, type Tone } from "@otelo/ui";
 
 import { kindName } from "./span";
 

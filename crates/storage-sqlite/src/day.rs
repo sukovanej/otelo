@@ -16,7 +16,7 @@ impl Day {
 
     #[must_use]
     pub fn today() -> Self {
-        Self::of(siner_storage::now_unix_nanos())
+        Self::of(otelo_storage::now_unix_nanos())
     }
 
     #[must_use]

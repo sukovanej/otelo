@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use anyhow::ensure;
+use otelo_query::{Builtin, Expr, Field, Op, Query, Signal};
+use otelo_storage::query::{Spans, Trace, TraceSpan, TraceSummary, Traces};
+use otelo_storage::{Attributes, SpanKind, SpanStatus, TraceId};
 use rusqlite::Row;
-use siner_query::{Builtin, Expr, Field, Op, Query, Signal};
-use siner_storage::query::{Spans, Trace, TraceSpan, TraceSummary, Traces};
-use siner_storage::{Attributes, SpanKind, SpanStatus, TraceId};
 
 use super::compile::{TableAliases, compile_query};
 use super::services::SpanLocation;
@@ -293,7 +293,7 @@ pub(super) fn read_trace(
         expr: Some(Expr::Compare {
             field: Field::Builtin(Builtin::TraceId),
             op: Op::Eq,
-            value: siner_query::Value::String(id.to_string()),
+            value: otelo_query::Value::String(id.to_string()),
         }),
     };
     let logs = super::logs::read_logs(reader, &logs, limit)?;

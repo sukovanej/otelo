@@ -1,9 +1,9 @@
 use std::fmt;
 
 use axum::extract::{Query, State};
+use otelo_query::{Signal, SuggestionKind};
+use otelo_storage::query::AttributeKeys;
 use serde::{Deserialize, Serialize};
-use siner_query::{Signal, SuggestionKind};
-use siner_storage::query::AttributeKeys;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::error::{ApiResult, ErrorBody};
@@ -157,7 +157,7 @@ pub async fn complete(
     });
     api.run_range_query([None, None], WHOLE_RETENTION, (None, 1), move |r| {
         let chars = |byte: usize| q[..byte].chars().count();
-        let suggestions = siner_query::complete(&q, cursor, signal, &*r.queries)
+        let suggestions = otelo_query::complete(&q, cursor, signal, &*r.queries)
             .into_iter()
             .map(|s| SuggestionBody {
                 start: chars(s.replace.start),

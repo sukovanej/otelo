@@ -1,6 +1,6 @@
-import type { Attributes } from "@siner/api";
-import { LanguageIcon, languageName } from "@siner/icons";
-import { Tooltip } from "@siner/ui";
+import type { Attributes } from "@otelo/api";
+import { LanguageIcon, languageName } from "@otelo/icons";
+import { Tooltip } from "@otelo/ui";
 
 import { language } from "./semantics";
 

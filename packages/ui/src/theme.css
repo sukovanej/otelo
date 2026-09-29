@@ -1,6 +1,6 @@
-/* The Tailwind theme of the siner UI: its colors in light and dark, its fonts,
+/* The Tailwind theme of the otelo UI: its colors in light and dark, its fonts,
    and its type scale. An app imports it after `tailwindcss`, and the fonts
-   with `@siner/ui/fonts.css`. Only these colors exist: `bg-surface`,
+   with `@otelo/ui/fonts.css`. Only these colors exist: `bg-surface`,
    `text-muted`, `border-line`, and so on. */
 
 @theme {
