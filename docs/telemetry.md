@@ -122,7 +122,7 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 - The names, units, and labels are the OpenTelemetry semantic conventions for system and process metrics, which are still in development and can change. Three names are not from there: the load averages have the names the OpenTelemetry Collector gives them, and `process.cgroup.memory.usage` and `otelo.storage.size` are otelo's.
 - `iowait` is the time the CPUs sat idle waiting for the disk, and `steal` the time the hypervisor gave to another tenant. Without the two, a slow droplet at 30% CPU looks healthy.
 - The `process.*` metrics cover a whole service, every process of its unit, and otelo's own process. `process.memory.usage` is the memory the processes hold themselves. `process.cgroup.memory.usage`, on Linux only, adds the page cache the unit filled, which is what `MemoryMax` and the OOM killer count.
-- `otelo.storage.size` is the size of the files in the data directory. A WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
+- `otelo.storage.size` is the size of otelo's data. The storage backend reports it through `Storage::size()`, so the collector knows no file names. The SQLite backend adds up its files, and a WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
 - A filesystem counts once per device, and an APFS container once for all its volumes. Filesystems without a disk, such as `tmpfs`, `overlay`, and `squashfs`, are left out. So are the loopback interface and every interface that has moved no bytes.
 
 ## The daemon's own telemetry
