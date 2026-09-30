@@ -7,7 +7,6 @@ mod rollup;
 mod series;
 mod sqlite;
 mod state;
-mod stored_schema;
 mod writer;
 
 pub use day::Day;

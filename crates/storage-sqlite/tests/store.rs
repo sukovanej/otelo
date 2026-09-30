@@ -244,22 +244,20 @@ fn deletes_the_files_past_the_retention() {
     let names = [
         expired.file_name(),
         format!("{}-wal", expired.file_name()),
-        format!("{}.schema-0", expired.file_name()),
         kept.file_name(),
-        format!("{}.schema-0", kept.file_name()),
         "notes.txt".into(),
     ];
     for name in &names {
         fs::write(directory.path().join(name), "").unwrap();
     }
     write_batches(directory.path(), Vec::new());
-    for name in &names[..3] {
+    for name in &names[..2] {
         assert!(
             !directory.path().join(name).exists(),
             "{name} is still there"
         );
     }
-    for name in &names[3..] {
+    for name in &names[2..] {
         assert!(directory.path().join(name).exists(), "{name} is gone");
     }
 }
@@ -473,56 +471,6 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
 }
 
 #[test]
-fn sets_aside_a_day_file_of_another_schema() {
-    let directory = tempfile::tempdir().unwrap();
-    let today = Day::today();
-    let day_file_path = directory.path().join(today.file_name());
-    Connection::open(&day_file_path)
-        .unwrap()
-        .execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE points (series_id INTEGER, ts INTEGER, value REAL, histogram TEXT);
-             INSERT INTO points VALUES (1, 2, 3.0, NULL);",
-        )
-        .unwrap();
-    write_batches(
-        directory.path(),
-        vec![metric_batch(vec![memory_metric(&[(
-            today.start_at(),
-            100.0,
-        )])])],
-    );
-
-    let set_aside_path = directory
-        .path()
-        .join(format!("{}.schema-0", today.file_name()));
-    let set_aside_connection = Connection::open(&set_aside_path).unwrap();
-    assert_eq!(
-        query_integer(
-            &set_aside_connection,
-            "SELECT count(*) FROM points WHERE value = 3.0"
-        ),
-        1
-    );
-    let day_file_connection = Connection::open(&day_file_path).unwrap();
-    assert_eq!(
-        query_integer(&day_file_connection, "PRAGMA user_version"),
-        2
-    );
-    let reader = open_reader_of_today(directory.path());
-    assert_eq!(
-        query_integer(
-            reader.connection(),
-            "SELECT count(*)
-             FROM points point
-             JOIN series ON series.day = point.day AND series.id = point.series_id
-             WHERE series.name = 'process.memory.usage' AND point.value = 100.0"
-        ),
-        1
-    );
-}
-
-#[test]
 fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
     let directory = tempfile::tempdir().unwrap();
     let storage = Sqlite::open(directory.path()).unwrap();
@@ -546,7 +494,6 @@ fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
         (day_file_name.clone(), 4096),
         (format!("{day_file_name}-wal"), 512),
         (format!("{day_file_name}-shm"), 32),
-        (format!("{day_file_name}.schema-0"), 100),
         ("metrics-rollup.sqlite".into(), 2048),
         ("metrics-rollup.sqlite-wal".into(), 64),
     ] {
@@ -556,7 +503,7 @@ fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
     assert_eq!(
         storage.size().unwrap(),
         StorageSize {
-            telemetry_bytes: 4096 + 512 + 32 + 100,
+            telemetry_bytes: 4096 + 512 + 32,
             rollup_bytes: 2048 + 64,
             state_bytes: state_bytes + 7,
         }

@@ -733,34 +733,6 @@ fn a_query_stops_at_the_time_limit() {
 }
 
 #[test]
-fn a_day_file_from_before_the_catalog_gets_its_tables() {
-    let directory = tempfile::tempdir().unwrap();
-    let yesterday = Day::today().add_days(-1);
-    let connection = Connection::open(directory.path().join(yesterday.file_name())).unwrap();
-    connection
-        .execute_batch(
-            "CREATE TABLE logs (ts INTEGER NOT NULL, resource_id INTEGER NOT NULL,
-           severity INTEGER NOT NULL, body TEXT NOT NULL, trace_id BLOB, span_id BLOB,
-           attributes TEXT NOT NULL, source TEXT NOT NULL)",
-        )
-        .unwrap();
-    drop(connection);
-    write_batch(directory.path(), Vec::new(), &Indexes::default());
-    let reader = Reader::open(
-        directory.path(),
-        TimeRange::new(yesterday.start_at(), Day::today().start_at()).unwrap(),
-    )
-    .unwrap();
-    assert!(
-        reader
-            .list_attribute_keys(Signal::Logs)
-            .unwrap()
-            .record
-            .is_empty()
-    );
-}
-
-#[test]
 fn a_histogram_returns_the_bucket_counts_of_each_step() {
     let directory = tempfile::tempdir().unwrap();
     let today_start_at = Day::today().start_at();

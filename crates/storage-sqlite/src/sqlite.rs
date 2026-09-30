@@ -80,8 +80,7 @@ impl Storage for Sqlite {
     }
 }
 
-// Counts every file whose name passes, so a write-ahead log and a day file set aside are part
-// of the size.
+// Counts every file whose name passes, so a write-ahead log is part of the size.
 fn size_of_files_in_bytes(
     directory: &Path,
     is_counted_name: impl Fn(&str) -> bool,

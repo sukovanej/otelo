@@ -1,11 +1,10 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
-use std::{fs, io};
 
-use anyhow::{Context, ensure};
+use anyhow::Context;
 use otelo_storage::query::Resolution;
 use otelo_storage::{
     Change, Increase, Level, MetricKind, SeriesSteps, StepSummary, Temporality, TimeRange,
@@ -21,12 +20,10 @@ use crate::series::{
     ResourceId, SeriesCache, SeriesId, SeriesIdentity, StoredSeries, find_or_insert_resource_id,
     find_or_insert_series_id,
 };
-use crate::stored_schema::{StoredSchema, read_stored_schema, set_aside_file_of_another_schema};
 
 pub const ROLLUP_FILE_NAME: &str = "metrics-rollup.sqlite";
 
 const ROLLUP_SCHEMA: &str = include_str!("rollup.sql");
-const ROLLUP_SCHEMA_VERSION: i32 = 2;
 
 pub const MINUTE_NS: i64 = 60 * 1_000_000_000;
 pub const HOUR_NS: i64 = 60 * MINUTE_NS;
@@ -94,18 +91,9 @@ impl Rollups {
         let path = telemetry_directory.join(ROLLUP_FILE_NAME);
         let connection =
             Connection::open(&path).with_context(|| format!("open {}", path.display()))?;
-        if let StoredSchema::Version(version) = read_stored_schema(&connection)? {
-            ensure!(
-                version == ROLLUP_SCHEMA_VERSION,
-                "{} has the schema version {version}, and this otelo reads version \
-                 {ROLLUP_SCHEMA_VERSION}",
-                path.display()
-            );
-        }
         connection
             .execute_batch(ROLLUP_SCHEMA)
             .with_context(|| format!("create the schema in {}", path.display()))?;
-        connection.pragma_update(None, "user_version", ROLLUP_SCHEMA_VERSION)?;
         Ok(Self {
             telemetry_directory: telemetry_directory.to_owned(),
             connection,
@@ -349,43 +337,6 @@ impl Rollups {
         self.series_cache = SeriesCache::default();
         Ok(())
     }
-}
-
-pub fn set_aside_rollup_file_of_another_schema(telemetry_directory: &Path) -> anyhow::Result<()> {
-    let path = telemetry_directory.join(ROLLUP_FILE_NAME);
-    if path.is_file() {
-        set_aside_file_of_another_schema(&path, ROLLUP_SCHEMA_VERSION)
-            .with_context(|| format!("set {} aside", path.display()))?;
-    }
-    Ok(())
-}
-
-// A file set aside takes no more rows, so its newest summary is no newer than its last change.
-pub fn delete_rollup_files_set_aside_before(
-    telemetry_directory: &Path,
-    oldest_hour_at: i64,
-) -> io::Result<Vec<String>> {
-    let oldest_kept_change =
-        UNIX_EPOCH + Duration::from_nanos(u64::try_from(oldest_hour_at).unwrap_or(0));
-    let mut deleted_file_names = Vec::new();
-    for entry in fs::read_dir(telemetry_directory)? {
-        let entry = entry?;
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        if is_rollup_file_set_aside(&name) && entry.metadata()?.modified()? < oldest_kept_change {
-            fs::remove_file(entry.path())?;
-            deleted_file_names.push(name);
-        }
-    }
-    deleted_file_names.sort();
-    Ok(deleted_file_names)
-}
-
-fn is_rollup_file_set_aside(name: &str) -> bool {
-    name.strip_prefix(ROLLUP_FILE_NAME)
-        .and_then(|rest| rest.strip_prefix(".schema-"))
-        .is_some_and(|version| version.parse::<i32>().is_ok())
 }
 
 // A summary holds what each step added, whatever the points of the series counted.
