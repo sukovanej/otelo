@@ -1,6 +1,6 @@
 use axum::extract::{Path, Query, State};
 use otelo_query::Signal;
-use otelo_storage::query::{MetricFilter, MetricList, MetricSeries};
+use otelo_storage::query::{MetricFilter, MetricList, MetricSeries, Resolution};
 use serde::Deserialize;
 use utoipa::IntoParams;
 
@@ -10,7 +10,8 @@ use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
 
 /// The series that have points in the range and that the query keeps, by
 /// name. The query reads `name`, `service`, `kind`, `unit`, the labels, and
-/// the resource.
+/// the resource. A range of metrics can go back 90 days, further than the
+/// logs and the spans.
 #[utoipa::path(
     get,
     path = "/api/metrics",
@@ -25,11 +26,14 @@ pub async fn metrics(
     Query(params): Query<QueryParams>,
 ) -> ApiResult<MetricList> {
     let query = parse_query(params.q.as_deref(), Signal::Metrics)?;
-    api.run_range_query(
+    let retention = api.storage.metric_retention();
+    api.run_metric_range_query(
         [params.since, params.until],
-        None,
         (params.limit, 100),
-        move |r| Ok(r.queries.metrics(&query, r.limit)?),
+        move |r| {
+            let resolution = Resolution::finest_kept_for(r.range, retention);
+            Ok(r.queries.metrics(&query, resolution, r.limit)?)
+        },
     )
     .await
 }
@@ -51,10 +55,16 @@ pub struct MetricParams {
     /// The length of a bucket, such as `1m`. One that makes 120 buckets at
     /// most when missing.
     step: Option<String>,
+    /// Which points to read: `raw`, `1m`, or `1h`. When missing, the raw
+    /// points for a range of 6 hours at most, the summaries by the minute
+    /// for one of 14 days at most, and the summaries by the hour for a longer
+    /// one, or the next of them that is still kept where the range starts.
+    resolution: Option<Resolution>,
 }
 
 /// The series of one metric, each in buckets of one step with the count, the
-/// minimum, the average, the maximum, and the last value.
+/// minimum, the average, the maximum, and the last value, the rate of a
+/// counter, and the distribution of a histogram.
 #[utoipa::path(
     get,
     path = "/api/metrics/{name}",
@@ -74,18 +84,17 @@ pub async fn metric(
 ) -> ApiResult<MetricSeries> {
     let query = parse_query(params.q.as_deref(), Signal::Metrics)?;
     let step = parse_step_ns(params.step.as_deref())?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 20),
-        move |r| {
-            let filter = MetricFilter {
-                name,
-                query,
-                step_ns: resolve_step(&r, step, 120)?,
-            };
-            Ok(r.queries.metric(&filter, r.limit)?)
-        },
-    )
+    let retention = api.storage.metric_retention();
+    api.run_metric_range_query([params.since, params.until], (params.limit, 20), move |r| {
+        let filter = MetricFilter {
+            name,
+            query,
+            step_ns: resolve_step(&r, step, 120)?,
+            resolution: params
+                .resolution
+                .unwrap_or_else(|| Resolution::finest_kept_for(r.range, retention)),
+        };
+        Ok(r.queries.metric(&filter, r.limit)?)
+    })
     .await
 }

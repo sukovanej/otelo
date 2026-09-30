@@ -13,6 +13,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use otelo_host::HostIdentity;
 use tracing_subscriber::filter::{FilterExt, filter_fn};
 use tracing_subscriber::layer::Filter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -75,6 +76,7 @@ impl Telemetry {
     pub fn start(
         destination: &Destination,
         own_receiver_addr: SocketAddr,
+        host: &HostIdentity,
     ) -> anyhow::Result<Option<Self>> {
         let base = match destination {
             Destination::Off => return Ok(None),
@@ -87,6 +89,11 @@ impl Telemetry {
                 "service.version",
                 env!("CARGO_PKG_VERSION"),
             ))
+            .with_attributes(
+                host.attributes()
+                    .into_iter()
+                    .map(|(key, value)| opentelemetry::KeyValue::new(key, value)),
+            )
             .build();
         let spans = SpanExporter::builder()
             .with_http()

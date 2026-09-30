@@ -12,13 +12,14 @@ use jiff::Timestamp;
 use otelo_query::{Query, Signal};
 use otelo_storage::query::{
     AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
-    OperationDetail, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
+    OperationDetail, Resolution, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
 };
 use otelo_storage::{Error, RangeQueries, Result, SpanId, SpanKind, TraceId};
 use rusqlite::types::Value;
 use rusqlite::{Row, ToSql};
 
 pub use compile::InvalidQuery;
+pub use metrics::{BASELINE_LOOKBACK_NS, kind_of_series};
 
 use crate::reader::timed_out;
 use crate::{Day, Reader};
@@ -144,6 +145,31 @@ impl Reader {
         Ok(())
     }
 
+    // The rollups are one file, so they need no SELECT per day.
+    pub(crate) fn scan_rollup_rows(
+        &self,
+        sql: &str,
+        filter: &WhereClause,
+        mut on_row: impl FnMut(&Row) -> anyhow::Result<bool>,
+    ) -> anyhow::Result<()> {
+        if !self.has_rollups() {
+            return Ok(());
+        }
+        let span = new_statement_span(sql);
+        let _entered = span.enter();
+        let mut stmt = self.conn().prepare(sql)?;
+        let mut rows = stmt.query(filter.params().as_slice())?;
+        let mut read = 0_i64;
+        while let Some(row) = rows.next()? {
+            read += 1;
+            if !on_row(row)? {
+                break;
+            }
+        }
+        span.record("db.response.returned_rows", read);
+        Ok(())
+    }
+
     pub(crate) fn explain_scan(
         &self,
         [head, tail]: [&str; 2],
@@ -242,8 +268,8 @@ impl RangeQueries for Reader {
         traces::read_trace(self, id, limit).map_err(classify_query_error)
     }
 
-    fn metrics(&self, query: &Query, limit: usize) -> Result<MetricList> {
-        metrics::list_metrics(self, query, limit).map_err(classify_query_error)
+    fn metrics(&self, query: &Query, resolution: Resolution, limit: usize) -> Result<MetricList> {
+        metrics::list_metrics(self, query, resolution, limit).map_err(classify_query_error)
     }
 
     fn metric(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries> {

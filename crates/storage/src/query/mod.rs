@@ -13,8 +13,8 @@ pub use calls::{
 pub use catalog::{Attribute, AttributeKeys};
 pub use logs::{GROUP_SCAN_LIMIT, LogGroup, LogGroups, LogLine, Logs};
 pub use metrics::{
-    Bucket, MAX_BUCKETS, MetricFilter, MetricList, MetricSeries, Series, SeriesInfo, default_step,
-    step_for,
+    Bucket, BucketChange, MAX_BUCKETS, MetricFilter, MetricList, MetricSeries, Resolution, Series,
+    SeriesInfo, default_step, step_for,
 };
 pub use services::{
     Latency, Operation, OperationDetail, RequestBucket, Requests, Service, ServiceBucket,

@@ -31,6 +31,24 @@ impl StateFile {
         Ok(state)
     }
 
+    pub fn size_in_bytes(&self) -> anyhow::Result<u64> {
+        // The write-ahead log and its index are part of the database.
+        ["", "-wal", "-shm"]
+            .into_iter()
+            .map(|suffix| {
+                let mut path = self.path.clone().into_os_string();
+                path.push(suffix);
+                match std::fs::metadata(&path) {
+                    Ok(metadata) => Ok(metadata.len()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+                    Err(error) => {
+                        Err(error).with_context(|| format!("read the size of {}", path.display()))
+                    }
+                }
+            })
+            .sum()
+    }
+
     fn connect(&self) -> anyhow::Result<Connection> {
         Connection::open(&self.path).with_context(|| format!("open {}", self.path.display()))
     }

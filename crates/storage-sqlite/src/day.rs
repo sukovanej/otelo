@@ -40,7 +40,8 @@ impl Day {
         let stem = name
             .strip_suffix(".sqlite")
             .or_else(|| name.strip_suffix(".sqlite-wal"))
-            .or_else(|| name.strip_suffix(".sqlite-shm"))?;
+            .or_else(|| name.strip_suffix(".sqlite-shm"))
+            .or_else(|| stem_of_a_file_set_aside(name))?;
         let date: Date = stem.parse().ok()?;
         Some(Self(i64::from(EPOCH.until(date).ok()?.get_days())))
     }
@@ -56,4 +57,11 @@ impl fmt::Display for Day {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.date().fmt(f)
     }
+}
+
+// The writer sets a day file of another schema version aside under this name, and retention
+// deletes it with its day.
+fn stem_of_a_file_set_aside(name: &str) -> Option<&str> {
+    let (stem, version) = name.split_once(".sqlite.schema-")?;
+    version.parse::<i32>().ok().map(|_| stem)
 }

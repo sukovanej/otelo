@@ -117,7 +117,7 @@ impl Builtin {
             (Self::Kind, Signal::Spans) => {
                 &["internal", "server", "client", "producer", "consumer"]
             }
-            (Self::Kind, _) => &["gauge", "sum", "histogram"],
+            (Self::Kind, _) => &["gauge", "updown", "counter", "histogram"],
             (Self::Status, _) => &["unset", "ok", "error"],
             (Self::Error | Self::Root, _) => &["true", "false"],
             _ => &[],
@@ -153,7 +153,7 @@ impl Builtin {
             (Self::Name, Signal::Metrics) => "The name of the metric.",
             (Self::Name, _) => "The name of the span, such as GET /users.",
             (Self::Kind, Signal::Metrics) => {
-                "Whether the metric is a gauge, a sum, or a histogram."
+                "Whether the metric is a gauge, an updown level, a counter, or a histogram."
             }
             (Self::Kind, _) => {
                 "The role of the span. It serves a request, makes one, or works inside the service."

@@ -109,6 +109,15 @@ fn traces_itself() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(children, ["open reader", "SELECT"]);
+    // The rollups of the metrics read the day files too, and trace none of it.
+    let outside_a_request: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM spans WHERE parent_span_id IS NULL AND name != 'GET /api/logs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(outside_a_request, 0);
     let bodies: Vec<String> = conn
         .prepare(
             "SELECT body FROM logs JOIN resources ON resources.id = resource_id
@@ -120,4 +129,67 @@ fn traces_itself() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(bodies, ["listening", "stopping"]);
+}
+
+#[test]
+fn collects_the_metrics_of_its_host_when_it_starts() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_daemon_with(dir.path(), &["--own-telemetry", "self"]);
+    let day = otelo_storage_sqlite::Day::today().file_name();
+    let path = dir.path().join("telemetry").join(day);
+    let host_metrics = "SELECT s.name, s.kind, r.attributes FROM points p
+         JOIN series s ON s.id = p.series_id
+         JOIN resources r ON r.id = s.resource_id
+         WHERE r.service = 'otelo' AND s.name IN
+             ('system.memory.limit', 'process.cpu.time', 'otelo.storage.size')
+         GROUP BY s.name ORDER BY s.name";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let rows: Vec<(String, String, String)> = loop {
+        let rows = rusqlite::Connection::open(&path)
+            .and_then(|conn| {
+                conn.prepare(host_metrics)?
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .unwrap_or_default();
+        if rows.len() == 3 {
+            break rows;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no host metrics after 10 s, only {rows:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    stop_daemon(daemon, "TERM");
+
+    let kinds: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|(name, kind, _)| (name.as_str(), kind.as_str()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("otelo.storage.size", "updown"),
+            ("process.cpu.time", "counter"),
+            ("system.memory.limit", "updown"),
+        ]
+    );
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let resources: Vec<String> = conn
+        .prepare("SELECT attributes FROM resources WHERE service = 'otelo'")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    // The collector, and the daemon's own spans and logs.
+    assert!(resources.len() >= 2, "{resources:?}");
+    for attributes in resources.iter().filter(|json| json.contains("host.")) {
+        let attributes: serde_json::Value = serde_json::from_str(attributes).unwrap();
+        assert!(attributes["os.type"].is_string(), "{attributes}");
+        assert!(attributes["host.arch"].is_string(), "{attributes}");
+    }
+    let with_host = resources.iter().filter(|json| json.contains("os.type"));
+    assert!(with_host.count() >= 2, "{resources:?}");
 }

@@ -44,27 +44,34 @@ CREATE TABLE IF NOT EXISTS spans (
 CREATE INDEX IF NOT EXISTS spans_trace_id ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS spans_start_ts ON spans (start_ts);
 
--- hash: xxh3 of the resource, the name, the kind, the unit, and the labels.
+-- hash: xxh3 of the resource, the name, the kind, the temporality, the unit,
+-- and the labels. kind is gauge, updown, counter, or histogram. temporality is
+-- cumulative or delta for a counter and a histogram, and NULL for the rest.
 CREATE TABLE IF NOT EXISTS series (
   id INTEGER PRIMARY KEY,
   hash INTEGER NOT NULL UNIQUE,
   resource_id INTEGER NOT NULL REFERENCES resources (id),
   name TEXT NOT NULL,
   kind TEXT NOT NULL,
+  temporality TEXT,
   unit TEXT NOT NULL,
   labels TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS series_name ON series (name);
 
+-- The key stores a point once and makes a batch that is sent again overwrite
+-- its rows.
 CREATE TABLE IF NOT EXISTS points (
   series_id INTEGER NOT NULL REFERENCES series (id),
   ts INTEGER NOT NULL,
+  -- The sum of a histogram point.
   value REAL NOT NULL,
-  -- The buckets of a histogram point as JSON: bounds, counts, count, sum, min,
-  -- max, and cumulative. NULL for a gauge or a sum.
-  histogram TEXT
-);
-CREATE INDEX IF NOT EXISTS points_series_ts ON points (series_id, ts);
+  -- The buckets of a histogram point as JSON: count, sum, min, max, and either
+  -- bounds and counts, or scale, zero_count, positive, and negative for an
+  -- exponential histogram. NULL for the other kinds.
+  histogram TEXT,
+  PRIMARY KEY (series_id, ts)
+) WITHOUT ROWID;
 
 -- The attribute keys the records carry, so a query can complete them. signal
 -- is logs, spans, metrics (series labels), or resource. type is the JSON type

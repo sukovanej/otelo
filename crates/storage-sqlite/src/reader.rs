@@ -8,9 +8,11 @@ use otelo_storage::{IndexedAttribute, TimeRange};
 use rusqlite::Connection;
 
 use crate::day::Day;
-use crate::writer::SCHEMA;
+use crate::rollup::ROLLUP_FILE_NAME;
+use crate::writer::create_schema;
 
-const MAX_ATTACHED_DAYS: usize = 10;
+// SQLite attaches 10 files at most, and the rollups are one of them.
+const MAX_ATTACHED_DAYS: usize = 9;
 
 const TABLES: [&str; 7] = [
     "resources",
@@ -25,6 +27,7 @@ const TABLES: [&str; 7] = [
 pub struct Reader {
     conn: Connection,
     days: Vec<Day>,
+    has_rollups: bool,
     range: TimeRange,
     indexed_attributes: BTreeSet<IndexedAttribute>,
 }
@@ -35,7 +38,7 @@ impl Reader {
         let _entered = span.enter();
         let conn = Connection::open_in_memory()?;
         // The empty main tables give the views their columns when no day file is attached.
-        conn.execute_batch(SCHEMA)?;
+        create_schema(&conn)?;
         let mut days = Vec::new();
         let mut day = Day::of(range.start_at());
         while day <= Day::of(range.end_at() - 1) {
@@ -58,6 +61,12 @@ impl Reader {
             )
             .with_context(|| format!("attach {}", path.display()))?;
         }
+        let rollups = dir.join(ROLLUP_FILE_NAME);
+        let has_rollups = rollups.is_file();
+        if has_rollups {
+            conn.execute("ATTACH DATABASE ?1 AS rollup", [rollups.to_string_lossy()])
+                .with_context(|| format!("attach {}", rollups.display()))?;
+        }
         for table in TABLES {
             let mut view =
                 format!("CREATE TEMP VIEW {table} AS SELECT NULL AS day, * FROM main.{table}");
@@ -70,6 +79,7 @@ impl Reader {
         Ok(Self {
             conn,
             days,
+            has_rollups,
             range,
             indexed_attributes: BTreeSet::new(),
         })
@@ -80,6 +90,11 @@ impl Reader {
         self.conn
             .progress_handler(1000, Some(move || Instant::now() > deadline))?;
         Ok(())
+    }
+
+    #[must_use]
+    pub const fn has_rollups(&self) -> bool {
+        self.has_rollups
     }
 
     #[must_use]

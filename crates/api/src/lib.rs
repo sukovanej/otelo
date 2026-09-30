@@ -126,9 +126,44 @@ pub(crate) struct Request {
 
 pub(crate) const WHOLE_RETENTION: Option<i64> = Some(i64::MIN);
 
+#[derive(Clone, Copy)]
+enum RetentionOf {
+    LogsAndSpans,
+    // The summaries of the metrics outlive the logs, the spans, and the raw points.
+    Metrics,
+}
+
 impl Api {
     async fn run_range_query<T: Send + 'static>(
         &self,
+        range: [Option<String>; 2],
+        default_since: Option<i64>,
+        limit: (Option<usize>, usize),
+        query: impl FnOnce(Request) -> Result<T, ApiError> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.run_query_within(
+            RetentionOf::LogsAndSpans,
+            range,
+            default_since,
+            limit,
+            query,
+        )
+        .await
+    }
+
+    async fn run_metric_range_query<T: Send + 'static>(
+        &self,
+        range: [Option<String>; 2],
+        limit: (Option<usize>, usize),
+        query: impl FnOnce(Request) -> Result<T, ApiError> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.run_query_within(RetentionOf::Metrics, range, None, limit, query)
+            .await
+    }
+
+    async fn run_query_within<T: Send + 'static>(
+        &self,
+        retention: RetentionOf,
         range: [Option<String>; 2],
         default_since: Option<i64>,
         limit: (Option<usize>, usize),
@@ -140,7 +175,7 @@ impl Api {
             let _entered = span.enter();
             let [since, until] = range;
             let range = api
-                .resolve_range(since.as_deref(), until.as_deref(), default_since)
+                .resolve_range_within(retention, since.as_deref(), until.as_deref(), default_since)
                 .map_err(|e| ApiError::bad_request(&e))?;
             let limit = check_limit(limit.0, limit.1).map_err(|e| ApiError::bad_request(&e))?;
             let queries = api.storage.open_range(range, QUERY_TIME_LIMIT)?;
@@ -161,6 +196,24 @@ impl Api {
         until: Option<&str>,
         default_since: Option<i64>,
     ) -> anyhow::Result<TimeRange> {
+        self.resolve_range_within(RetentionOf::LogsAndSpans, since, until, default_since)
+    }
+
+    pub fn resolve_metric_range(
+        &self,
+        since: Option<&str>,
+        until: Option<&str>,
+    ) -> anyhow::Result<TimeRange> {
+        self.resolve_range_within(RetentionOf::Metrics, since, until, None)
+    }
+
+    fn resolve_range_within(
+        &self,
+        retention: RetentionOf,
+        since: Option<&str>,
+        until: Option<&str>,
+        default_since: Option<i64>,
+    ) -> anyhow::Result<TimeRange> {
         let now = nanos(Timestamp::now());
         let until = until.map_or(Ok(now), |text| parse_time(text, now))?;
         let since = match since {
@@ -168,7 +221,10 @@ impl Api {
             None => default_since.unwrap_or(now - parse_duration(DEFAULT_SINCE)?),
         };
         ensure!(since < until, "since has to be before until");
-        let oldest_retained_at = self.storage.oldest_retained_at();
+        let oldest_retained_at = match retention {
+            RetentionOf::LogsAndSpans => self.storage.oldest_retained_at(),
+            RetentionOf::Metrics => self.storage.metric_retention().oldest_hour_at,
+        };
         ensure!(
             oldest_retained_at < until,
             "the range ends before the oldest telemetry otelo keeps"

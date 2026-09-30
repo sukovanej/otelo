@@ -2,10 +2,11 @@ use std::fs;
 use std::path::Path;
 
 use otelo_storage::{
-    Attributes, Batch, Inbox, Log, Metric, MetricKind, Point, Records, Resource, Sender, Severity,
-    Span, SpanEvent, SpanId, SpanKind, SpanStatus, TimeRange, TraceId, batch_channel,
+    Attributes, Batch, Buckets, ExplicitBuckets, Histogram, HistogramPoint, Inbox, Log, Metric,
+    NumberPoint, Points, Records, Resource, Sender, Severity, Span, SpanEvent, SpanId, SpanKind,
+    SpanStatus, Storage, StorageSize, Temporality, TimeRange, TraceId, batch_channel,
 };
-use otelo_storage_sqlite::{Config, Day, Reader, Writer};
+use otelo_storage_sqlite::{Config, Day, Reader, Sqlite, Writer};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
@@ -53,21 +54,29 @@ fn span(started_at: i64, name: &str) -> Span {
     }
 }
 
+fn number_points(points: &[(i64, f64)]) -> Vec<NumberPoint> {
+    points
+        .iter()
+        .map(|&(recorded_at, value)| NumberPoint { recorded_at, value })
+        .collect()
+}
+
 fn memory(points: &[(i64, f64)]) -> Metric {
     Metric {
         name: "process.memory.usage".into(),
-        kind: MetricKind::Gauge,
         unit: "By".into(),
         labels: attributes_from_json(json!({"state": "used"})),
-        points: points
-            .iter()
-            .map(|&(recorded_at, value)| Point {
-                recorded_at,
-                value,
-                histogram: None,
-            })
-            .collect(),
+        points: Points::UpDown(number_points(points)),
     }
+}
+
+fn metrics(metrics: Vec<Metric>) -> Batch {
+    vec![Records {
+        resource: api(),
+        logs: Vec::new(),
+        spans: Vec::new(),
+        metrics,
+    }]
 }
 
 fn logs(logged_at: i64, body: &str) -> Batch {
@@ -199,17 +208,19 @@ fn deletes_the_files_past_the_retention() {
     let names = [
         expired.file_name(),
         format!("{}-wal", expired.file_name()),
+        format!("{}.schema-0", expired.file_name()),
         kept.file_name(),
+        format!("{}.schema-0", kept.file_name()),
         "notes.txt".into(),
     ];
     for name in &names {
         fs::write(dir.path().join(name), "").unwrap();
     }
     write_batches(dir.path(), Vec::new());
-    for name in &names[..2] {
+    for name in &names[..3] {
         assert!(!dir.path().join(name).exists(), "{name} is still there");
     }
-    for name in &names[2..] {
+    for name in &names[3..] {
         assert!(dir.path().join(name).exists(), "{name} is gone");
     }
 }
@@ -245,4 +256,230 @@ fn a_reader_cannot_write() {
         .conn()
         .execute(&format!("DELETE FROM \"{day}\".logs"), []);
     assert!(result.is_err());
+}
+
+fn todays_reader(dir: &Path) -> Reader {
+    let start = Day::today().start();
+    Reader::open(dir, TimeRange::new(start, start + 86_400 * SECOND).unwrap()).unwrap()
+}
+
+fn count(conn: &Connection, sql: &str) -> i64 {
+    conn.query_row(sql, [], |row| row.get(0)).unwrap()
+}
+
+#[test]
+fn stores_the_kind_and_the_temporality_of_each_series() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Day::today().start();
+    let metric = |name: &str, points: Points| Metric {
+        name: name.into(),
+        unit: "1".into(),
+        labels: Attributes::new(),
+        points,
+    };
+    let one = || number_points(&[(now, 1.0)]);
+    let duration = HistogramPoint {
+        recorded_at: now,
+        histogram: Histogram {
+            count: 3,
+            sum: Some(2.5),
+            min: None,
+            max: None,
+            buckets: Buckets::Explicit(ExplicitBuckets {
+                bounds: vec![1.0],
+                counts: vec![2, 1],
+            }),
+        },
+    };
+    write_batches(
+        dir.path(),
+        vec![metrics(vec![
+            metric("queue.lag", Points::Gauge(one())),
+            metric("memory.used", Points::UpDown(one())),
+            metric(
+                "emails.sent",
+                Points::Counter(Temporality::Cumulative, one()),
+            ),
+            metric("bytes.sent", Points::Counter(Temporality::Delta, one())),
+            metric(
+                "request.duration",
+                Points::Histogram(Temporality::Delta, vec![duration]),
+            ),
+        ])],
+    );
+    let reader = todays_reader(dir.path());
+    let kinds: Vec<(String, Option<String>)> = rows(
+        reader.conn(),
+        "SELECT name || ' ' || kind, temporality FROM series
+         WHERE name NOT LIKE 'otelo.%' ORDER BY name",
+    );
+    assert_eq!(
+        kinds,
+        [
+            ("bytes.sent counter".into(), Some("delta".into())),
+            ("emails.sent counter".into(), Some("cumulative".into())),
+            ("memory.used updown".into(), None),
+            ("queue.lag gauge".into(), None),
+            ("request.duration histogram".into(), Some("delta".into())),
+        ]
+    );
+    let sums: Vec<(String, f64)> = rows(
+        reader.conn(),
+        "SELECT p.histogram ->> '$.counts', p.value FROM points p
+         JOIN series s ON s.day = p.day AND s.id = p.series_id
+         WHERE s.name = 'request.duration'",
+    );
+    assert_eq!(sums, [("[2,1]".into(), 2.5)]);
+}
+
+#[test]
+fn a_batch_written_twice_leaves_each_point_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Day::today().start();
+    write_batches(
+        dir.path(),
+        vec![
+            metrics(vec![memory(&[(now, 100.0), (now + SECOND, 200.0)])]),
+            metrics(vec![memory(&[(now, 150.0), (now + SECOND, 200.0)])]),
+        ],
+    );
+    let reader = todays_reader(dir.path());
+    let values: Vec<(String, f64)> = rows(
+        reader.conn(),
+        "SELECT s.name, p.value FROM points p
+         JOIN series s ON s.day = p.day AND s.id = p.series_id
+         WHERE s.name = 'process.memory.usage' ORDER BY p.ts",
+    );
+    let name = || String::from("process.memory.usage");
+    assert_eq!(values, [(name(), 150.0), (name(), 200.0)]);
+}
+
+#[test]
+fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Day::today().start();
+    let cart_adds_of_user = |user: i64, recorded_at: i64| Metric {
+        name: "cart.adds".into(),
+        unit: "{item}".into(),
+        labels: attributes_from_json(json!({"user.id": user})),
+        points: Points::Gauge(number_points(&[(recorded_at, 1.0)])),
+    };
+    write_batches(
+        dir.path(),
+        vec![
+            metrics((0..1001).map(|user| cart_adds_of_user(user, now)).collect()),
+            metrics(vec![
+                cart_adds_of_user(0, now + SECOND),
+                cart_adds_of_user(2000, now + SECOND),
+                memory(&[(now, 1.0)]),
+            ]),
+        ],
+    );
+    let reader = todays_reader(dir.path());
+    let conn = reader.conn();
+    let of_cart_adds = "JOIN series s ON s.day = p.day AND s.id = p.series_id
+                        WHERE s.name = 'cart.adds'";
+    assert_eq!(
+        count(conn, "SELECT count(*) FROM series WHERE name = 'cart.adds'"),
+        1000
+    );
+    // A series from before the cap still takes points.
+    assert_eq!(
+        count(
+            conn,
+            &format!("SELECT count(*) FROM points p {of_cart_adds}")
+        ),
+        1001
+    );
+    assert_eq!(
+        count(
+            conn,
+            "SELECT count(*) FROM series WHERE name = 'process.memory.usage'"
+        ),
+        1
+    );
+    let rejected: Vec<(String, f64)> = rows(
+        conn,
+        "SELECT s.kind || ' ' || s.unit, p.value FROM points p
+         JOIN series s ON s.day = p.day AND s.id = p.series_id
+         WHERE s.name = 'otelo.telemetry.rejected_points'",
+    );
+    assert_eq!(rejected, [("counter {point}".into(), 2.0)]);
+}
+
+#[test]
+fn sets_aside_a_day_file_of_another_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let today = Day::today();
+    let path = dir.path().join(today.file_name());
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE points (series_id INTEGER, ts INTEGER, value REAL, histogram TEXT);
+             INSERT INTO points VALUES (1, 2, 3.0, NULL);",
+        )
+        .unwrap();
+    write_batches(
+        dir.path(),
+        vec![metrics(vec![memory(&[(today.start(), 100.0)])])],
+    );
+
+    let aside = dir.path().join(format!("{}.schema-0", today.file_name()));
+    let old = Connection::open(&aside).unwrap();
+    assert_eq!(
+        count(&old, "SELECT count(*) FROM points WHERE value = 3.0"),
+        1
+    );
+    let new = Connection::open(&path).unwrap();
+    assert_eq!(count(&new, "PRAGMA user_version"), 1);
+    let reader = todays_reader(dir.path());
+    assert_eq!(
+        count(
+            reader.conn(),
+            "SELECT count(*) FROM points p
+             JOIN series s ON s.day = p.day AND s.id = p.series_id
+             WHERE s.name = 'process.memory.usage' AND p.value = 100.0"
+        ),
+        1
+    );
+}
+
+#[test]
+fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Sqlite::open(dir.path()).unwrap();
+    let state_bytes = fs::metadata(dir.path().join("state.sqlite")).unwrap().len();
+    assert!(state_bytes > 0);
+    assert_eq!(
+        storage.size().unwrap(),
+        StorageSize {
+            telemetry_bytes: 0,
+            rollup_bytes: 0,
+            state_bytes,
+        }
+    );
+
+    let telemetry = dir.path().join("telemetry");
+    fs::create_dir_all(&telemetry).unwrap();
+    let day = Day::today().file_name();
+    for (name, bytes) in [
+        (day.clone(), 4096),
+        (format!("{day}-wal"), 512),
+        (format!("{day}-shm"), 32),
+        (format!("{day}.schema-0"), 100),
+        ("metrics-rollup.sqlite".into(), 2048),
+        ("metrics-rollup.sqlite-wal".into(), 64),
+    ] {
+        fs::write(telemetry.join(name), vec![0; bytes]).unwrap();
+    }
+    fs::write(dir.path().join("state.sqlite-wal"), [0; 7]).unwrap();
+    assert_eq!(
+        storage.size().unwrap(),
+        StorageSize {
+            telemetry_bytes: 4096 + 512 + 32 + 100,
+            rollup_bytes: 2048 + 64,
+            state_bytes: state_bytes + 7,
+        }
+    );
 }
