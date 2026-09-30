@@ -1,4 +1,4 @@
-use otelo_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo};
+use otelo_query::{Builtin, Catalog, Field, FieldValues, KeyInfo, Signal, Value, ValueInfo};
 use otelo_storage::AttributeValue;
 use otelo_storage::query::{Attribute, AttributeKeys};
 
@@ -25,7 +25,7 @@ impl Reader {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    fn read_catalog_values(&self, group: &str, key: &str) -> anyhow::Result<Vec<ValueInfo>> {
+    fn read_catalog_values(&self, group: &str, key: &str) -> anyhow::Result<FieldValues> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT value, sum(count) FROM attribute_values WHERE signal = ?1 AND key = ?2
              GROUP BY value ORDER BY 2 DESC, value LIMIT {MAX_CATALOG_ROWS}"
@@ -48,13 +48,23 @@ impl Reader {
                 count: count.cast_unsigned(),
             });
         }
-        Ok(values)
+        let many_values = self.conn().query_row(
+            "SELECT coalesce(max(many_values), 0) FROM attribute_keys
+             WHERE signal = ?1 AND key = ?2",
+            [group, key],
+            |row| row.get(0),
+        )?;
+        Ok(FieldValues {
+            listed: values,
+            many_values,
+        })
     }
 
-    fn read_column_values(&self, table: &str, column: &str) -> anyhow::Result<Vec<ValueInfo>> {
+    fn read_column_values(&self, table: &str, column: &str) -> anyhow::Result<FieldValues> {
         let mut stmt = self.conn().prepare(&format!(
             "SELECT {column}, count(*) FROM {table}
-             GROUP BY {column} ORDER BY 2 DESC, 1 LIMIT {MAX_CATALOG_ROWS}"
+             GROUP BY {column} ORDER BY 2 DESC, 1 LIMIT {}",
+            MAX_CATALOG_ROWS + 1
         ))?;
         let rows = stmt.query_map([], |row| {
             Ok(ValueInfo {
@@ -62,14 +72,20 @@ impl Reader {
                 count: row.get::<_, i64>(1)?.cast_unsigned(),
             })
         })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        let mut listed: Vec<ValueInfo> = rows.collect::<Result<_, _>>()?;
+        let many_values = listed.len() > MAX_CATALOG_ROWS;
+        listed.truncate(MAX_CATALOG_ROWS);
+        Ok(FieldValues {
+            listed,
+            many_values,
+        })
     }
 }
 
-fn values_or_warn<T>(result: anyhow::Result<Vec<T>>) -> Vec<T> {
+fn read_or_warn<T: Default>(result: anyhow::Result<T>) -> T {
     result.unwrap_or_else(|error| {
         tracing::warn!("read the attribute catalog: {error:#}");
-        Vec::new()
+        T::default()
     })
 }
 
@@ -80,11 +96,11 @@ impl Catalog for Reader {
         } else {
             signal.as_str()
         };
-        values_or_warn(self.read_catalog_keys(group))
+        read_or_warn(self.read_catalog_keys(group))
     }
 
-    fn values(&self, signal: Signal, field: &Field) -> Vec<ValueInfo> {
-        values_or_warn(match field {
+    fn values(&self, signal: Signal, field: &Field) -> FieldValues {
+        read_or_warn(match field {
             Field::Attribute(key) => self.read_catalog_values(signal.as_str(), key),
             Field::Resource(key) => self.read_catalog_values("resource", key),
             Field::Builtin(Builtin::Service) => self.read_column_values("resources", "service"),
@@ -93,7 +109,7 @@ impl Catalog for Reader {
             }
             Field::Builtin(Builtin::Name) => self.read_column_values("series", "name"),
             Field::Builtin(Builtin::Unit) => self.read_column_values("series", "unit"),
-            Field::Builtin(_) => Ok(Vec::new()),
+            Field::Builtin(_) => Ok(FieldValues::default()),
         })
     }
 }

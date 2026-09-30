@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
-use otelo_query::{Signal, complete, parse};
+use otelo_query::{FieldOrigin, MAX_HELP_VALUES, Signal, complete, parse};
 use otelo_storage::query::{MetricFilter, SqlValue, default_step};
 use otelo_storage::{
     AttributeValue, Attributes, Batch, Error, IndexedAttribute, IndexedSignal, Log, Metric,
@@ -491,6 +491,7 @@ fn the_catalog_knows_the_attributes_and_their_values() {
 
     let at = |signal: Signal, input: &str| -> Vec<String> {
         complete(input, input.len(), signal, &reader)
+            .suggestions
             .into_iter()
             .map(|s| s.text)
             .collect()
@@ -515,6 +516,20 @@ fn the_catalog_knows_the_attributes_and_their_values() {
         at(Signal::Metrics, "name = p"),
         [r#""process.memory.usage""#]
     );
+
+    let route = complete("http.route", 10, Signal::Logs, &reader)
+        .field_at_cursor
+        .unwrap();
+    assert_eq!(route.type_name, "string");
+    assert_eq!(route.origin, FieldOrigin::Attribute { record_count: 5 });
+    let values: Vec<&str> = route
+        .most_common_values
+        .iter()
+        .map(|value| value.text.as_str())
+        .collect();
+    assert_eq!(values, [r#""/login""#, r#""/matches""#, r#""/languages""#]);
+    assert_eq!(route.distinct_value_count, 3);
+    assert!(!route.many_values);
 }
 
 #[test]
@@ -750,4 +765,34 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
         row("SELECT count FROM attribute_values WHERE key = 'user.id' AND value = '3'"),
         [vec![SqlValue::Integer(2)]]
     );
+    let user = complete("user.id", 7, Signal::Logs, &reader)
+        .field_at_cursor
+        .unwrap();
+    assert_eq!(user.distinct_value_count, 200);
+    assert_eq!(user.most_common_values.len(), MAX_HELP_VALUES);
+    assert!(user.many_values);
+}
+
+#[test]
+fn the_catalog_marks_a_key_with_a_value_too_long_to_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Day::today().start() + SECOND;
+    let mut api = records("api", &json!({"service.name": "api"}));
+    api.logs = vec![
+        log(t, Severity::INFO, "asked", &json!({"question": "short"})),
+        log(
+            t,
+            Severity::INFO,
+            "asked",
+            &json!({"question": "long ".repeat(30)}),
+        ),
+    ];
+    write(dir.path(), vec![api], &Indexes::default());
+    let reader = Reader::open(dir.path(), TimeRange::new(t, t + SECOND).unwrap()).unwrap();
+
+    let question = complete("question", 8, Signal::Logs, &reader)
+        .field_at_cursor
+        .unwrap();
+    assert_eq!(question.distinct_value_count, 1);
+    assert!(question.many_values);
 }

@@ -29,7 +29,9 @@ use utoipa_axum::routes;
 use crate::error::{ApiError, ApiResult};
 use crate::time::check_limit;
 
-pub use catalog::{CompletionKind, Completions, SignalName, SuggestionBody};
+pub use catalog::{
+    CompletionKind, Completions, FieldBody, FieldSource, FieldValueBody, SignalName, SuggestionBody,
+};
 pub use error::ErrorBody;
 pub use indexes::{IndexBody, IndexList};
 pub use sql::SqlRequest;

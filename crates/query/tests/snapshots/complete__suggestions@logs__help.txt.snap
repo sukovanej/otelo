@@ -1,0 +1,74 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/logs/help.txt
+---
+> level|
+level                          field    built-in, string   replaces "level" at 0..5
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal
+
+> level >= |
+trace                          value                       replaces "" at 9..9
+debug                          value                       replaces "" at 9..9
+info                           value                       replaces "" at 9..9
+warn                           value                       replaces "" at 9..9
+error                          value                       replaces "" at 9..9
+fatal                          value                       replaces "" at 9..9
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal
+
+> http.route|
+http.route                     field    string, 90         replaces "http.route" at 0..10
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
+
+> http.route = "/m|
+"/matches"                     value    50                 replaces "\"/m" at 13..16
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
+
+> user.id in (7, |
+7                              value    30                 replaces "" at 15..15
+"8"                            value    10                 replaces "" at 15..15
+field user.id: mixed, attribute of 40 records
+  2+ values: 7 in 30, "8" in 10
+
+> resource.host.name|
+resource.host.name             field    string, 3          replaces "resource.host.name" at 0..18
+field resource.host.name: string, attribute of 3 resources
+  1 values: "droplet" in 3
+
+> has(http.response.status_code|
+http.response.status_code      field    int, 80            replaces "http.response.status_code" at 4..29
+field http.response.status_code: int, attribute of 80 records
+  2 values: 200 in 70, 500 in 10
+
+> attr.level|
+attr.level                     field    string, 2          replaces "attr.level" at 0..10
+field attr.level: string, attribute of 2 records
+  0 values: 
+
+> `odd key` |
+=                              operator                    replaces "" at 10..10
+!=                             operator                    replaces "" at 10..10
+<                              operator                    replaces "" at 10..10
+<=                             operator                    replaces "" at 10..10
+>                              operator                    replaces "" at 10..10
+>=                             operator                    replaces "" at 10..10
+~                              operator                    replaces "" at 10..10
+in                             operator                    replaces "" at 10..10
+field `odd key`: string, attribute of 1 records
+  0 values: 
+
+> http.r|
+http.route                     field    string, 90         replaces "http.r" at 0..6
+http.response.status_code      field    int, 80            replaces "http.r" at 0..6
+
+> missing = |
+(none)
+
+> body ~ "x" and service|
+service                        field    built-in, string   replaces "service" at 15..22
+field service: string, built-in: The service that sent it, taken from service.name of its resource.
+  2 values: "mudro" in 9, "caddy" in 2

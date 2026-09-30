@@ -4,69 +4,85 @@ expression: out
 input_file: crates/query/tests/complete/spans/fields.txt
 ---
 > |
-service                        field    built-in     replaces "" at 0..0
-name                           field    built-in     replaces "" at 0..0
-kind                           field    built-in     replaces "" at 0..0
-status                         field    built-in     replaces "" at 0..0
-error                          field    built-in     replaces "" at 0..0
-duration                       field    built-in     replaces "" at 0..0
-root                           field    built-in     replaces "" at 0..0
-trace_id                       field    built-in     replaces "" at 0..0
-span_id                        field    built-in     replaces "" at 0..0
-http.route                     field    string, 90   replaces "" at 0..0
-http.response.status_code      field    int, 80      replaces "" at 0..0
-user.id                        field    mixed, 40    replaces "" at 0..0
-attr.level                     field    string, 2    replaces "" at 0..0
-`odd key`                      field    string, 1    replaces "" at 0..0
-resource.service.name          field    string, 4    replaces "" at 0..0
-resource.host.name             field    string, 3    replaces "" at 0..0
-not                            keyword               replaces "" at 0..0
-has(                           keyword               replaces "" at 0..0
-(                              keyword               replaces "" at 0..0
+service                        field    built-in, string   replaces "" at 0..0
+name                           field    built-in, string   replaces "" at 0..0
+kind                           field    built-in, string   replaces "" at 0..0
+status                         field    built-in, string   replaces "" at 0..0
+error                          field    built-in, bool     replaces "" at 0..0
+duration                       field    built-in, duration replaces "" at 0..0
+root                           field    built-in, bool     replaces "" at 0..0
+trace_id                       field    built-in, string   replaces "" at 0..0
+span_id                        field    built-in, string   replaces "" at 0..0
+http.route                     field    string, 90         replaces "" at 0..0
+http.response.status_code      field    int, 80            replaces "" at 0..0
+user.id                        field    mixed, 40          replaces "" at 0..0
+attr.level                     field    string, 2          replaces "" at 0..0
+`odd key`                      field    string, 1          replaces "" at 0..0
+resource.service.name          field    string, 4          replaces "" at 0..0
+resource.host.name             field    string, 3          replaces "" at 0..0
+not                            keyword                     replaces "" at 0..0
+has(                           keyword                     replaces "" at 0..0
+(                              keyword                     replaces "" at 0..0
 
 > name = |
-"GET /languages"               value    20           replaces "" at 7..7
-"POST /matches"                value    5            replaces "" at 7..7
+"GET /languages"               value    20                 replaces "" at 7..7
+"POST /matches"                value    5                  replaces "" at 7..7
+field name: string, built-in: The name of the span, such as GET /users.
+  2 values: "GET /languages" in 20, "POST /matches" in 5
 
 > kind = |
-internal                       value                 replaces "" at 7..7
-server                         value                 replaces "" at 7..7
-client                         value                 replaces "" at 7..7
-producer                       value                 replaces "" at 7..7
-consumer                       value                 replaces "" at 7..7
+internal                       value                       replaces "" at 7..7
+server                         value                       replaces "" at 7..7
+client                         value                       replaces "" at 7..7
+producer                       value                       replaces "" at 7..7
+consumer                       value                       replaces "" at 7..7
+field kind: string, built-in: The role of the span. It serves a request, makes one, or works inside the service.
+  5 values: internal, server, client, producer, consumer
 
 > status = e|
-error                          value                 replaces "e" at 9..10
+error                          value                       replaces "e" at 9..10
+field status: string, built-in: How the span ended. Most spans leave it unset.
+  3 values: unset, ok, error
 
 > error = |
-true                           value                 replaces "" at 8..8
-false                          value                 replaces "" at 8..8
+true                           value                       replaces "" at 8..8
+false                          value                       replaces "" at 8..8
+field error: bool, built-in: Whether the span failed, which means its status is error.
+  2 values: true, false
 
 > duration |
-=                              operator              replaces "" at 9..9
-!=                             operator              replaces "" at 9..9
-<                              operator              replaces "" at 9..9
-<=                             operator              replaces "" at 9..9
->                              operator              replaces "" at 9..9
->=                             operator              replaces "" at 9..9
-in                             operator              replaces "" at 9..9
+=                              operator                    replaces "" at 9..9
+!=                             operator                    replaces "" at 9..9
+<                              operator                    replaces "" at 9..9
+<=                             operator                    replaces "" at 9..9
+>                              operator                    replaces "" at 9..9
+>=                             operator                    replaces "" at 9..9
+in                             operator                    replaces "" at 9..9
+field duration: duration, built-in: How long the span took. It takes a unit, such as duration > 250ms, and a number without one is nanoseconds.
+  0 values: 
 
 > root = t|
-true                           value                 replaces "t" at 7..8
+true                           value                       replaces "t" at 7..8
+field root: bool, built-in: Whether the span starts its trace, which means it has no parent.
+  2 values: true, false
 
 > kind = s|
-server                         value                 replaces "s" at 7..8
+server                         value                       replaces "s" at 7..8
+field kind: string, built-in: The role of the span. It serves a request, makes one, or works inside the service.
+  5 values: internal, server, client, producer, consumer
 
 > error |
-=                              operator              replaces "" at 6..6
-!=                             operator              replaces "" at 6..6
-in                             operator              replaces "" at 6..6
+=                              operator                    replaces "" at 6..6
+!=                             operator                    replaces "" at 6..6
+in                             operator                    replaces "" at 6..6
+field error: bool, built-in: Whether the span failed, which means its status is error.
+  2 values: true, false
 
 > has(|
-http.route                     field    string, 90   replaces "" at 4..4
-http.response.status_code      field    int, 80      replaces "" at 4..4
-user.id                        field    mixed, 40    replaces "" at 4..4
-attr.level                     field    string, 2    replaces "" at 4..4
-`odd key`                      field    string, 1    replaces "" at 4..4
-resource.service.name          field    string, 4    replaces "" at 4..4
-resource.host.name             field    string, 3    replaces "" at 4..4
+http.route                     field    string, 90         replaces "" at 4..4
+http.response.status_code      field    int, 80            replaces "" at 4..4
+user.id                        field    mixed, 40          replaces "" at 4..4
+attr.level                     field    string, 2          replaces "" at 4..4
+`odd key`                      field    string, 1          replaces "" at 4..4
+resource.service.name          field    string, 4          replaces "" at 4..4
+resource.host.name             field    string, 3          replaces "" at 4..4

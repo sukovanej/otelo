@@ -18,6 +18,9 @@ export type CompletionKind = Schemas["CompletionKind"];
 export type Completions = Schemas["Completions"];
 export type Distribution = Schemas["Distribution"];
 export type ErrorBody = Schemas["ErrorBody"];
+export type FieldBody = Schemas["FieldBody"];
+export type FieldSource = Schemas["FieldSource"];
+export type FieldValueBody = Schemas["FieldValueBody"];
 export type IndexBody = Schemas["IndexBody"];
 export type IndexList = Schemas["IndexList"];
 export type Latency = Schemas["Latency"];
@@ -190,13 +193,14 @@ export const getCall = (
     signal,
   );
 
-/** What can go at `cursor`, in characters, of the query `q`. */
+/** What can go at `cursor`, in characters, of the query `q`, and the field
+ * of the term the cursor is in. */
 export const complete = (kind: Signal, q: string, cursor: number, signal?: AbortSignal) =>
   request<Ok<"/api/complete", "get">>(
     "GET",
     `/api/complete${search({ signal: kind, q, cursor })}`,
     signal,
-  ).then((body) => body.suggestions);
+  );
 
 export const addIndex = (kind: Signal, key: string) =>
   request<Ok<"/api/indexes/{signal}/{key}", "put">>(

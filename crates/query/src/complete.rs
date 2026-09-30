@@ -6,11 +6,13 @@ use crate::{Builtin, Field, Op, Signal, Value, quote};
 
 const MAX_SUGGESTIONS: usize = 50;
 
+pub const MAX_HELP_VALUES: usize = 10;
+
 pub trait Catalog {
     // Both lists come most common first, since completion keeps only the first MAX_SUGGESTIONS.
     fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo>;
 
-    fn values(&self, signal: Signal, field: &Field) -> Vec<ValueInfo>;
+    fn values(&self, signal: Signal, field: &Field) -> FieldValues;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +28,13 @@ pub struct ValueInfo {
     pub count: u64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FieldValues {
+    pub listed: Vec<ValueInfo>,
+    // The field has more distinct values than the catalog lists.
+    pub many_values: bool,
+}
+
 pub struct NoCatalog;
 
 impl Catalog for NoCatalog {
@@ -33,8 +42,8 @@ impl Catalog for NoCatalog {
         Vec::new()
     }
 
-    fn values(&self, _: Signal, _: &Field) -> Vec<ValueInfo> {
-        Vec::new()
+    fn values(&self, _: Signal, _: &Field) -> FieldValues {
+        FieldValues::default()
     }
 }
 
@@ -66,6 +75,36 @@ pub struct Suggestion {
     pub detail: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Completion {
+    pub suggestions: Vec<Suggestion>,
+    pub field_at_cursor: Option<FieldHelp>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldHelp {
+    pub name: String,
+    pub type_name: String,
+    pub origin: FieldOrigin,
+    pub most_common_values: Vec<HelpValue>,
+    pub distinct_value_count: usize,
+    pub many_values: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FieldOrigin {
+    Builtin { description: &'static str },
+    Attribute { record_count: u64 },
+    Resource { resource_count: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HelpValue {
+    pub text: String,
+    // The fixed values of a built-in field are not counted.
+    pub record_count: Option<u64>,
+}
+
 #[derive(Clone, Debug)]
 enum ExpectedNext {
     Term,
@@ -81,12 +120,7 @@ enum ExpectedNext {
 }
 
 #[must_use]
-pub fn complete(
-    input: &str,
-    cursor: usize,
-    signal: Signal,
-    catalog: &dyn Catalog,
-) -> Vec<Suggestion> {
+pub fn complete(input: &str, cursor: usize, signal: Signal, catalog: &dyn Catalog) -> Completion {
     let cursor = floor_char_boundary(input, cursor);
     let tokens = lex_tokens(&input[..cursor]);
     let (tokens_before_word, word_at_cursor) = match tokens.last() {
@@ -96,7 +130,16 @@ pub fn complete(
         _ => (&tokens[..], None),
     };
     let Some((expect, open_parens)) = expected_after_tokens(tokens_before_word, signal) else {
-        return Vec::new();
+        return Completion::default();
+    };
+    let field_at_cursor = field_of_term_at_cursor(&expect, word_at_cursor, signal);
+    let known_field = field_at_cursor
+        .as_ref()
+        .and_then(|field| find_known_field(field, signal, catalog));
+    let completes_value = matches!(expect, ExpectedNext::Value(_) | ExpectedNext::InValue(_));
+    let values = match &field_at_cursor {
+        Some(field) if completes_value || known_field.is_some() => catalog.values(signal, field),
+        _ => FieldValues::default(),
     };
     let replace = word_at_cursor.map_or(cursor..cursor, |token| {
         // Also replace the part after the cursor, such as the rest of a string and its closing quote.
@@ -124,7 +167,7 @@ pub fn complete(
         }
         ExpectedNext::Operator(field) => out.push_operators(&field),
         ExpectedNext::Value(field) | ExpectedNext::InValue(field) => {
-            out.push_values(signal, &field, catalog);
+            out.push_values(signal, &field, &values.listed);
         }
         ExpectedNext::InOpen | ExpectedNext::HasOpen => out.push_keyword("("),
         ExpectedNext::InNext => {
@@ -146,7 +189,111 @@ pub fn complete(
         }
     }
     out.suggestions.truncate(MAX_SUGGESTIONS);
-    out.suggestions
+    Completion {
+        suggestions: out.suggestions,
+        field_at_cursor: field_at_cursor
+            .zip(known_field)
+            .map(|(field, (type_name, origin))| {
+                describe_field(&field, type_name, origin, signal, &values)
+            }),
+    }
+}
+
+fn field_of_term_at_cursor(
+    expect: &ExpectedNext,
+    word_at_cursor: Option<&Token>,
+    signal: Signal,
+) -> Option<Field> {
+    match expect {
+        ExpectedNext::Operator(field)
+        | ExpectedNext::Value(field)
+        | ExpectedNext::InValue(field) => Some(field.clone()),
+        ExpectedNext::Term | ExpectedNext::AfterTerm | ExpectedNext::HasField => {
+            match &word_at_cursor?.tok {
+                Tok::Word(word) if !is_keyword(word) => Some(resolve_field(signal, word)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn find_known_field(
+    field: &Field,
+    signal: Signal,
+    catalog: &dyn Catalog,
+) -> Option<(String, FieldOrigin)> {
+    let find_key = |wanted: &str, resource: bool| {
+        catalog
+            .keys(signal, resource)
+            .into_iter()
+            .find(|info| info.key == wanted)
+    };
+    match field {
+        Field::Builtin(builtin) => Some((
+            builtin.type_name().to_owned(),
+            FieldOrigin::Builtin {
+                description: builtin.description(signal),
+            },
+        )),
+        Field::Attribute(key) => find_key(key, false).map(|info| {
+            (
+                info.kind,
+                FieldOrigin::Attribute {
+                    record_count: info.count,
+                },
+            )
+        }),
+        Field::Resource(key) => find_key(key, true).map(|info| {
+            (
+                info.kind,
+                FieldOrigin::Resource {
+                    resource_count: info.count,
+                },
+            )
+        }),
+    }
+}
+
+fn describe_field(
+    field: &Field,
+    type_name: String,
+    origin: FieldOrigin,
+    signal: Signal,
+    values: &FieldValues,
+) -> FieldHelp {
+    let fixed_values = match field {
+        Field::Builtin(builtin) => builtin.values(signal),
+        _ => &[],
+    };
+    let mut all_values: Vec<HelpValue> = fixed_values
+        .iter()
+        .map(|value| HelpValue {
+            text: (*value).to_owned(),
+            record_count: None,
+        })
+        .collect();
+    all_values.extend(values.listed.iter().map(|info| HelpValue {
+        text: value_as_written(&info.value),
+        record_count: Some(info.count),
+    }));
+    let distinct_value_count = all_values.len();
+    all_values.truncate(MAX_HELP_VALUES);
+    FieldHelp {
+        name: field.to_string(),
+        type_name,
+        origin,
+        most_common_values: all_values,
+        distinct_value_count,
+        many_values: values.many_values,
+    }
+}
+
+fn value_as_written(value: &Value) -> String {
+    match value {
+        Value::String(text) => quote(text),
+        value => value.to_string(),
+    }
 }
 
 const fn can_extend_token(tok: &Tok) -> bool {
@@ -304,7 +451,7 @@ impl Out {
                 self.push(
                     builtin.name().into(),
                     SuggestionKind::Field,
-                    Some("built-in".into()),
+                    Some(format!("built-in, {}", builtin.type_name())),
                 );
             }
         }
@@ -347,7 +494,7 @@ impl Out {
         self.push("in".into(), SuggestionKind::Operator, None);
     }
 
-    fn push_values(&mut self, signal: Signal, field: &Field, catalog: &dyn Catalog) {
+    fn push_values(&mut self, signal: Signal, field: &Field, listed_values: &[ValueInfo]) {
         if let Field::Builtin(builtin) = field {
             for value in builtin.values(signal) {
                 self.push((*value).into(), SuggestionKind::Value, None);
@@ -356,11 +503,8 @@ impl Out {
                 return;
             }
         }
-        for info in catalog.values(signal, field) {
-            let text = match &info.value {
-                Value::String(text) => quote(text),
-                value => value.to_string(),
-            };
+        for info in listed_values {
+            let text = value_as_written(&info.value);
             let unquoted_text = match &info.value {
                 Value::String(text) => text.to_lowercase(),
                 _ => text.to_lowercase(),

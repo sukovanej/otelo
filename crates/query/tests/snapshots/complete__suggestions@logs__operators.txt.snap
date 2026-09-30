@@ -4,37 +4,47 @@ expression: out
 input_file: crates/query/tests/complete/logs/operators.txt
 ---
 > http.route |
-=                              operator              replaces "" at 11..11
-!=                             operator              replaces "" at 11..11
-<                              operator              replaces "" at 11..11
-<=                             operator              replaces "" at 11..11
->                              operator              replaces "" at 11..11
->=                             operator              replaces "" at 11..11
-~                              operator              replaces "" at 11..11
-in                             operator              replaces "" at 11..11
+=                              operator                    replaces "" at 11..11
+!=                             operator                    replaces "" at 11..11
+<                              operator                    replaces "" at 11..11
+<=                             operator                    replaces "" at 11..11
+>                              operator                    replaces "" at 11..11
+>=                             operator                    replaces "" at 11..11
+~                              operator                    replaces "" at 11..11
+in                             operator                    replaces "" at 11..11
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
 
 > level |
-=                              operator              replaces "" at 6..6
-!=                             operator              replaces "" at 6..6
-<                              operator              replaces "" at 6..6
-<=                             operator              replaces "" at 6..6
->                              operator              replaces "" at 6..6
->=                             operator              replaces "" at 6..6
-in                             operator              replaces "" at 6..6
+=                              operator                    replaces "" at 6..6
+!=                             operator                    replaces "" at 6..6
+<                              operator                    replaces "" at 6..6
+<=                             operator                    replaces "" at 6..6
+>                              operator                    replaces "" at 6..6
+>=                             operator                    replaces "" at 6..6
+in                             operator                    replaces "" at 6..6
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal
 
 > body |
-=                              operator              replaces "" at 5..5
-!=                             operator              replaces "" at 5..5
-~                              operator              replaces "" at 5..5
-in                             operator              replaces "" at 5..5
+=                              operator                    replaces "" at 5..5
+!=                             operator                    replaces "" at 5..5
+~                              operator                    replaces "" at 5..5
+in                             operator                    replaces "" at 5..5
+field body: string, built-in: The message of the log line. body ~ "words" finds the lines that have every word.
+  0 values: 
 
 > service |
-=                              operator              replaces "" at 8..8
-!=                             operator              replaces "" at 8..8
-~                              operator              replaces "" at 8..8
-in                             operator              replaces "" at 8..8
+=                              operator                    replaces "" at 8..8
+!=                             operator                    replaces "" at 8..8
+~                              operator                    replaces "" at 8..8
+in                             operator                    replaces "" at 8..8
+field service: string, built-in: The service that sent it, taken from service.name of its resource.
+  2 values: "mudro" in 9, "caddy" in 2
 
 > trace_id |
-=                              operator              replaces "" at 9..9
-!=                             operator              replaces "" at 9..9
-in                             operator              replaces "" at 9..9
+=                              operator                    replaces "" at 9..9
+!=                             operator                    replaces "" at 9..9
+in                             operator                    replaces "" at 9..9
+field trace_id: string, built-in: The trace the log line belongs to, as hex digits.
+  0 values:

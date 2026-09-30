@@ -5,6 +5,8 @@ import { Button, Callout, QueryInput, RangePicker, Tabs } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
 import { pageContent } from "./classes";
+import { fieldHelp } from "./FieldCard";
+import { highlight } from "./highlight";
 import type { List, ListResult } from "./list";
 import PageBar, { LiveToggle } from "./PageBar";
 
@@ -35,7 +37,11 @@ export function QueryBar<V extends string, R extends ListResult<V>>(props: {
         >
           <QueryInput
             value={list().draft()}
-            complete={(text, cursor, signal) => complete(props.signal, text, cursor, signal)}
+            highlight={highlight}
+            complete={(text, cursor, signal) =>
+              complete(props.signal, text, cursor, signal).then((body) => body.suggestions)
+            }
+            help={(q, token, signal) => fieldHelp(props.signal, q, token, signal)}
             onInput={(q) => list().setDraft(q)}
             onSubmit={() => list().run()}
             placeholder={props.placeholder}

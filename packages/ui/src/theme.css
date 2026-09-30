@@ -31,6 +31,12 @@
   --color-error-soft: #fdecec;
   --color-hint: #fff7e0;
   --color-bar: #dbe6fb;
+  /* The colors of a query in the query input: its keywords, and its values
+     by their type. Its fields are `ink`, and its operators `muted`. */
+  --color-syntax-keyword: #7a4fcf;
+  --color-syntax-string: #1b7f4d;
+  --color-syntax-number: #a8590a;
+  --color-syntax-boolean: #1a66c2;
 
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -112,6 +118,10 @@
       --color-error-soft: #3a1d20;
       --color-hint: #332b15;
       --color-bar: #253552;
+      --color-syntax-keyword: #b79cf2;
+      --color-syntax-string: #5fc98d;
+      --color-syntax-number: #e2a458;
+      --color-syntax-boolean: #74b0f4;
       --color-series-1: #3987e5;
       --color-series-2: #d95926;
       --color-series-3: #199e70;

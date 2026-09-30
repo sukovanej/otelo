@@ -1,0 +1,12 @@
+level|
+level >= |
+http.route|
+http.route = "/m|
+user.id in (7, |
+resource.host.name|
+has(http.response.status_code|
+attr.level|
+`odd key` |
+http.r|
+missing = |
+body ~ "x" and service|
