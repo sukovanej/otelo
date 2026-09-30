@@ -1,5 +1,5 @@
 ---
-status: backlog
+status: in_progress
 created: 2026-09-30T15:35:51Z
 ---
 # Write the SQL standards as a skill
