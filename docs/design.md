@@ -19,7 +19,7 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 ## Parts of the daemon
 
 - OTLP receiver on 4317 (gRPC) and 4318 (HTTP) for logs, traces, and metrics.
-- Host collector: CPU, memory, swap, load, disk, network, through the `sysinfo` crate on both platforms ([[../tasks/00007-collect-host-and-service-metrics.md]]).
+- Host collector: every 15 seconds, the CPU, load, memory, swap, disks, and network of the machine, the CPU and memory of every service the service manager runs, and the CPU, memory, and data size of otelo itself ([[../tasks/00007-collect-host-and-service-metrics.md]]). It needs no configuration. [[./telemetry.md]] lists the metrics, and [[./platforms.md]] says where each number comes from.
 - The daemon's own telemetry, which it sends to its own receiver under the service `otelo`.
 - Query API over HTTP, which the CLI and the UI both read. [[./telemetry.md]] has the queries.
 - UI: a SolidJS SPA, built with Vite, in a pnpm workspace under `packages/`: `app` is the SPA, `ui` its components, its Tailwind v4 theme of colors and type, and its fonts, and `viz` the parts that show data: a chart of values over time, a table, a stat, a sparkline, and the panel that frames them. The pages build on `viz`, and so will custom dashboards, so its props are plain data and name units (`count`, `duration`, `ratio`, `rate`, `bytes`) and series colors (`series-1` to `series-8`, `error`, `p95`) by string, which a dashboard can keep as JSON. The UI ships IBM Plex Sans and IBM Plex Mono, so it looks the same on macOS, Windows, and Linux. A release binary embeds `packages/app/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
@@ -34,6 +34,7 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 | `otelo-storage` | the storage interface: the model of the records, what the queries return, the channel to the writer, and the `Storage` and `RangeQueries` traits |
 | `otelo-storage-sqlite` | the SQLite backend: the day files, the writer, the queries, and the indexed attributes in the state file, `state.sqlite` |
 | `otelo-otlp` | the OTLP receiver over HTTP and gRPC |
+| `otelo-host` | the host collector: the readers of the machine, of its services, and of otelo itself, and the mapping from what they read to metric points |
 | `otelo-api` | the HTTP API, its errors, and its OpenAPI spec |
 | `otelo` | the binary: `otelo serve`, the daemon's own telemetry, the web UI, and the CLI commands in `cli/` |
 
