@@ -37,8 +37,10 @@ export {
   TypeScriptIcon,
 } from "./languages";
 export {
+  CalendarIcon,
   CheckIcon,
   ChevronIcon,
+  ClockIcon,
   CloseIcon,
   CodeIcon,
   DatabaseIcon,

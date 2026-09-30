@@ -57,6 +57,30 @@ export function ChevronIcon(props: IconProps & { direction?: keyof typeof turns 
   );
 }
 
+/** A calendar, for a date. */
+export function CalendarIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <g {...line} stroke-width="1.2">
+        <rect x="2.2" y="3.2" width="11.6" height="10.6" rx="1.8" />
+        <path d="M2.2 6.6h11.6M5.4 1.8v2.6M10.6 1.8v2.6" />
+      </g>
+    </Icon>
+  );
+}
+
+/** A clock, for a time of day. */
+export function ClockIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <g {...line} stroke-width="1.2">
+        <circle cx="8" cy="8" r="6.2" />
+        <path d="M8 4.6V8l2.3 1.5" />
+      </g>
+    </Icon>
+  );
+}
+
 /** A globe, for a request over HTTP. */
 export function GlobeIcon(props: IconProps) {
   return (
