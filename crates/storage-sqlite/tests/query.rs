@@ -1,9 +1,12 @@
 use std::collections::BTreeSet;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::time::Duration;
 
 use otelo_query::{FieldOrigin, MAX_HELP_VALUES, Signal, ValueType, complete_query, parse_query};
-use otelo_storage::query::{Bucket, BucketChange, MetricFilter, Resolution};
+use otelo_storage::query::{
+    Bucket, BucketChange, GroupKey, Grouping, MetricFilter, Resolution, SeriesGroup,
+};
 use otelo_storage::{
     AttributeValue, Attributes, Batch, Buckets, Distribution, Error, ExplicitBuckets,
     ExponentialBuckets, Histogram, HistogramPoint, IndexedAttribute, IndexedCounts, IndexedSignal,
@@ -85,6 +88,15 @@ fn distribution_of(bucket: &Bucket) -> &Distribution {
     match &bucket.change {
         BucketChange::Distribution(distribution) => distribution,
         other => panic!("a distribution, not {other:?}"),
+    }
+}
+
+fn labels_and_resource_of(group: &SeriesGroup) -> (&Attributes, &Attributes) {
+    match &group.key {
+        GroupKey::Series {
+            labels, resource, ..
+        } => (labels, resource),
+        other => panic!("one series, not {other:?}"),
     }
 }
 
@@ -537,12 +549,16 @@ fn metrics_filter_series_by_labels_and_resource() {
         query: parse_query("state = used", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
         resolution: Resolution::Raw,
+        grouping: Grouping::default(),
     };
     let metric = reader.get_metric_series(&filter, 10).unwrap();
-    assert_eq!(metric.series.len(), 1);
-    assert_eq!(metric.series[0].kind, MetricKind::UpDown);
-    assert_eq!(metric.series[0].resource["host.name"], "droplet");
-    let buckets: Vec<(u64, f64, f64, f64, f64)> = metric.series[0]
+    assert_eq!(metric.groups.len(), 1);
+    assert_eq!(metric.groups[0].kind, MetricKind::UpDown);
+    assert_eq!(
+        labels_and_resource_of(&metric.groups[0]).1["host.name"],
+        "droplet"
+    );
+    let buckets: Vec<(u64, f64, f64, f64, f64)> = metric.groups[0]
         .buckets
         .iter()
         .map(|bucket| {
@@ -567,7 +583,7 @@ fn metrics_filter_series_by_labels_and_resource() {
         reader
             .get_metric_series(&free, 10)
             .unwrap()
-            .series
+            .groups
             .is_empty()
     );
 }
@@ -772,9 +788,10 @@ fn a_histogram_returns_the_bucket_counts_of_each_step() {
         query: parse_query("", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
         resolution: Resolution::Raw,
+        grouping: Grouping::default(),
     };
     let metric = reader.get_metric_series(&filter, 10).unwrap();
-    let buckets = &metric.series[0].buckets;
+    let buckets = &metric.groups[0].buckets;
     assert_eq!(buckets[0].count, 2);
     let first = distribution_of(&buckets[0]);
     assert_eq!(first.bounds, [0.1, 1.0]);
@@ -933,11 +950,12 @@ fn a_counter_returns_its_rate_from_the_point_before_the_range() {
         query: parse_query("", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
         resolution: Resolution::Raw,
+        grouping: Grouping::default(),
     };
     let metric = reader.get_metric_series(&filter, 10).unwrap();
-    assert_eq!(metric.series.len(), 1);
+    assert_eq!(metric.groups.len(), 1);
     assert!(!metric.truncated);
-    let series = &metric.series[0];
+    let series = &metric.groups[0];
     assert_eq!(series.kind, MetricKind::Counter(Temporality::Cumulative));
     let rates: Vec<(u64, f64, Option<f64>)> = series
         .buckets
@@ -1005,13 +1023,17 @@ fn a_series_past_the_limit_is_cut_by_the_points_of_the_range() {
         query: parse_query("", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
         resolution: Resolution::Raw,
+        grouping: Grouping::default(),
     };
     let limited_to_two = reader.get_metric_series(&filter, 2).unwrap();
-    assert_eq!(limited_to_two.series.len(), 2);
+    assert_eq!(limited_to_two.groups.len(), 2);
     assert!(!limited_to_two.truncated);
     let limited_to_one = reader.get_metric_series(&filter, 1).unwrap();
-    assert_eq!(limited_to_one.series.len(), 1);
-    assert_eq!(limited_to_one.series[0].labels["queue"], "email");
+    assert_eq!(limited_to_one.groups.len(), 1);
+    assert_eq!(
+        labels_and_resource_of(&limited_to_one.groups[0]).0["queue"],
+        "email"
+    );
     assert!(limited_to_one.truncated);
 }
 
@@ -1061,15 +1083,115 @@ fn an_exponential_histogram_returns_the_bounds_of_its_buckets() {
         query: parse_query("", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
         resolution: Resolution::Raw,
+        grouping: Grouping::default(),
     };
     let metric = reader.get_metric_series(&filter, 10).unwrap();
     assert_eq!(
-        metric.series[0].kind,
+        metric.groups[0].kind,
         MetricKind::Histogram(Temporality::Delta)
     );
-    let merged = distribution_of(&metric.series[0].buckets[0]);
+    let merged = distribution_of(&metric.groups[0].buckets[0]);
     // The point of scale 1 joins its two buckets into the first one of scale 0.
     assert_eq!(merged.bounds, [1.0, 2.0, 4.0]);
     assert_eq!(merged.counts, [0, 14, 10, 0]);
     assert_eq!(merged.count, 24);
+}
+
+#[test]
+fn a_group_combines_the_series_of_two_resources() {
+    let directory = tempfile::tempdir().unwrap();
+    let range_start_at = Day::today().start_at() + 3600 * SECOND;
+    let memory_usage_metric = |state: &str, value: f64| Metric {
+        name: "system.memory.usage".into(),
+        unit: "By".into(),
+        labels: attributes_from_json(json!({"system.memory.state": state})),
+        points: Points::UpDown(vec![NumberPoint {
+            recorded_at: range_start_at + 10 * SECOND,
+            value,
+        }]),
+    };
+    let host = |name: &str, used: f64, free: f64| {
+        let mut host = records("otelo", &json!({"host.name": name}));
+        host.metrics = vec![
+            memory_usage_metric("used", used),
+            memory_usage_metric("free", free),
+        ];
+        host
+    };
+    write_batch(
+        directory.path(),
+        vec![host("droplet", 300.0, 700.0), host("laptop", 500.0, 1500.0)],
+        &Indexes::default(),
+    );
+    let reader = Reader::open(
+        directory.path(),
+        TimeRange::new(range_start_at, range_start_at + 600 * SECOND).unwrap(),
+    )
+    .unwrap();
+    let by_state = MetricFilter {
+        name: "system.memory.usage".into(),
+        query: parse_query("", Signal::Metrics).unwrap(),
+        step_ns: 60 * SECOND,
+        resolution: Resolution::Raw,
+        grouping: Grouping {
+            by: vec!["system.memory.state".parse().unwrap()],
+            top: None,
+        },
+    };
+    let group_totals = |filter: &MetricFilter, limit: usize| {
+        let metric = reader.get_metric_series(filter, limit).unwrap();
+        let totals: Vec<(Value, f64)> = metric
+            .groups
+            .iter()
+            .map(|group| {
+                (
+                    serde_json::to_value(&group.key).unwrap(),
+                    group.buckets[0].last,
+                )
+            })
+            .collect();
+        (totals, metric.truncated)
+    };
+    assert_eq!(
+        group_totals(&by_state, 10),
+        (
+            vec![
+                (
+                    json!({"type": "values", "values": {"system.memory.state": "free"}, "series_count": 2}),
+                    2200.0
+                ),
+                (
+                    json!({"type": "values", "values": {"system.memory.state": "used"}, "series_count": 2}),
+                    800.0
+                ),
+            ],
+            false
+        )
+    );
+    let top_host = MetricFilter {
+        grouping: Grouping {
+            by: vec!["resource.host.name".parse().unwrap()],
+            top: NonZeroUsize::new(1),
+        },
+        ..by_state.clone()
+    };
+    assert_eq!(
+        group_totals(&top_host, 10),
+        (
+            vec![
+                (
+                    json!({"type": "values", "values": {"resource.host.name": "laptop"}, "series_count": 2}),
+                    2000.0
+                ),
+                (
+                    json!({"type": "other", "group_count": 1, "series_count": 2}),
+                    1000.0
+                ),
+            ],
+            false
+        )
+    );
+    let (first_group, truncated) = group_totals(&by_state, 1);
+    assert_eq!(first_group.len(), 1);
+    assert!(truncated);
 }

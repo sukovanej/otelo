@@ -6,21 +6,24 @@ use std::ops::ControlFlow;
 use anyhow::{Context, ensure};
 use otelo_query::{Query, Signal};
 use otelo_storage::query::{
-    Bucket, MAX_BUCKETS_IN_RANGE, MetricFilter, MetricList, MetricSeries, Resolution, Series,
-    SeriesInfo,
+    MAX_BUCKETS_IN_RANGE, MetricFilter, MetricList, MetricSeries, Resolution, SeriesInfo,
 };
 use otelo_storage::{
     HistogramPoint, MetricKind, NumberPoint, SeriesPoint, SeriesSteps, StepSummary,
+    SummarizedSeries, group_series,
 };
 
 use super::compile::{TableAliases, compile_query};
-use super::{ROLLUP_SCHEMA_NAME, WhereClause, timestamp_from_nanos, truncate_to_limit};
+use super::{ROLLUP_SCHEMA_NAME, WhereClause, truncate_to_limit};
 use crate::Reader;
 use crate::rollup::{RollupTable, read_summary, summary_columns_of};
 
 // A counter and a cumulative histogram count from the point before. The apps export every
 // minute, so five minutes before the range hold that point.
 pub const BASELINE_LOOKBACK_NS: i64 = 5 * 60 * 1_000_000_000;
+
+// A group needs every series of the metric, so the query cannot stop at the limit of the answer.
+const MAX_SERIES_IN_A_METRIC_QUERY: usize = 2_000;
 
 const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
     record: "series",
@@ -38,20 +41,37 @@ struct SeriesKey {
 }
 
 impl SeriesKey {
-    fn into_series(self, summaries_by_step: BTreeMap<i64, StepSummary>) -> anyhow::Result<Series> {
-        Ok(Series {
+    fn into_summarized_series(
+        self,
+        summaries_by_step: BTreeMap<i64, StepSummary>,
+    ) -> anyhow::Result<SummarizedSeries> {
+        Ok(SummarizedSeries {
             service: self.service,
             kind: self.kind,
             unit: self.unit,
             labels: serde_json::from_str(&self.labels_json)?,
             resource: serde_json::from_str(&self.resource_attributes_json)?,
-            buckets: summaries_by_step
-                .into_iter()
-                .map(|(start_at, summary)| {
-                    Bucket::from_step_summary(timestamp_from_nanos(start_at), summary)
-                })
-                .collect(),
+            summaries_by_step,
         })
+    }
+}
+
+fn group_summarized_series(
+    filter: &MetricFilter,
+    step_ns: i64,
+    resolution: Resolution,
+    series: Vec<SummarizedSeries>,
+    has_more_series_than_read: bool,
+    limit: usize,
+) -> MetricSeries {
+    let mut groups = group_series(series, &filter.grouping);
+    let has_more_groups_than_limit = truncate_to_limit(&mut groups, limit);
+    MetricSeries {
+        name: filter.name.clone(),
+        step_ns,
+        resolution,
+        groups,
+        truncated: has_more_series_than_read || has_more_groups_than_limit,
     }
 }
 
@@ -229,7 +249,7 @@ fn read_buckets_of_raw_points(
     )?;
     let mut steps_by_series: BTreeMap<SeriesKey, SeriesSteps> = BTreeMap::new();
     let mut series_in_range_count = 0;
-    let mut truncated = false;
+    let mut has_more_series_than_read = false;
     reader.scan_rows(
         ["", " ORDER BY recorded_at"],
         |day_schema| {
@@ -267,8 +287,8 @@ fn read_buckets_of_raw_points(
             }
             // A series with points only before the range is not a series of the range.
             if series_steps.has_no_point_in_range() {
-                if series_in_range_count == limit {
-                    truncated = true;
+                if series_in_range_count == MAX_SERIES_IN_A_METRIC_QUERY {
+                    has_more_series_than_read = true;
                     return Ok(ControlFlow::Continue(()));
                 }
                 series_in_range_count += 1;
@@ -281,16 +301,17 @@ fn read_buckets_of_raw_points(
         .into_iter()
         .filter(|(_, series_steps)| !series_steps.has_no_point_in_range())
         .map(|(series_key, series_steps)| {
-            series_key.into_series(series_steps.into_summaries_by_step())
+            series_key.into_summarized_series(series_steps.into_summaries_by_step())
         })
         .collect::<anyhow::Result<_>>()?;
-    Ok(MetricSeries {
-        name: filter.name.clone(),
+    Ok(group_summarized_series(
+        filter,
         step_ns,
-        resolution: Resolution::Raw,
+        Resolution::Raw,
         series,
-        truncated,
-    })
+        has_more_series_than_read,
+        limit,
+    ))
 }
 
 fn read_buckets_of_summaries(
@@ -332,7 +353,7 @@ fn read_buckets_of_summaries(
         where_clause.sql_for_rollups()
     );
     let mut summaries_by_series: BTreeMap<SeriesKey, BTreeMap<i64, StepSummary>> = BTreeMap::new();
-    let mut truncated = false;
+    let mut has_more_series_than_read = false;
     reader.scan_rollup_rows(&sql, &where_clause, |row| {
         let kind: String = row.get(1)?;
         let temporality: Option<String> = row.get(2)?;
@@ -348,8 +369,8 @@ fn read_buckets_of_summaries(
         let series_count = summaries_by_series.len();
         let summaries_by_step = match summaries_by_series.entry(series_key) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(_) if series_count == limit => {
-                truncated = true;
+            Entry::Vacant(_) if series_count == MAX_SERIES_IN_A_METRIC_QUERY => {
+                has_more_series_than_read = true;
                 return Ok(ControlFlow::Continue(()));
             }
             Entry::Vacant(entry) => entry.insert(BTreeMap::new()),
@@ -364,13 +385,14 @@ fn read_buckets_of_summaries(
     })?;
     let series = summaries_by_series
         .into_iter()
-        .map(|(series_key, summaries_by_step)| series_key.into_series(summaries_by_step))
+        .map(|(series_key, summaries_by_step)| series_key.into_summarized_series(summaries_by_step))
         .collect::<anyhow::Result<_>>()?;
-    Ok(MetricSeries {
-        name: filter.name.clone(),
+    Ok(group_summarized_series(
+        filter,
         step_ns,
-        resolution: filter.resolution,
+        filter.resolution,
         series,
-        truncated,
-    })
+        has_more_series_than_read,
+        limit,
+    ))
 }

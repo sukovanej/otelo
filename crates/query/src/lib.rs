@@ -13,7 +13,7 @@ pub use complete::{
     NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete_query,
 };
 pub use highlight::{Highlight, HighlightKind, highlight_tokens};
-pub use parser::{ParseError, parse_query};
+pub use parser::{ParseError, parse_query, resolve_field};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Signal {

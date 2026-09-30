@@ -7,8 +7,8 @@ use std::process::{Command, Output};
 
 use common::{StopSignal, send_get_request, start_daemon, stop_daemon};
 use otelo_storage::{
-    Attributes, Log, LogSource, Records, Resource, Severity, Span, SpanId, SpanKind, SpanStatus,
-    TraceContext, TraceId, now_unix_nanos, open_batch_channel,
+    Attributes, Log, LogSource, Metric, NumberPoint, Points, Records, Resource, Severity, Span,
+    SpanId, SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos, open_batch_channel,
 };
 use otelo_storage_sqlite::{Config, Writer};
 use serde_json::{Value, json};
@@ -50,6 +50,15 @@ fn write_telemetry(data: &Path) {
         }),
         source: LogSource::Otlp,
     };
+    let build_queue_depth = |queue: &str, depth: f64| Metric {
+        name: "queue.depth".into(),
+        unit: "{job}".into(),
+        labels: parse_attributes(json!({"queue": queue})),
+        points: Points::UpDown(vec![NumberPoint {
+            recorded_at: written_at,
+            value: depth,
+        }]),
+    };
     let records = Records {
         resource: Resource {
             service: "api".into(),
@@ -64,7 +73,11 @@ fn write_telemetry(data: &Path) {
             build_span(1, None, "GET /languages", SpanStatus::Unset),
             build_span(2, Some(1), "SELECT languages", SpanStatus::Error),
         ],
-        metrics: Vec::new(),
+        metrics: vec![
+            build_queue_depth("email", 3.0),
+            build_queue_depth("sms", 5.0),
+            build_queue_depth("push", 1.0),
+        ],
     };
     let (batch_sender, inbox) = open_batch_channel(1);
     assert!(batch_sender.send_batch(vec![records]));
@@ -96,6 +109,35 @@ fn check_calls_of_a_service_without_calls(addr: &str) {
     let table = run_otelo(addr, &["calls", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.starts_with("api: 0 calls"), "{table}");
+}
+
+fn check_the_groups_of_a_metric(addr: &str) {
+    let queue_depth_args = ["metric", "queue.depth", "--by", "queue", "--top", "2"];
+    let (queue_depth, _) = run_otelo_and_parse_json(addr, &queue_depth_args);
+    let keys: Vec<&Value> = queue_depth["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|group| &group["key"])
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            &json!({"type": "values", "values": {"queue": "sms"}, "series_count": 1}),
+            &json!({"type": "values", "values": {"queue": "email"}, "series_count": 1}),
+            &json!({"type": "other", "group_count": 1, "series_count": 1}),
+        ]
+    );
+    let queue_depth_table = run_otelo(addr, &[&queue_depth_args[..], &["--table"]].concat());
+    let queue_depth_table = String::from_utf8(queue_depth_table.stdout).unwrap();
+    assert!(
+        queue_depth_table.contains("queue.depth updown {job} queue=sms (1 series) every"),
+        "{queue_depth_table}"
+    );
+    assert!(
+        queue_depth_table.contains("queue.depth updown {job} other (1 group, 1 series) every"),
+        "{queue_depth_table}"
+    );
 }
 
 fn check_the_spec_lists_every_path(addr: &str) {
@@ -184,7 +226,6 @@ fn the_cli_reads_what_the_api_serves() {
 
     let (metrics, _) = run_otelo_and_parse_json(&addr, &["metrics", "--since", "2d"]);
     assert!(metrics["series"].is_array());
-
     // Both spans have the server kind, so both are requests.
     let (services, _) = run_otelo_and_parse_json(&addr, &["services"]);
     let api = &services["services"][0];
@@ -210,6 +251,7 @@ fn the_cli_reads_what_the_api_serves() {
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.contains("GET /languages"), "{table}");
     check_calls_of_a_service_without_calls(&addr);
+    check_the_groups_of_a_metric(&addr);
     check_the_spec_lists_every_path(&addr);
     stop_daemon(daemon, StopSignal::Term);
 }
@@ -373,6 +415,10 @@ fn a_bad_request_prints_the_reason() {
     let output = run_otelo(&addr, &["trace", TRACE_ID_HEX]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("no spans or logs"), "{stderr}");
+
+    let output = run_otelo(&addr, &["metric", "queue.depth", "--by", "state,name"]);
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("share its name"), "{stderr}");
     stop_daemon(daemon, StopSignal::Term);
 }
 
