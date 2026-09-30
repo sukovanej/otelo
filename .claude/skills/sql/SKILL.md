@@ -63,13 +63,14 @@ are strings in the Rust sources of that crate.
 - `GROUP BY` and `ORDER BY` name their columns, never `1, 2`. To sort by an aggregate,
   name it with `AS`.
 
-## Changing a name on disk
+## Changing the schema
 
-- A day file and the rollup file keep their `SCHEMA_VERSION` in `PRAGMA user_version`.
-- A new table or index needs no new version. `IF NOT EXISTS` adds it to an old file.
-- A renamed, removed, or retyped column raises the version. There is no migration. The
-  writer sets a file of another version aside, and its rows leave every query.
-- So a rename costs the users their history. Rename a name that is wrong, not one that
-  could be nicer, and say so in the commit message.
+- otelo is in development and the tables are still being designed. Change a table, a
+  column, or an index as soon as a better design shows up.
+- Write no migration, no code that reads or fills in a file of an older schema, and no
+  name kept for an older file.
+- A change raises the `SCHEMA_VERSION` of its file, which the file keeps in
+  `PRAGMA user_version`. The writer sets a file of another version aside and starts a new
+  one.
 - The same commit changes the `telemetry` doc, the tests, and the SQL in
-  `packages/app/tests`.
+  `packages/ui/tests/sql.test.ts`.
