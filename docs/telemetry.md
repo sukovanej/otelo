@@ -26,6 +26,7 @@ flowchart LR
 
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
 - SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
+- A day file carries the version of its schema in `PRAGMA user_version`. When the writer starts, it sets a file of another version aside as `<day>.sqlite.schema-<version>` and starts a new one. Retention deletes the file it set aside with its day.
 - A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached.
 - `service` is the OTel `service.name` resource attribute. The host collector sends no OTLP, so it names its services itself.
 
@@ -68,10 +69,11 @@ erDiagram
   }
   series {
     int id PK
-    int hash "xxh3 of resource, name, kind, unit, labels, unique"
+    int hash "xxh3 of resource, name, kind, temporality, unit, labels, unique"
     int resource_id FK
     text name
-    text kind "gauge, sum, histogram"
+    text kind "gauge, updown, counter, histogram"
+    text temporality "cumulative or delta, for a counter and a histogram"
     text unit
     text labels "JSON"
   }
@@ -79,7 +81,7 @@ erDiagram
     int series_id FK
     int ts
     real value
-    text histogram "JSON buckets, null for gauge and sum"
+    text histogram "JSON buckets, null for the other kinds"
   }
 ```
 
@@ -91,9 +93,15 @@ The `otelo-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 
 - `service` is `service.name`, or `unknown_service` without one.
 - The instrumentation scope becomes `otel.scope.name` and `otel.scope.version` on each record, and the status message of a span becomes `otel.status_description`, as the OTel spec maps them for formats without those fields. A log's `event_name` becomes `event.name`.
-- A histogram point stores its sum as `points.value`. A point without buckets gets one bucket without bounds.
-- Exponential histograms, summaries, and a span without valid IDs are rejected. Span links, severity text, and trace state are not kept.
+- A series has one of four kinds, which say how its points combine over time. A gauge is a `gauge`. A sum is a `counter` when it is monotonic and an `updown` when it is not. A histogram and an exponential histogram are a `histogram`. A `counter` and a `histogram` keep their temporality, `cumulative` or `delta`. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] has the table of the kinds.
+- Points are stored as they arrive. The increase of a cumulative counter is computed when it is read.
+- A histogram point stores its sum as `points.value`. A point without buckets gets one bucket without bounds. An exponential histogram keeps its scale and its buckets, because the sender changes both as its values spread, and fixed bounds would not subtract.
+- A point with the `NO_RECORDED_VALUE` flag is skipped. A query never fills a gap, so nothing needs a marker for the end of a series.
+- The key of `points` is the series and the time, so a batch that is sent again overwrites its points.
+- Summaries, a delta sum that is not monotonic, a sum or a histogram without a temporality, and a span without valid IDs are rejected. Span links, severity text, trace state, exemplars, and the start time of a point are not kept.
+- Proto3 JSON leaves out a field at its default, and the decoder of `opentelemetry-proto` takes a point of an exponential histogram only with every field. The receiver fills the missing ones before it decodes.
 - A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
+- A metric gets at most 1,000 series per day file, so one label that holds a user ID cannot fill the disk. The writer skips the points of a series past that. The receiver has answered by then, so the writer counts them in `otelo.telemetry.rejected_points`, next to `otelo.telemetry.dropped_batches`, and warns in its log.
 
 ## Host collector
 
@@ -140,8 +148,10 @@ The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serv
 
 - `otelo logs` groups lines by message template first, with counts, and prints samples. `--raw` prints lines.
 - `otelo spans` lists spans. `otelo traces` lists the traces that have a matching span, by root span, duration, and error flag. `otelo trace <id>` prints the span tree.
-- `otelo metrics` lists the series. `otelo metric <name>` prints one metric at a step that fits the range.
-- A histogram point keeps its buckets in `points.histogram` as JSON: `bounds`, `counts` (one more than the bounds), `count`, `sum`, `min`, `max`, and `cumulative`. The writer skips a point whose counts do not fit its bounds. `otelo metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point of a range only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
+- `otelo metrics` lists the series. `otelo metric <name>` prints one metric at a step that fits the range: the count, minimum, average, maximum, and last value of each step for a `gauge` and an `updown`, the rate for a `counter`, and the percentiles for a `histogram`.
+- The rate of a counter is its increase between two neighbouring points, divided by the time between them and not by the step, so a 30-second step over points a minute apart stays right. A cumulative value that goes down is a restart, and the increase counts from zero. The query also reads the 5 minutes before the range, so the first step has a point to count from.
+- A histogram point keeps its buckets in `points.histogram` as JSON: `count`, `sum`, `min`, `max`, and either `bounds` and `counts` (one more than the bounds), or `scale`, `zero_count`, `positive`, and `negative` for an exponential histogram. The writer skips a point whose counts do not fit its bounds. `otelo metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
+- Two exponential points always merge. Both go down to the lower scale, where each step joins neighbouring buckets in pairs. The API returns every distribution with explicit bounds, and joins the buckets of an exponential one until 64 are left. The percentiles are estimated before that. An explicit and an exponential point in one step do not merge, and the step keeps the newer one.
 - `otelo services` lists the services that sent spans or logs, the most requests first, with their requests, errors, p50, p95, and p99 latency, logs, and error logs. `otelo service <name>` prints the same for one service and its requests by span name. A request is a span that enters the service: a root span, or a span of the server or the consumer kind. The percentiles come from buckets that each grow by 2%, so an estimate is off by 1% at most and the memory does not grow with the count of spans. `--buckets` adds the numbers of each step.
 - `otelo calls <name>` prints the calls a service makes, by target and by what they do, the most time first. A call is a span of the client or the producer kind, or a span with `db.system.name` or `db.system` of any kind, since an in-process database such as SQLite may mark its spans internal. Its target comes from the OpenTelemetry attributes, the older names too: a database by system and `db.namespace`, a host by `server.address` or the host of `url.full`, with a port other than 80 or 443, an RPC service by `rpc.system` and `rpc.service`, a message destination by `messaging.system` and `messaging.destination.name`, and else `peer.service`. What a call does is `db.query.summary`, or the query with each string, number, and parameter such as `$1` or `:id` as `?` and a list of them as one `?`, for a database; the method and `url.template`, or the path with each id as `{id}`, for HTTP; and the span name for the rest. So `SELECT * FROM users WHERE id = 7` and `… id = 8` are one row, and two queries under one span name such as `SELECT` are two. Each target carries the span query terms that keep its calls, such as `db.system.name = "postgresql" db.namespace = "app"`.
 - `otelo sql` runs a read-only query against the day files.
