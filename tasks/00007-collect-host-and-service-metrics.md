@@ -59,13 +59,17 @@ flowchart LR
 - On Linux a unit without the memory files of its cgroup still sends its CPU time.
 - On macOS `sysinfo` lists every process each tick. The mapping adds the CPU time each live process under a service's PID gained since the last tick to a running total of that service. The total starts at zero when the daemon starts.
 
-## Open: a counter and a level are the same kind today
+## Kinds
 
-`system.network.io` and `process.cpu.time` are counters: totals that only grow, which a chart shows as a rate. The `usage` metrics are levels that go up and down. OpenTelemetry calls both a sum and tells them apart by `is_monotonic`. `MetricKind::Sum` does not keep that flag, and the OTLP mapping drops it together with the temporality. The rollups of [[./00008-roll-up-metrics-to-1-minute-and-1.md]] and the charts need it to choose between a rate and a minimum and maximum. Whether `series` learns it in a task before this one or inside [[./00008-roll-up-metrics-to-1-minute-and-1.md]] is not decided. This task sends the counters as `sum` either way.
+The collector uses the four kinds of the model in part 1 of [[./00008-roll-up-metrics-to-1-minute-and-1.md]], which lands before this task:
+
+- `counter`, cumulative: `system.network.io` and `process.cpu.time`. They are totals that only grow, and a chart shows their rate.
+- `updown`: the `usage` metrics, `system.memory.limit`, and `otelo.storage.size`. They are levels that go up and down.
+- `gauge`: `system.cpu.utilization` and the load averages.
 
 ## Size
 
-About 100 series on the droplet: 25 for the machine and otelo, and 3 for each of about 25 units. [[./00008-roll-up-metrics-to-1-minute-and-1.md]] counts with 50.
+About 100 series on the droplet: 25 for the machine and otelo, and 3 for each of about 25 units.
 
 ## Tests
 
