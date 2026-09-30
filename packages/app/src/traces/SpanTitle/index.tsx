@@ -2,7 +2,7 @@ import { Match, Show, Switch } from "solid-js";
 
 import type { Attributes } from "@otelo/api";
 import { SpanIcon } from "@otelo/icons";
-import { Level, Tooltip } from "@otelo/ui";
+import { LevelBadge, Tooltip } from "@otelo/ui";
 
 import {
   isSqlSystem,
@@ -53,7 +53,7 @@ export default function SpanTitle(props: SpanTitleProps) {
   return (
     <span class="flex min-w-0 items-baseline gap-1.5 overflow-hidden" title={title()}>
       <Show when={props.variant === "span" && props.error}>
-        <Level level="ERROR" />
+        <LevelBadge level="ERROR" />
       </Show>
       <Switch
         fallback={

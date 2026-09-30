@@ -45,11 +45,11 @@ export default function DatabaseSystemIcon(props: DatabaseSystemIconProps) {
       component={knownSystem()?.icon ?? DatabaseIcon}
       size={props.size}
       class={knownSystem() ? props.class : `text-database ${props.class ?? ""}`}
-      title={props.title ?? databaseName(props.system)}
+      title={props.title ?? toDatabaseName(props.system)}
     />
   );
 }
 
-export function databaseName(systemId: string): string {
+export function toDatabaseName(systemId: string): string {
   return DATABASE_SYSTEMS[systemId]?.name ?? systemId;
 }

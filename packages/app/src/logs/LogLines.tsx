@@ -1,5 +1,5 @@
 import type { LogLine } from "@otelo/api";
-import { Level } from "@otelo/ui";
+import { LevelBadge } from "@otelo/ui";
 import { type Column, Table } from "@otelo/viz";
 
 import ServiceName from "../ServiceName";
@@ -10,10 +10,10 @@ const MIN_ERROR_SEVERITY = 17;
 
 const COLUMNS: Column<LogLine>[] = [
   {
+    kind: "cell",
     id: "time",
     label: "Time",
     width: "max-content",
-    value: (line) => line.logged_at,
     tone: () => "muted",
     cell: (line) => (
       <time class="whitespace-nowrap" datetime={line.logged_at}>
@@ -22,21 +22,27 @@ const COLUMNS: Column<LogLine>[] = [
     ),
   },
   {
+    kind: "cell",
     id: "level",
     label: "Level",
     width: "max-content",
-    value: (line) => toLevelName(line.severity),
-    cell: (line) => <Level level={toLevelName(line.severity)} />,
+    cell: (line) => <LevelBadge level={toLevelName(line.severity)} />,
   },
   {
+    kind: "cell",
     id: "service",
     label: "Service",
     width: "minmax(6ch,16ch)",
-    value: (line) => line.service,
     tone: () => "muted",
     cell: (line) => <ServiceName name={line.service} resource={line.resource} />,
   },
-  { id: "body", label: "Message", width: "minmax(0,1fr)", value: (line) => line.body },
+  {
+    kind: "text",
+    id: "body",
+    label: "Message",
+    width: "minmax(0,1fr)",
+    value: (line) => line.body,
+  },
 ];
 
 interface LogLinesProps {

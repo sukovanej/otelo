@@ -1,14 +1,25 @@
 import { Show } from "solid-js";
 
+import { isPlainLeftClick } from "@otelo/ui";
+
 import type { Column } from "../column";
 import TableCells from "./table-cells";
 
 export type RowTone = "error";
 
-export interface TreeLevel {
+export type TreeLevel = TreeLeaf | TreeBranch;
+
+interface TreeLevelBase {
   readonly depth: number;
-  /** `undefined` for a row without children. */
-  readonly expanded?: boolean | undefined;
+}
+
+interface TreeLeaf extends TreeLevelBase {
+  readonly kind: "leaf";
+}
+
+interface TreeBranch extends TreeLevelBase {
+  readonly kind: "branch";
+  readonly expanded: boolean;
 }
 
 interface TableRowProps<R> {
@@ -28,7 +39,7 @@ export default function TableRow<R>(props: TableRowProps<R>) {
     return {
       "aria-selected": props.selected,
       "aria-level": level ? level.depth + 1 : undefined,
-      "aria-expanded": level?.expanded,
+      "aria-expanded": level?.kind === "branch" ? level.expanded : undefined,
     };
   };
   const onClick = (e: MouseEvent) => {
@@ -97,8 +108,4 @@ function pickRowClasses<R>(props: TableRowProps<R>): string {
   return `col-span-full grid grid-cols-subgrid items-center border-b border-line px-3 py-1.5 ${
     isInteractive ? "cursor-pointer" : ""
   } ${stateClasses}`;
-}
-
-function isPlainLeftClick(e: MouseEvent): boolean {
-  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 }

@@ -1,6 +1,6 @@
-import { Badge, type Tone } from "@otelo/ui";
+import Badge, { type BadgeTone } from "./Badge";
 
-const KIND_TONES: Record<SpanKindName, Tone> = {
+const KIND_TONES: Record<SpanKindName, BadgeTone> = {
   unspecified: "trace",
   internal: "muted",
   server: "info",

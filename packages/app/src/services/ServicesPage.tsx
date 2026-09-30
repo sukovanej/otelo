@@ -21,16 +21,16 @@ export default function ServicesPage() {
 
   const columns: Column<ServiceSummary>[] = [
     {
+      kind: "cell",
       id: "service",
       label: "Service",
-      value: (service) => service.service,
+      sortBy: (service) => service.service,
       cell: (service) => <ServiceName name={service.service} resource={service.resource} />,
     },
     {
+      kind: "cell",
       id: "traffic",
       label: "Requests over time",
-      value: () => null,
-      sortable: false,
       width: "max-content",
       cell: (service) => (
         <Sparkline
@@ -48,18 +48,21 @@ export default function ServicesPage() {
       ),
     },
     {
+      kind: "number",
       id: "requests",
       label: "Requests",
       unit: "count",
       value: (service) => service.stats.requests.count,
     },
     {
+      kind: "number",
       id: "rate",
       label: "Rate",
       unit: "rate",
       value: (service) => toRate(service.stats.requests.count, rangeSeconds()),
     },
     {
+      kind: "number",
       id: "errors",
       label: "Error rate",
       unit: "ratio",
@@ -67,13 +70,21 @@ export default function ServicesPage() {
       tone: (service) => (service.stats.requests.errors > 0 ? "error" : undefined),
     },
     ...(["p50", "p95", "p99"] as const).map((percentile): Column<ServiceSummary> => ({
+      kind: "number",
       id: percentile,
       label: percentile.toUpperCase(),
       unit: "duration",
       value: (service) => service.stats.requests.latency?.[percentile] ?? null,
     })),
-    { id: "logs", label: "Logs", unit: "count", value: (service) => service.stats.logs },
     {
+      kind: "number",
+      id: "logs",
+      label: "Logs",
+      unit: "count",
+      value: (service) => service.stats.logs,
+    },
+    {
+      kind: "number",
       id: "error_logs",
       label: "Error logs",
       unit: "count",
@@ -114,12 +125,12 @@ export default function ServicesPage() {
                 label="Services"
                 rows={services().services}
                 columns={columns}
-                sort={{ column: "requests", descending: true }}
+                initialSort={{ columnId: "requests", descending: true }}
                 href={(service) =>
                   `/services/${encodeURIComponent(service.service)}${range.toSearch()}`
                 }
                 loading={fetched.loading()}
-                empty="No service sent spans or logs in this range."
+                emptyMessage="No service sent spans or logs in this range."
               />
             </Panel>
           )}

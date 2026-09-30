@@ -9,11 +9,10 @@ import {
 import { createMemo, Show } from "solid-js";
 
 import { getCalls, getLogGroups, getService, getTraces, type TargetKey } from "@otelo/api";
-import { Callout } from "@otelo/ui";
+import { Callout, EmptyMessage } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
 import { link, pageContent } from "../../classes";
-import EmptyMessage from "../../EmptyMessage";
 import LogGroupList from "../../logs/LogGroupList";
 import { addTerm, quoteString } from "../../query";
 import ServiceName from "../../ServiceName";

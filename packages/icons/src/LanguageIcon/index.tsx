@@ -48,12 +48,12 @@ export default function LanguageIcon(props: LanguageIconProps) {
       component={knownLanguage()?.icon ?? CodeIcon}
       size={props.size}
       class={knownLanguage() ? props.class : `text-muted ${props.class ?? ""}`}
-      title={props.title ?? languageName(props.language)}
+      title={props.title ?? toLanguageName(props.language)}
     />
   );
 }
 
-export function languageName(languageId: string | undefined): string {
+export function toLanguageName(languageId: string | undefined): string {
   return languageId === undefined
     ? "Unknown language"
     : (LANGUAGES[languageId]?.name ?? languageId);

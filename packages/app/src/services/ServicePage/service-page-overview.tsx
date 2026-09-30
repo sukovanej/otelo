@@ -1,6 +1,7 @@
 import { createMemo, For, Show } from "solid-js";
 
 import type { Operation, Service } from "@otelo/api";
+import { SpanKindBadge } from "@otelo/ui";
 import {
   ChartPanel,
   type Column,
@@ -13,7 +14,6 @@ import {
 } from "@otelo/viz";
 
 import { toKindName } from "../../traces/span";
-import SpanKindBadge from "../../traces/SpanKindBadge";
 import SpanTitle from "../../traces/SpanTitle";
 import { toTimeFrame } from "../frame";
 import { PERCENTILES, toErrorRateSeries, toLatencySeries, toRequestSeries } from "../series";
@@ -53,34 +53,38 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
 
   const operationColumns = createMemo<Column<Operation>[]>(() => [
     {
+      kind: "cell",
       id: "name",
       label: "Operation",
-      value: (operation) => operation.name,
+      sortBy: (operation) => operation.name,
       cell: (operation) => (
         <SpanTitle variant="operation" name={operation.name} attributes={operation.attributes} />
       ),
     },
     {
+      kind: "cell",
       id: "kind",
       label: "Kind",
       width: "max-content",
-      value: (operation) => operation.kind,
+      sortBy: (operation) => operation.kind,
       cell: (operation) => <SpanKindBadge kind={toKindName(operation.kind)} />,
     },
     {
+      kind: "meter",
       id: "requests",
       label: "Requests",
       unit: "count",
-      meter: true,
       value: (operation) => operation.requests.count,
     },
     {
+      kind: "number",
       id: "rate",
       label: "Rate",
       unit: "rate",
       value: (operation) => toRate(operation.requests.count, rangeSeconds()),
     },
     {
+      kind: "number",
       id: "errors",
       label: "Error rate",
       unit: "ratio",
@@ -88,17 +92,18 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
       tone: (operation) => (operation.requests.errors > 0 ? "error" : undefined),
     },
     ...PERCENTILES.map((percentile): Column<Operation> => ({
+      kind: "number",
       id: percentile,
       label: percentile.toUpperCase(),
       unit: "duration",
       value: (operation) => operation.requests.latency?.[percentile] ?? null,
     })),
     {
+      kind: "meter",
       id: "total",
       label: "Total time",
       description: "The durations of its requests added up",
       unit: "duration",
-      meter: true,
       value: (operation) => operation.requests.total_ns,
     },
   ]);
@@ -117,7 +122,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           label="Error rate"
           value={toShare(requests().errors, requests().count)}
           unit="ratio"
-          tone={requests().errors > 0 ? "error" : "default"}
+          tone={requests().errors > 0 ? "error" : undefined}
           detail={`${requests().errors.toLocaleString()} failed`}
           trend={errorRateSeries()[0]?.values}
           trendColor="error"
@@ -163,7 +168,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           series={latencySeries()}
           loading={props.loading}
           onZoom={props.onZoom}
-          empty="No requests in this range"
+          emptyMessage="No requests in this range"
         />
         <ChartPanel
           title="Error rate"
@@ -174,7 +179,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           series={errorRateSeries()}
           loading={props.loading}
           onZoom={props.onZoom}
-          empty="No requests in this range"
+          emptyMessage="No requests in this range"
         />
         <ChartPanel
           title="Logs"
@@ -202,7 +207,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
             label="Operations"
             rows={props.service.operations}
             columns={operationColumns()}
-            sort={{ column: "requests", descending: true }}
+            initialSort={{ columnId: "requests", descending: true }}
             href={props.operationHref}
             onRowClick={props.onOpenOperation}
             loading={props.loading}

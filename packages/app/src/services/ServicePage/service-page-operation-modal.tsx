@@ -6,20 +6,16 @@ import {
   getOperation,
   getSpans,
   type OperationDetail,
-  search,
+  toQueryString,
   type TargetKey,
   type TraceSpan,
 } from "@otelo/api";
-import { Callout } from "@otelo/ui";
+import { Callout, CloseButton, EmptyMessage, Modal, SpanKindBadge } from "@otelo/ui";
 import { ChartPanel, formatValue, Panel, Stat } from "@otelo/viz";
 
 import { link, pageContent } from "../../classes";
-import CloseButton from "../../CloseButton";
-import EmptyMessage from "../../EmptyMessage";
-import Modal from "../../Modal";
 import { quoteString } from "../../query";
 import { entersService, toKindName } from "../../traces/span";
-import SpanKindBadge from "../../traces/SpanKindBadge";
 import SpanList from "../../traces/SpanList";
 import SpanTitle from "../../traces/SpanTitle";
 import { toTimeFrame } from "../frame";
@@ -128,7 +124,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
           </span>
         </Show>
         <A
-          href={`/traces${search({ view: "spans", q: fetched.data()?.spanQuery, since: props.range.since(), until: props.range.until() || undefined })}`}
+          href={`/traces${toQueryString({ view: "spans", q: fetched.data()?.spanQuery, since: props.range.since(), until: props.range.until() || undefined })}`}
           class={`shrink-0 whitespace-nowrap ${link}`}
           title={`Every span of the ${subjectNoun()} on the traces page`}
         >
@@ -164,7 +160,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
               label="Error rate"
               value={toShare(requests()?.errors ?? 0, requests()?.count ?? 0)}
               unit="ratio"
-              tone={(requests()?.errors ?? 0) > 0 ? "error" : "default"}
+              tone={(requests()?.errors ?? 0) > 0 ? "error" : undefined}
               detail={`${(requests()?.errors ?? 0).toLocaleString()} failed`}
               trend={errorRateSeries()[0]?.values}
               trendColor="error"
@@ -204,7 +200,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
                   series={latencySeries()}
                   loading={fetched.loading()}
                   onZoom={zoomRangeTo}
-                  empty={`No ${countLabel().toLowerCase()} in this range`}
+                  emptyMessage={`No ${countLabel().toLowerCase()} in this range`}
                 />
                 <ChartPanel
                   title="Error rate"
@@ -215,7 +211,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
                   series={errorRateSeries()}
                   loading={fetched.loading()}
                   onZoom={zoomRangeTo}
-                  empty={`No ${countLabel().toLowerCase()} in this range`}
+                  emptyMessage={`No ${countLabel().toLowerCase()} in this range`}
                 />
               </div>
             )}
@@ -239,7 +235,9 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
                     selectedKey={undefined}
                     onSelect={(span) => {
                       if (span)
-                        navigate(`/traces/${span.trace_id}${search({ span: span.span_id })}`);
+                        navigate(
+                          `/traces/${span.trace_id}${toQueryString({ span: span.span_id })}`,
+                        );
                     }}
                   />
                 </Show>

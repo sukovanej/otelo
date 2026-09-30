@@ -1,9 +1,9 @@
 import { A } from "@solidjs/router";
 import { createSignal } from "solid-js";
 
+import { CloseButton, Modal } from "@otelo/ui";
+
 import { link } from "../../classes";
-import CloseButton from "../../CloseButton";
-import Modal from "../../Modal";
 import TraceView, { closePanel, createTraceState, toTracePath, type TraceTab } from "../TraceView";
 
 interface TracesPageTraceModalProps {

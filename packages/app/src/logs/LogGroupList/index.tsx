@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 
 import type { LogGroup } from "@otelo/api";
-import { Level } from "@otelo/ui";
+import { LevelBadge } from "@otelo/ui";
 import { type Column, Table } from "@otelo/viz";
 
 import { formatAge, parseTime } from "../../time";
@@ -18,25 +18,25 @@ export default function LogGroupList(props: LogGroupListProps) {
   const [openTemplate, setOpenTemplate] = createSignal<string>();
   const columns: Column<LogGroup>[] = [
     {
+      kind: "meter",
       id: "count",
       label: "Lines",
       unit: "count",
-      meter: true,
       width: "16ch",
       value: (group) => group.count,
     },
     {
+      kind: "cell",
       id: "level",
       label: "Level",
       width: "max-content",
-      value: (group) => toLevelName(group.severity),
-      cell: (group) => <Level level={toLevelName(group.severity)} />,
+      cell: (group) => <LevelBadge level={toLevelName(group.severity)} />,
     },
     {
+      kind: "cell",
       id: "template",
       label: "Template",
       width: "minmax(0,1fr)",
-      value: (group) => group.template,
       cell: (group) => (
         <span class="wrap-anywhere">
           <LogGroupListTemplate text={group.template} />
@@ -44,6 +44,7 @@ export default function LogGroupList(props: LogGroupListProps) {
       ),
     },
     {
+      kind: "text",
       id: "services",
       label: "Services",
       width: "minmax(8ch,20ch)",
@@ -51,11 +52,11 @@ export default function LogGroupList(props: LogGroupListProps) {
       tone: () => "muted",
     },
     {
+      kind: "cell",
       id: "last",
       label: "Last",
       align: "end",
       width: "max-content",
-      value: (group) => group.last_at,
       tone: () => "muted",
       cell: (group) => (
         <time class="whitespace-nowrap" datetime={group.last_at} title={group.last_at}>
@@ -74,8 +75,10 @@ export default function LogGroupList(props: LogGroupListProps) {
       onRowClick={(group) =>
         setOpenTemplate(openTemplate() === group.template ? undefined : group.template)
       }
-      expanded={(group) => openTemplate() === group.template}
-      detail={(group) => <LogGroupListSamples group={group} onShowLines={props.onShowLines} />}
+      detail={{
+        isOpen: (group) => openTemplate() === group.template,
+        draw: (group) => <LogGroupListSamples group={group} onShowLines={props.onShowLines} />,
+      }}
     />
   );
 }

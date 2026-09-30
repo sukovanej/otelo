@@ -25,15 +25,16 @@ export default function TableCells<R>(props: TableCellsProps<R>) {
           return tone ? CELL_TONE_CLASSES[tone] : "";
         };
         const drawContent = (): JSX.Element => {
-          if (column.cell) return column.cell(props.row);
+          if (column.kind === "cell") return column.cell(props.row);
+          if (column.kind === "text") {
+            return <span class="truncate">{column.value(props.row) ?? "–"}</span>;
+          }
           const value = column.value(props.row);
-          if (!column.unit) return <span class="truncate">{value ?? "–"}</span>;
-          const numericValue = typeof value === "number" ? value : null;
-          const valueElement = <Value value={numericValue} unit={column.unit} inColumn />;
-          if (!column.meter) return valueElement;
+          const valueElement = <Value value={value} unit={column.unit} inColumn />;
+          if (column.kind === "number") return valueElement;
           const largest = props.largestMeterValues.get(column.id) ?? 0;
           return (
-            <TableMeter share={largest > 0 && numericValue !== null ? numericValue / largest : 0}>
+            <TableMeter share={largest > 0 && value !== null ? value / largest : 0}>
               {valueElement}
             </TableMeter>
           );

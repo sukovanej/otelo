@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js";
 
-const TONE_CLASSES: Record<Tone, string> = {
+const TONE_CLASSES: Record<BadgeTone, string> = {
   trace: "bg-trace/15 text-trace",
   muted: "bg-muted/12 text-muted",
   info: "bg-info/12 text-info",
@@ -12,7 +12,7 @@ const TONE_CLASSES: Record<Tone, string> = {
   placeholder: "bg-placeholder/14 text-placeholder",
 };
 
-export type Tone =
+export type BadgeTone =
   | "trace"
   | "muted"
   | "info"
@@ -24,7 +24,7 @@ export type Tone =
   | "placeholder";
 
 interface BadgeProps {
-  readonly tone: Tone;
+  readonly tone: BadgeTone;
   readonly children: JSX.Element;
 }
 

@@ -70,13 +70,13 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
 
   const plotWidth = () => Math.max(40, chartWidth() - PLOT_LEFT_PX - PLOT_RIGHT_MARGIN_PX);
   const frame = createMemo(() => props.frame);
-  const frameLengthMs = () => Math.max(1, frame().end - frame().start);
+  const frameLengthMs = () => Math.max(1, frame().endMs - frame().startMs);
   const timeToX = (timeMs: number) =>
-    PLOT_LEFT_PX + ((timeMs - frame().start) / frameLengthMs()) * plotWidth();
+    PLOT_LEFT_PX + ((timeMs - frame().startMs) / frameLengthMs()) * plotWidth();
   const xToTimeMs = (x: number) =>
-    frame().start + ((x - PLOT_LEFT_PX) / plotWidth()) * frameLengthMs();
+    frame().startMs + ((x - PLOT_LEFT_PX) / plotWidth()) * frameLengthMs();
   const bucketCenterX = (bucketIndex: number) =>
-    timeToX((frame().times[bucketIndex] ?? frame().start) + frame().step / 2);
+    timeToX((frame().bucketStartsMs[bucketIndex] ?? frame().startMs) + frame().stepMs / 2);
 
   const coloredSeries = createMemo<ColoredSeries[]>(() =>
     props.series.map((series, index) => ({
@@ -96,7 +96,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   );
 
   const bucketTops = createMemo(() =>
-    frame().times.map((_, bucketIndex) => {
+    frame().bucketStartsMs.map((_, bucketIndex) => {
       const values = shownSeries().map((series) => series.values[bucketIndex] ?? 0);
       return props.kind === "bar"
         ? values.reduce((sum, value) => sum + value, 0)
@@ -108,11 +108,11 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   const valueToY = (value: number) =>
     PLOT_TOP_PX + PLOT_HEIGHT_PX - (value / yAxisMax()) * PLOT_HEIGHT_PX;
   const xTicks = createMemo(() =>
-    pickTimeTicks(frame().start, frame().end, Math.floor(plotWidth() / 96)),
+    pickTimeTicks(frame().startMs, frame().endMs, Math.floor(plotWidth() / 96)),
   );
 
   const barWidth = createMemo(() => {
-    const bucketWidth = (frame().step / frameLengthMs()) * plotWidth();
+    const bucketWidth = (frame().stepMs / frameLengthMs()) * plotWidth();
     return Math.max(
       1,
       Math.min(MAX_BAR_WIDTH_PX, bucketWidth - Math.min(BAR_GAP_PX, bucketWidth / 3)),
@@ -122,7 +122,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   const barPaths = createMemo<BarPath[]>(() =>
     props.kind !== "bar"
       ? []
-      : frame().times.flatMap((_, bucketIndex) => {
+      : frame().bucketStartsMs.flatMap((_, bucketIndex) => {
           const width = barWidth();
           const left = bucketCenterX(bucketIndex) - width / 2;
           let stackedValue = 0;
@@ -181,10 +181,10 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   const [zoomDrag, setZoomDrag] = createSignal<ZoomDrag>();
 
   const findBucketIndexAt = (x: number) => {
-    const bucketCount = frame().times.length;
+    const bucketCount = frame().bucketStartsMs.length;
     if (bucketCount === 0) return undefined;
     const bucketIndex = Math.floor(
-      (xToTimeMs(x) - (frame().times[0] ?? frame().start)) / frame().step,
+      (xToTimeMs(x) - (frame().bucketStartsMs[0] ?? frame().startMs)) / frame().stepMs,
     );
     return Math.min(bucketCount - 1, Math.max(0, bucketIndex));
   };
@@ -213,7 +213,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
     );
   };
   const onKeyDown = (e: KeyboardEvent) => {
-    const bucketCount = frame().times.length;
+    const bucketCount = frame().bucketStartsMs.length;
     if (bucketCount === 0) return;
     switch (e.key) {
       case "ArrowLeft":
@@ -398,8 +398,8 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
           <ChartPanelTooltip
             crosshairX={bucketCenterX(hoveredBucketIndex() ?? 0)}
             chartWidth={chartWidth()}
-            bucketStartMs={frame().times[hoveredBucketIndex() ?? 0] ?? 0}
-            stepMs={frame().step}
+            bucketStartMs={frame().bucketStartsMs[hoveredBucketIndex() ?? 0] ?? 0}
+            stepMs={frame().stepMs}
             rows={shownSeries().map((series) => ({
               label: series.label,
               cssColor: series.cssColor,
@@ -427,7 +427,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
             </tr>
           </thead>
           <tbody>
-            <For each={frame().times}>
+            <For each={frame().bucketStartsMs}>
               {(bucketStartMs, bucketIndex) => (
                 <tr>
                   <th scope="row">{formatInstant(bucketStartMs)}</th>

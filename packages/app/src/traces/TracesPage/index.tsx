@@ -1,9 +1,16 @@
 import { type SearchParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { createSignal, Match, Show, Switch } from "solid-js";
 
-import { getSpans, getTraces, search, type Spans, type Traces, type TraceSpan } from "@otelo/api";
+import {
+  getSpans,
+  getTraces,
+  toQueryString,
+  type Spans,
+  type Traces,
+  type TraceSpan,
+} from "@otelo/api";
+import { EmptyMessage } from "@otelo/ui";
 
-import EmptyMessage from "../../EmptyMessage";
 import { createListState, formatCount, usePageKeys } from "../../list";
 import ListContent from "../../ListContent";
 import { addTerm } from "../../query";
@@ -160,7 +167,7 @@ export default function TracesPage() {
             onFilterSpans={(term) =>
               setParams({ trace: undefined, view: "spans", q: addTerm(list.query(), term) })
             }
-            onFilterLogs={(term) => navigate(`/logs${search({ q: term })}`)}
+            onFilterLogs={(term) => navigate(`/logs${toQueryString({ q: term })}`)}
             onClose={() => setParams({ trace: undefined })}
           />
         )}

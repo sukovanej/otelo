@@ -1,10 +1,9 @@
 import { For, Show } from "solid-js";
 
 import type { AttributeValue } from "@otelo/api";
-import { Button } from "@otelo/ui";
+import { Button, SqlCode } from "@otelo/ui";
 
 import type { Field } from "./field";
-import SqlCode from "./SqlCode";
 
 interface FieldTableProps {
   readonly fields: ReadonlyArray<Field>;

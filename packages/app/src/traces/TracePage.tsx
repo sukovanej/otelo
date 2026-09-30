@@ -7,7 +7,7 @@ import {
   useSearchParams,
 } from "@solidjs/router";
 
-import { search } from "@otelo/api";
+import { toQueryString } from "@otelo/api";
 
 import { link } from "../classes";
 import { usePageKeys } from "../list";
@@ -39,8 +39,8 @@ export default function TracePage() {
       id={params.id}
       state={state}
       // A filter leaves the trace for the list it narrows.
-      onFilterSpans={(term) => navigate(`/traces${search({ view: "spans", q: term })}`)}
-      onFilterLogs={(term) => navigate(`/logs${search({ q: term })}`)}
+      onFilterSpans={(term) => navigate(`/traces${toQueryString({ view: "spans", q: term })}`)}
+      onFilterLogs={(term) => navigate(`/logs${toQueryString({ q: term })}`)}
       lead={
         <>
           <A href="/traces" class={link}>
