@@ -89,7 +89,7 @@ erDiagram
     text key PK
     text value_type "JSON type of the values, or mixed"
     int count "records that have the key"
-    int has_more_values "1 once the key has more values than attribute_values keeps"
+    int has_more_values_than_listed "1 once the key has more values than attribute_values keeps"
   }
   attribute_values {
     text key_group PK
@@ -207,7 +207,7 @@ root = true AND duration > 500ms AND NOT resource.host.name = "droplet"
 
 ## Catalog and completion
 
-The writer keeps the attribute keys of each signal and of the resources in `attribute_keys` in every day file, with their JSON type in `value_type` and their count. The `key_group` of a row says whose keys they are: `logs`, `spans`, `metrics` for the labels of the series, or `resource`. `attribute_values` keeps up to 200 values of each key, and `has_more_values` marks a key that has more. The group `span_names` holds the names of the spans under the key `name`. The writer only touches these tables for a new key or value and for the counts, once per transaction.
+The writer keeps the attribute keys of each signal and of the resources in `attribute_keys` in every day file, with their JSON type in `value_type` and their count. The `key_group` of a row says whose keys they are: `logs`, `spans`, `metrics` for the labels of the series, or `resource`. `attribute_values` keeps up to 200 values of each key, and `has_more_values_than_listed` marks a key that has more. The group `span_names` holds the names of the spans under the key `name`. The writer only touches these tables for a new key or value and for the counts, once per transaction.
 
 `otelo complete <signal> <query>` and `/api/complete` suggest the fields, operators, values, and keywords that fit at the cursor, from the catalog of the retention. `otelo attributes <signal>` lists the keys.
 
