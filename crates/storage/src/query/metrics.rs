@@ -1,13 +1,13 @@
+use std::fmt;
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 
 use jiff::Timestamp;
-use otelo_query::Query;
+use otelo_query::{BuiltinField, Field, Query, Signal, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{
-    Attributes, Change, Distribution, MetricKind, MetricRetention, StepSummary, TimeRange,
-};
+use crate::{Attributes, Distribution, MetricKind, MetricRetention, TimeRange};
 
 pub const MAX_BUCKETS_IN_RANGE: i64 = 10_000;
 
@@ -117,15 +117,58 @@ impl FromStr for Resolution {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GroupingField {
+    Service,
+    Label(String),
+    Resource(String),
+}
+
+impl FromStr for GroupingField {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match resolve_field(Signal::Metrics, name) {
+            Field::Builtin(BuiltinField::Service) => Ok(Self::Service),
+            Field::Attribute(key) => Ok(Self::Label(key)),
+            Field::Resource(key) => Ok(Self::Resource(key)),
+            Field::Builtin(builtin_field) => Err(format!(
+                "the series of a metric share its {}; group them by a label, service, or \
+                 resource.<key>",
+                builtin_field.name()
+            )),
+        }
+    }
+}
+
+impl fmt::Display for GroupingField {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let field = match self {
+            Self::Service => Field::Builtin(BuiltinField::Service),
+            Self::Label(key) => Field::Attribute(key.clone()),
+            Self::Resource(key) => Field::Resource(key.clone()),
+        };
+        field.fmt(formatter)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Grouping {
+    pub by: Vec<GroupingField>,
+    pub top: Option<NonZeroUsize>,
+}
+
 #[derive(Clone, Debug)]
 pub struct MetricFilter {
     pub name: String,
     pub query: Query,
     pub step_ns: i64,
     pub resolution: Resolution,
+    pub grouping: Grouping,
 }
 
-/// The series of one metric, each in buckets of one step.
+/// The series of one metric, or the groups of them, each in buckets of one
+/// step.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct MetricSeries {
     pub name: String,
@@ -133,24 +176,55 @@ pub struct MetricSeries {
     /// the hour rounds the step up to whole minutes or hours.
     pub step_ns: i64,
     pub resolution: Resolution,
-    pub series: Vec<Series>,
-    /// More series match than the limit let through.
+    /// The highest value over the range first: the average of a gauge and an
+    /// updown, the rate of a counter, and the sum of the values of a
+    /// histogram. The group `other` comes last.
+    pub groups: Vec<SeriesGroup>,
+    /// More groups match than the limit let through, or the metric has more
+    /// series than a query reads.
     pub truncated: bool,
 }
 
+/// One series, or the series of a group combined in each step.
+///
+/// A gauge takes their average, an updown and a counter add up, and a
+/// histogram merges its buckets. The minimum and the maximum of series that
+/// add up are the sums of theirs, since their points do not line up in time.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
-pub struct Series {
-    pub service: String,
+pub struct SeriesGroup {
+    pub key: GroupKey,
     #[serde(flatten)]
     pub kind: MetricKind,
     pub unit: String,
-    pub labels: Attributes,
-    pub resource: Attributes,
     /// The buckets that have points, oldest first.
     pub buckets: Vec<Bucket>,
 }
 
-/// The points of one series in one step.
+/// What a group holds.
+///
+/// `series` is one series, when the query groups by nothing. `values` is
+/// the series that have these values of the names of `by`, and a name that
+/// the series lack is missing. `other` is the groups past `top`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum GroupKey {
+    Series {
+        service: String,
+        labels: Attributes,
+        /// The attributes of the resource that sends the series.
+        resource: Attributes,
+    },
+    Values {
+        values: Attributes,
+        series_count: usize,
+    },
+    Other {
+        group_count: usize,
+        series_count: usize,
+    },
+}
+
+/// The points of one series or group in one step.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Bucket {
     /// The start of the bucket.
@@ -160,7 +234,8 @@ pub struct Bucket {
     pub min: f64,
     pub max: f64,
     pub avg: f64,
-    /// The value of the newest point.
+    /// The value of the newest point. In a group, the newest points of its
+    /// series combined.
     pub last: f64,
     pub change: BucketChange,
 }
@@ -179,30 +254,4 @@ pub enum BucketChange {
     None,
     Rate { per_second: f64 },
     Distribution(Distribution),
-}
-
-impl Bucket {
-    #[must_use]
-    pub fn from_step_summary(start_at: Timestamp, summary: StepSummary) -> Self {
-        let change = match summary.change {
-            Change::Nothing => BucketChange::None,
-            Change::Increase(increase) => increase
-                .rate_per_second()
-                .map_or(BucketChange::None, |per_second| BucketChange::Rate {
-                    per_second,
-                }),
-            Change::Distribution(histogram) => {
-                BucketChange::Distribution(Distribution::from(*histogram))
-            }
-        };
-        Self {
-            start_at,
-            count: summary.level.count,
-            min: summary.level.min,
-            max: summary.level.max,
-            avg: summary.level.average(),
-            last: summary.level.last,
-            change,
-        }
-    }
 }

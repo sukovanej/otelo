@@ -1,11 +1,15 @@
+use std::num::NonZeroUsize;
+
 use axum::extract::{Path, Query, State};
 use otelo_query::Signal;
-use otelo_storage::query::{MetricFilter, MetricList, MetricSeries, Resolution};
+use otelo_storage::query::{
+    Grouping, GroupingField, MetricFilter, MetricList, MetricSeries, Resolution,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::Api;
-use crate::error::{ApiResult, ErrorBody};
+use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
 
 /// The series that have points in the range and that the query keeps, by
@@ -64,11 +68,32 @@ pub struct MetricParams {
     /// for one of 14 days at most, and the summaries by the hour for a longer
     /// one, or the next of them that is still kept where the range starts.
     resolution: Option<Resolution>,
+    /// The names to group the series by, separated by commas: labels,
+    /// `service`, or `resource.<key>`, such as `http.route,resource.host.name`.
+    /// The series with the same values of them combine into one group. Each
+    /// series is its own group when missing.
+    by: Option<String>,
+    /// Keep the N groups with the highest value over the range, and combine
+    /// the rest into one group `other`.
+    #[param(value_type = Option<usize>, minimum = 1)]
+    top: Option<NonZeroUsize>,
 }
 
-/// The series of one metric, each in buckets of one step with the count, the
-/// minimum, the average, the maximum, and the last value, the rate of a
-/// counter, and the distribution of a histogram.
+fn parse_grouping_fields(text: Option<&str>) -> Result<Vec<GroupingField>, ApiError> {
+    text.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            name.parse()
+                .map_err(|error: String| ApiError::bad_request(&error))
+        })
+        .collect()
+}
+
+/// The series of one metric, or the groups of them, each in buckets of one
+/// step with the count, the minimum, the average, the maximum, and the last
+/// value, the rate of a counter, and the distribution of a histogram.
 #[utoipa::path(
     get,
     path = "/api/metrics/{name}",
@@ -88,6 +113,10 @@ pub async fn get_metric_series(
 ) -> ApiResult<MetricSeries> {
     let query = parse_query(params.query.as_deref(), Signal::Metrics)?;
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
+    let grouping = Grouping {
+        by: parse_grouping_fields(params.by.as_deref())?,
+        top: params.top,
+    };
     let retention = api.storage.metric_retention();
     api.run_limited_metric_range_query(
         params.since,
@@ -102,6 +131,7 @@ pub async fn get_metric_series(
                 resolution: params
                     .resolution
                     .unwrap_or_else(|| Resolution::choose_finest_kept_for(opened.range, retention)),
+                grouping,
             };
             Ok(opened.queries.get_metric_series(&filter, limit)?)
         },

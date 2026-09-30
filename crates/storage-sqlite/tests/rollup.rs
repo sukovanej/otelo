@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use otelo_query::{Signal, parse_query};
-use otelo_storage::query::{Bucket, BucketChange, MetricFilter, MetricSeries, Resolution};
+use otelo_storage::query::{
+    Bucket, BucketChange, Grouping, MetricFilter, MetricSeries, Resolution,
+};
 use otelo_storage::{
     Attributes, Batch, Buckets, ExplicitBuckets, ExponentialBuckets, Histogram, HistogramPoint,
     IndexedCounts, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource,
@@ -161,6 +163,16 @@ fn read_metric_series(
     resolution: Resolution,
     step_ns: i64,
 ) -> MetricSeries {
+    read_grouped_metric_series(directory, name, resolution, step_ns, Grouping::default())
+}
+
+fn read_grouped_metric_series(
+    directory: &Path,
+    name: &str,
+    resolution: Resolution,
+    step_ns: i64,
+    grouping: Grouping,
+) -> MetricSeries {
     let range = TimeRange::new(ten_tomorrow(), ten_tomorrow() + 4 * HOUR).unwrap();
     let reader = Reader::open(directory, range).unwrap();
     let filter = MetricFilter {
@@ -168,6 +180,7 @@ fn read_metric_series(
         query: parse_query("", Signal::Metrics).unwrap(),
         step_ns,
         resolution,
+        grouping,
     };
     reader.get_metric_series(&filter, 10).unwrap()
 }
@@ -178,8 +191,8 @@ fn read_buckets(directory: &Path, name: &str, resolution: Resolution) -> Vec<Buc
         Resolution::Raw | Resolution::Minute => MINUTE,
     };
     let mut metric_series = read_metric_series(directory, name, resolution, step_ns);
-    assert_eq!(metric_series.series.len(), 1, "{name}");
-    metric_series.series.remove(0).buckets
+    assert_eq!(metric_series.groups.len(), 1, "{name}");
+    metric_series.groups.remove(0).buckets
 }
 
 fn levels(buckets: &[Bucket]) -> Vec<(u64, f64, f64, f64, f64)> {
@@ -258,6 +271,79 @@ fn a_minute_sums_up_each_kind_as_the_raw_points_do() {
 }
 
 #[test]
+fn a_group_of_minutes_combines_as_the_group_of_raw_points_does() {
+    let directory = tempfile::tempdir().unwrap();
+    let queue_metric = |name: &str, queue: &str, points: Points| Metric {
+        labels: serde_json::from_value(serde_json::json!({"queue": queue})).unwrap(),
+        ..metric(name, points)
+    };
+    write_metrics(
+        directory.path(),
+        vec![
+            queue_metric(
+                "queue.depth",
+                "email",
+                Points::UpDown(number_points(&[(5, 4.0), (20, 6.0), (65, 2.0)])),
+            ),
+            queue_metric(
+                "queue.depth",
+                "sms",
+                Points::UpDown(number_points(&[(10, 1.0), (70, 3.0)])),
+            ),
+            queue_metric(
+                "queue.jobs",
+                "email",
+                Points::Counter(
+                    Temporality::Cumulative,
+                    number_points(&[(0, 10.0), (30, 40.0), (90, 100.0)]),
+                ),
+            ),
+            queue_metric(
+                "queue.jobs",
+                "sms",
+                Points::Counter(
+                    Temporality::Cumulative,
+                    number_points(&[(0, 0.0), (60, 120.0)]),
+                ),
+            ),
+        ],
+    );
+    roll_up_all_due(directory.path(), ten_tomorrow() + 10 * MINUTE);
+    let read_group = |name: &str, resolution: Resolution| {
+        let grouping = Grouping {
+            by: vec!["service".parse().unwrap()],
+            top: None,
+        };
+        let mut metric_series =
+            read_grouped_metric_series(directory.path(), name, resolution, MINUTE, grouping);
+        assert_eq!(metric_series.groups.len(), 1, "{name}");
+        metric_series.groups.remove(0)
+    };
+    for name in ["queue.depth", "queue.jobs"] {
+        let raw_group = read_group(name, Resolution::Raw);
+        let minute_group = read_group(name, Resolution::Minute);
+        assert_eq!(minute_group.key, raw_group.key, "{name}");
+        assert_eq!(
+            levels(&minute_group.buckets),
+            levels(&raw_group.buckets),
+            "{name}"
+        );
+        assert_eq!(
+            rates(&minute_group.buckets),
+            rates(&raw_group.buckets),
+            "{name}"
+        );
+    }
+    let queue_depth = read_group("queue.depth", Resolution::Minute);
+    assert_eq!(
+        levels(&queue_depth.buckets),
+        [(3, 5.0, 7.0, 6.0, 7.0), (2, 5.0, 5.0, 5.0, 5.0)]
+    );
+    let queue_jobs = read_group("queue.jobs", Resolution::Minute);
+    assert_eq!(rates(&queue_jobs.buckets), [Some(1.0), Some(3.0)]);
+}
+
+#[test]
 fn an_hour_adds_up_its_minutes() {
     let directory = tempfile::tempdir().unwrap();
     write_metrics(directory.path(), metrics_of_each_kind());
@@ -265,7 +351,7 @@ fn an_hour_adds_up_its_minutes() {
     roll_up_all_due(directory.path(), ten_tomorrow() + 30 * MINUTE);
     assert!(
         read_metric_series(directory.path(), "queue.lag", Resolution::Hour, HOUR)
-            .series
+            .groups
             .is_empty()
     );
     roll_up_all_due(directory.path(), ten_tomorrow() + HOUR + 5 * MINUTE);
@@ -279,7 +365,7 @@ fn an_hour_adds_up_its_minutes() {
     let hour_series =
         read_metric_series(directory.path(), "request.duration", Resolution::Hour, HOUR);
     assert_eq!(
-        hour_series.series[0].kind,
+        hour_series.groups[0].kind,
         MetricKind::Histogram(Temporality::Delta)
     );
     assert_eq!(hour_series.resolution, Resolution::Hour);
@@ -382,7 +468,7 @@ fn a_step_of_summaries_is_a_whole_number_of_them() {
     );
     assert_eq!(metric_series.step_ns, 2 * MINUTE);
     assert_eq!(
-        levels(&metric_series.series[0].buckets),
+        levels(&metric_series.groups[0].buckets),
         [(3, 1.0, 5.0, 3.0, 3.0)]
     );
 }

@@ -1,6 +1,7 @@
 mod attributes;
 mod channel;
 mod error;
+mod grouping;
 mod histogram;
 mod increase;
 mod indexes;
@@ -17,6 +18,7 @@ use utoipa::ToSchema;
 pub use attributes::{AttributeValue, Attributes, SpanEvent};
 pub use channel::{BatchInbox, BatchSender, open_batch_channel};
 pub use error::{Error, Result};
+pub use grouping::{SummarizedSeries, group_series};
 pub use histogram::{
     Buckets, Distribution, ExplicitBuckets, ExponentialBuckets, Histogram, IndexedCounts,
     Percentiles, StepHistograms,

@@ -150,9 +150,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The series of one metric, each in buckets of one step with the count, the
-         *     minimum, the average, the maximum, and the last value, the rate of a
-         *     counter, and the distribution of a histogram.
+         * The series of one metric, or the groups of them, each in buckets of one
+         *     step with the count, the minimum, the average, the maximum, and the last
+         *     value, the rate of a counter, and the distribution of a histogram.
          */
         get: operations["get_metric_series"];
         put?: never;
@@ -367,7 +367,7 @@ export interface components {
         Attributes: {
             [key: string]: components["schemas"]["AttributeValue"];
         };
-        /** @description The points of one series in one step. */
+        /** @description The points of one series or group in one step. */
         Bucket: {
             /** Format: double */
             avg: number;
@@ -376,7 +376,8 @@ export interface components {
             count: number;
             /**
              * Format: double
-             * @description The value of the newest point.
+             * @description The value of the newest point. In a group, the newest points of its
+             *     series combined.
              */
             last: number;
             /** Format: double */
@@ -563,6 +564,31 @@ export interface components {
             /** @description The value as a query writes it. */
             text: string;
         };
+        /**
+         * @description What a group holds.
+         *
+         *     `series` is one series, when the query groups by nothing. `values` is
+         *     the series that have these values of the names of `by`, and a name that
+         *     the series lack is missing. `other` is the groups past `top`.
+         */
+        GroupKey: {
+            labels: components["schemas"]["Attributes"];
+            /** @description The attributes of the resource that sends the series. */
+            resource: components["schemas"]["Attributes"];
+            service: string;
+            /** @enum {string} */
+            type: "series";
+        } | {
+            series_count: number;
+            /** @enum {string} */
+            type: "values";
+            values: components["schemas"]["Attributes"];
+        } | {
+            group_count: number;
+            series_count: number;
+            /** @enum {string} */
+            type: "other";
+        };
         IndexBody: {
             key: string;
             /** @description `logs` or `spans`. */
@@ -692,18 +718,29 @@ export interface components {
             /** @description More series exist than the limit let through. */
             truncated: boolean;
         };
-        /** @description The series of one metric, each in buckets of one step. */
+        /**
+         * @description The series of one metric, or the groups of them, each in buckets of one
+         *     step.
+         */
         MetricSeries: {
+            /**
+             * @description The highest value over the range first: the average of a gauge and an
+             *     updown, the rate of a counter, and the sum of the values of a
+             *     histogram. The group `other` comes last.
+             */
+            groups: components["schemas"]["SeriesGroup"][];
             name: string;
             resolution: components["schemas"]["Resolution"];
-            series: components["schemas"]["Series"][];
             /**
              * Format: int64
              * @description The length of a bucket. A query of the summaries by the minute or by
              *     the hour rounds the step up to whole minutes or hours.
              */
             step_ns: number;
-            /** @description More series match than the limit let through. */
+            /**
+             * @description More groups match than the limit let through, or the metric has more
+             *     series than a query reads.
+             */
             truncated: boolean;
         };
         /** @description The requests of a service by the name of their span. */
@@ -798,12 +835,17 @@ export interface components {
          * @enum {string}
          */
         Resolution: "raw" | "1m" | "1h";
-        Series: components["schemas"]["MetricKind"] & {
+        /**
+         * @description One series, or the series of a group combined in each step.
+         *
+         *     A gauge takes their average, an updown and a counter add up, and a
+         *     histogram merges its buckets. The minimum and the maximum of series that
+         *     add up are the sums of theirs, since their points do not line up in time.
+         */
+        SeriesGroup: components["schemas"]["MetricKind"] & {
             /** @description The buckets that have points, oldest first. */
             buckets: components["schemas"]["Bucket"][];
-            labels: components["schemas"]["Attributes"];
-            resource: components["schemas"]["Attributes"];
-            service: string;
+            key: components["schemas"]["GroupKey"];
             unit: string;
         };
         SeriesInfo: components["schemas"]["MetricKind"] & {
@@ -1368,6 +1410,18 @@ export interface operations {
                  *     one, or the next of them that is still kept where the range starts.
                  */
                 resolution?: components["schemas"]["Resolution"];
+                /**
+                 * @description The names to group the series by, separated by commas: labels,
+                 *     `service`, or `resource.<key>`, such as `http.route,resource.host.name`.
+                 *     The series with the same values of them combine into one group. Each
+                 *     series is its own group when missing.
+                 */
+                by?: string;
+                /**
+                 * @description Keep the N groups with the highest value over the range, and combine
+                 *     the rest into one group `other`.
+                 */
+                top?: number;
             };
             header?: never;
             path: {

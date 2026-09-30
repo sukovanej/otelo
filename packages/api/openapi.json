@@ -429,7 +429,7 @@
     },
     "/api/metrics/{name}": {
       "get": {
-        "summary": "The series of one metric, each in buckets of one step with the count, the\nminimum, the average, the maximum, and the last value, the rate of a\ncounter, and the distribution of a histogram.",
+        "summary": "The series of one metric, or the groups of them, each in buckets of one\nstep with the count, the minimum, the average, the maximum, and the last\nvalue, the rate of a counter, and the distribution of a histogram.",
         "operationId": "get_metric_series",
         "parameters": [
           {
@@ -494,6 +494,25 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/Resolution"
+            }
+          },
+          {
+            "name": "by",
+            "in": "query",
+            "description": "The names to group the series by, separated by commas: labels,\n`service`, or `resource.<key>`, such as `http.route,resource.host.name`.\nThe series with the same values of them combine into one group. Each\nseries is its own group when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "top",
+            "in": "query",
+            "description": "Keep the N groups with the highest value over the range, and combine\nthe rest into one group `other`.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         ],
@@ -1255,7 +1274,7 @@
       },
       "Bucket": {
         "type": "object",
-        "description": "The points of one series in one step.",
+        "description": "The points of one series or group in one step.",
         "required": [
           "start_at",
           "count",
@@ -1281,7 +1300,7 @@
           "last": {
             "type": "number",
             "format": "double",
-            "description": "The value of the newest point."
+            "description": "The value of the newest point. In a group, the newest points of its\nseries combined."
           },
           "max": {
             "type": "number",
@@ -1719,6 +1738,85 @@
           }
         }
       },
+      "GroupKey": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "service",
+              "labels",
+              "resource",
+              "type"
+            ],
+            "properties": {
+              "labels": {
+                "$ref": "#/components/schemas/Attributes"
+              },
+              "resource": {
+                "$ref": "#/components/schemas/Attributes",
+                "description": "The attributes of the resource that sends the series."
+              },
+              "service": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "series"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "values",
+              "series_count",
+              "type"
+            ],
+            "properties": {
+              "series_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "values"
+                ]
+              },
+              "values": {
+                "$ref": "#/components/schemas/Attributes"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "group_count",
+              "series_count",
+              "type"
+            ],
+            "properties": {
+              "group_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "series_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a group holds.\n\n`series` is one series, when the query groups by nothing. `values` is\nthe series that have these values of the names of `by`, and a name that\nthe series lack is missing. `other` is the groups past `top`."
+      },
       "IndexBody": {
         "type": "object",
         "required": [
@@ -2050,26 +2148,27 @@
       },
       "MetricSeries": {
         "type": "object",
-        "description": "The series of one metric, each in buckets of one step.",
+        "description": "The series of one metric, or the groups of them, each in buckets of one\nstep.",
         "required": [
           "name",
           "step_ns",
           "resolution",
-          "series",
+          "groups",
           "truncated"
         ],
         "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesGroup"
+            },
+            "description": "The highest value over the range first: the average of a gauge and an\nupdown, the rate of a counter, and the sum of the values of a\nhistogram. The group `other` comes last."
+          },
           "name": {
             "type": "string"
           },
           "resolution": {
             "$ref": "#/components/schemas/Resolution"
-          },
-          "series": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Series"
-            }
           },
           "step_ns": {
             "type": "integer",
@@ -2078,7 +2177,7 @@
           },
           "truncated": {
             "type": "boolean",
-            "description": "More series match than the limit let through."
+            "description": "More groups match than the limit let through, or the metric has more\nseries than a query reads."
           }
         }
       },
@@ -2256,7 +2355,7 @@
           "1h"
         ]
       },
-      "Series": {
+      "SeriesGroup": {
         "allOf": [
           {
             "$ref": "#/components/schemas/MetricKind"
@@ -2264,10 +2363,8 @@
           {
             "type": "object",
             "required": [
-              "service",
+              "key",
               "unit",
-              "labels",
-              "resource",
               "buckets"
             ],
             "properties": {
@@ -2278,21 +2375,16 @@
                 },
                 "description": "The buckets that have points, oldest first."
               },
-              "labels": {
-                "$ref": "#/components/schemas/Attributes"
-              },
-              "resource": {
-                "$ref": "#/components/schemas/Attributes"
-              },
-              "service": {
-                "type": "string"
+              "key": {
+                "$ref": "#/components/schemas/GroupKey"
               },
               "unit": {
                 "type": "string"
               }
             }
           }
-        ]
+        ],
+        "description": "One series, or the series of a group combined in each step.\n\nA gauge takes their average, an updown and a counter add up, and a\nhistogram merges its buckets. The minimum and the maximum of series that\nadd up are the sums of theirs, since their points do not line up in time."
       },
       "SeriesInfo": {
         "allOf": [
