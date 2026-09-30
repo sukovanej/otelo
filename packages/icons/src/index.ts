@@ -46,5 +46,9 @@ export {
   DatabaseIcon,
   GlobeIcon,
   LogoIcon,
+  LogsIcon,
+  MetricsIcon,
+  ServicesIcon,
   SpanIcon,
+  TracesIcon,
 } from "./ui";

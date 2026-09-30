@@ -1,6 +1,13 @@
 import { A, type RouteSectionProps } from "@solidjs/router";
+import { For } from "solid-js";
 
-import { LogoIcon } from "@otelo/icons";
+import { LogoIcon, LogsIcon, ServicesIcon, TracesIcon } from "@otelo/icons";
+
+const SECTIONS = [
+  { href: "/services", label: "Services", icon: ServicesIcon },
+  { href: "/logs", label: "Logs", icon: LogsIcon },
+  { href: "/traces", label: "Traces", icon: TracesIcon },
+] as const;
 
 /** The frame of every page: the name and the sections above, and the page
  * filling the rest of the window. A page scrolls its own parts. */
@@ -12,16 +19,20 @@ export default function App(props: RouteSectionProps) {
           <LogoIcon size={20} class="text-accent" />
           otelo
         </A>
-        <nav class="flex gap-4">
-          <A href="/services" activeClass="text-ink" inactiveClass="text-muted hover:text-ink">
-            Services
-          </A>
-          <A href="/logs" activeClass="text-ink" inactiveClass="text-muted hover:text-ink">
-            Logs
-          </A>
-          <A href="/traces" activeClass="text-ink" inactiveClass="text-muted hover:text-ink">
-            Traces
-          </A>
+        <nav class="flex gap-5">
+          <For each={SECTIONS}>
+            {(section) => (
+              <A
+                href={section.href}
+                class="group flex items-center gap-1.5"
+                activeClass="text-ink"
+                inactiveClass="text-muted hover:text-ink"
+              >
+                <section.icon class="group-aria-[current=page]:text-accent" />
+                {section.label}
+              </A>
+            )}
+          </For>
         </nav>
       </header>
       <main class="flex min-h-0 flex-1 flex-col bg-page">{props.children}</main>
