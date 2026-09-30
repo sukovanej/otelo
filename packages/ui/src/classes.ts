@@ -22,9 +22,12 @@ export type Size = keyof typeof sizes;
  * outline. */
 export const textInput = "focus:border-line-focus focus:outline-none";
 
+/** What opens under a control, which its `relative` parent places. */
+export const popover =
+  "absolute top-[calc(100%+4px)] z-10 rounded-lg border border-line bg-surface shadow-popup";
+
 /** A list that opens under a control. */
-export const popup =
-  "absolute top-[calc(100%+4px)] z-10 m-0 max-h-80 list-none overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-popup";
+export const popup = `${popover} m-0 max-h-80 list-none overflow-y-auto p-1`;
 
 /** An option of a popup list, and the one the keys or the pointer are on.
  * The list lays out its content with `items-*` and `gap-*`. */
