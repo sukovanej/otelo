@@ -80,3 +80,9 @@ About 100 series on the droplet: 25 for the machine and otelo, and 3 for each of
 - The parsers, on recorded text: the first line of `/proc/stat`, `/proc/meminfo`, `cpu.stat`, `memory.stat`, `cgroup.events`, `launchctl list`, and the `ioreg` output.
 - The reader of cgroups, on a directory a test builds.
 - `size()` of the SQLite backend, on a data directory a test builds, with WAL files in it.
+
+## Comments
+
+### 2026-09-30T13:14:33Z by Milan Suk via claude-code
+
+> The Linux readers ran only against directories and sample files a test builds, on a Mac. No Linux machine was at hand, so /proc, cgroup v2, and sysinfo on Linux still need one run on Ubuntu 24.04 before the droplet.
