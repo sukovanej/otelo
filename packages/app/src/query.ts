@@ -4,7 +4,7 @@
 
 import type { AttributeValue } from "@otelo/api";
 
-import { isKeyword, isWordChar, lex } from "./lexer";
+import { isKeyword, isWordChar, lexQuery } from "./lexer";
 
 /** The built-in fields of every signal. An attribute with one of these names
  * is written as `attr.<key>`. */
@@ -72,7 +72,7 @@ export function literal(value: AttributeValue): string | undefined {
  * term joined to it with `AND` needs the query in parentheses. */
 function hasTopLevelOr(q: string): boolean {
   let depth = 0;
-  for (const { type, start, end } of lex(q)) {
+  for (const { type, start, end } of lexQuery(q)) {
     if (type === "(") depth++;
     else if (type === ")") depth = Math.max(0, depth - 1);
     else if (type === "word" && depth === 0 && q.slice(start, end).toLowerCase() === "or") {
