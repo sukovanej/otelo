@@ -21,3 +21,9 @@ The skill has to decide at least:
 - whether comments are allowed in `schema.sql`
 - how the SQL in the Rust sources is written: keyword case, layout, where a fragment is built from a Rust type such as `SpanKind` and not from a literal number
 - how a name on disk changes. The day files have no migration, and the `sql` query shows the names to users, so a rename changes what they type.
+
+## Comments
+
+### 2026-09-30T16:35:19Z by Milan Suk via claude-code
+
+> Left as they are: telemetry_indexes.signal in state.sqlite (real signals, and the file has no schema version) and cursors.rolled_until. The rollup file is now set aside at another version, which the task did not ask for; a rename of minutes.start needed it.
