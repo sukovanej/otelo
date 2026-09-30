@@ -86,7 +86,7 @@ impl Catalog for SmallAppCatalog {
         };
         FieldValues {
             listed,
-            has_more_values_than_listed: matches!(field, Field::Attribute(key) if key == "user.id"),
+            has_more_values: matches!(field, Field::Attribute(key) if key == "user.id"),
         }
     }
 }
@@ -114,11 +114,7 @@ fn describe_field_help(help: &FieldHelp) -> String {
         help.name,
         help.value_type,
         help.distinct_value_count,
-        if help.has_more_values_than_listed {
-            "+"
-        } else {
-            ""
-        },
+        if help.has_more_values { "+" } else { "" },
         values.join(", ")
     )
 }

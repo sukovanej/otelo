@@ -80,7 +80,7 @@ impl Reader {
                 count: count.cast_unsigned(),
             });
         }
-        let has_more_values_than_listed = self.connection().query_row(
+        let has_more_values = self.connection().query_row(
             "SELECT coalesce(max(has_more_values), 0)
              FROM attribute_keys
              WHERE key_group = ?1 AND key = ?2",
@@ -89,7 +89,7 @@ impl Reader {
         )?;
         Ok(FieldValues {
             listed: values,
-            has_more_values_than_listed,
+            has_more_values,
         })
     }
 
@@ -110,11 +110,11 @@ impl Reader {
             })
         })?;
         let mut listed: Vec<ValueInfo> = rows.collect::<Result<_, _>>()?;
-        let has_more_values_than_listed = listed.len() > MAX_CATALOG_ROWS;
+        let has_more_values = listed.len() > MAX_CATALOG_ROWS;
         listed.truncate(MAX_CATALOG_ROWS);
         Ok(FieldValues {
             listed,
-            has_more_values_than_listed,
+            has_more_values,
         })
     }
 }
