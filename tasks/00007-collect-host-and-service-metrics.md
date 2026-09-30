@@ -29,11 +29,12 @@ flowchart LR
 
 ## How it runs
 
-- One thread of its own. The readers block, so they stay off the async runtime.
+- A task on the async runtime of `otelo serve` owns the tick, next to the receivers in `run_daemon`, and ends on the shutdown token.
+- `otelo-host` is synchronous and does not depend on tokio. One call reads the machine and returns the batch of a tick. The task runs that call in `spawn_blocking`, never on a worker thread: the droplet has one vCPU, so the runtime has one worker, and a read that hangs, such as `statvfs` on a stuck mount, would stop the receivers and the API.
 - A tick on every wall-clock multiple of 15 seconds. Every point of a tick carries the time of the tick, so the series line up in the buckets of [[./00008-roll-up-metrics-to-1-minute-and-1.md]].
 - The reader fills a `Snapshot`, a plain struct of the numbers it read. The mapping turns the snapshot and the one before it into a `Batch`. The CPU shares are a change between two snapshots, so the first tick sends none.
 - The batch goes to the writer through a clone of the `Sender` the OTLP receivers use. Nothing goes through OTLP. A full channel drops the batch, and the collector logs a warning.
-- The thread ends on the shutdown token of `otelo serve`, before the writer ends.
+- A tick that is still running when the next one is due makes the task skip that one.
 
 ## Resources
 
