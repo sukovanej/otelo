@@ -23,7 +23,7 @@ change did not touch.
 ## File names
 
 - One component per file.
-- Public component: CamelCase, `RangePicker.tsx`.
+- Public component: CamelCase, `SidePanel.tsx`.
 - Private component: kebab-case, `query-input-suggestions.tsx`.
 - Several sub-components: a directory, public one in `index.tsx`, private ones beside it.
 
