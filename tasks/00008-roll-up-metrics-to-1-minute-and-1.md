@@ -51,7 +51,7 @@ The receiver accepts them and stores them as they arrive. Converting one to fixe
 ### Reading
 
 - A bucket of a counter has its rate per second: the increase between two neighbouring points, divided by the time between them. Dividing by the gap and not by the step keeps a 30-second step over 60-second points right.
-- The query reads one point before the range, so the first bucket has a point to count from.
+- The query also reads the 5 minutes before the range, so the first bucket has a point to count from. The apps export every minute, so those minutes hold it.
 - The logic that turns points into an increase or a merged distribution lives once in `otelo-storage`. The raw query and the rollup job both call it.
 - `otelo metric` prints the rate of a counter. The `kind` field of the query language takes the four names.
 
@@ -71,7 +71,7 @@ flowchart LR
   m -->|every hour| h[(1-hour rollups, 90 days)]
 ```
 
-Both rollup tables are in `metrics-rollup.sqlite`. A day file numbers its series itself, so the rollup file keeps its own `series` table, keyed by a hash of the resource, the name, the kind, the unit, and the labels. A rollup point is already an increase or a merged distribution, so the rollup series has no temporality.
+Both rollup tables are in `metrics-rollup.sqlite`. A day file numbers its series itself, so the rollup file keeps its own `series` table, keyed by a hash of the resource, the name, the kind, the unit, and the labels. A rollup point is already an increase or a merged distribution, so a rolled up `counter` or `histogram` has the temporality `delta`.
 
 ### What one rollup point holds
 
@@ -83,11 +83,17 @@ A point covers one series and one bucket (a minute or an hour).
 | `counter` | the increase in the bucket, and the seconds it covers | The chart wants the rate, which is the increase divided by those seconds. For a cumulative counter a value that goes down is a restart: the increase counts from zero. For a delta counter the increase is the sum of the deltas. |
 | `histogram` | count, sum, and the merged buckets, explicit or exponential | Merging bucket counts keeps percentiles. An average of p99s is wrong. Explicit points with different bounds do not merge: the rollup keeps the bounds of the newest point and counts the skip. Exponential points always merge. |
 
+### The file
+
+`metrics-rollup.sqlite` lives in the telemetry directory, next to the day files. It has the `resources` and `series` tables of a day file, so the compiled query of a day file reads it too. The table `cursors` says up to where the minutes and the hours are rolled up.
+
+A rollup file of another schema version does not open: the daemon logs the error and keeps no rollups. A later change of its schema needs a step that moves the rows over.
+
 ### When it runs
 
 - Every minute, the job rolls up the minute that ended 2 minutes ago. The 2 minutes let late batches arrive first.
 - Every hour, the job rolls up the hour before from the 1-minute points, not from raw points.
-- A write is an upsert on (series, bucket start), so running a bucket again gives the same result. At start the job fills the buckets it missed while the daemon was down, as far back as raw data exists.
+- A write is an upsert on (series, bucket start), so running a bucket again gives the same result. At start the job fills the buckets it missed while the daemon was down, as far back as raw data exists. It rolls up an hour at a time, and the writer takes batches in between.
 - Retention deletes 1-minute rows older than 14 days and 1-hour rows older than 90 days, once an hour.
 
 ### Which table a query reads
@@ -100,7 +106,7 @@ The metrics query in [[./00009-serve-the-query-api.md]] picks the finest table t
 | up to 14 days | 1-minute points |
 | longer | 1-hour points |
 
-A query can force a table with `resolution`.
+A range that starts before the finer points are kept reads the next coarser ones. A query can force a table with `resolution`: `raw`, `1m`, or `1h`. A step of summaries is rounded up to whole minutes or hours, and the answer names the step and the resolution it read. The list of the series picks its table the same way. A range of metrics can go back the 90 days of the hours, where the logs and the spans stop at 7.
 
 ### Size
 
