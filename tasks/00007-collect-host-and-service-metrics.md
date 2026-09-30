@@ -7,6 +7,8 @@ dependencies:
 - ./00003-store-telemetry-in-daily-sqlite-f.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/20
 ---
 # Collect host and service metrics
 
