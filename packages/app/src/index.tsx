@@ -3,6 +3,7 @@ import { render } from "solid-js/web";
 
 import App from "./App";
 import LogsPage from "./logs/LogsPage";
+import MetricsPage from "./metrics/MetricsPage";
 import ServicePage from "./services/ServicePage";
 import ServicesPage from "./services/ServicesPage";
 import TracePage from "./traces/TracePage";
@@ -27,6 +28,7 @@ render(
       <Route path="/logs" component={LogsPage} />
       <Route path="/traces" component={TracesPage} />
       <Route path="/traces/:id" component={TracePage} />
+      <Route path="/metrics/:name?" component={MetricsPage} />
       <Route path="*" component={NotFound} />
     </Router>
   ),

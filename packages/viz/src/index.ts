@@ -9,5 +9,5 @@ export type { TimeFrame, TimeSeries } from "./series";
 export { default as Sparkline } from "./Sparkline";
 export { default as Stat } from "./Stat";
 export { default as Table } from "./Table";
-export { formatValue } from "./units";
+export { formatValue, type Unit } from "./units";
 export { default as Value } from "./Value";

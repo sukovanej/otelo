@@ -23,7 +23,7 @@ type CategoricalColor =
 
 type StateColor = "error" | "warn" | "success";
 
-type PercentileColor = "p50" | "p95" | "p99";
+type PercentileColor = "p50" | "p90" | "p95" | "p99";
 
 // Each is a color of the theme of `@otelo/ui`.
 export function toCssColor(color: SeriesColor): string {

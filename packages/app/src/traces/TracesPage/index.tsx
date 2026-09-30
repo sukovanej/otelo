@@ -11,7 +11,8 @@ import {
 } from "@otelo/api";
 import { EmptyMessage } from "@otelo/ui";
 
-import { createListState, formatCount, usePageKeys } from "../../list";
+import { formatCount } from "../../count";
+import { createListState, usePageKeys } from "../../list";
 import ListContent from "../../ListContent";
 import { addTerm } from "../../query";
 import QueryBar from "../../QueryBar";

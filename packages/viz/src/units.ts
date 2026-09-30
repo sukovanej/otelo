@@ -12,10 +12,18 @@ const VALUE_SPLITTERS: Record<Unit, (value: number) => ValuePart[]> = {
   ratio: splitRatio,
   rate: splitRate,
   bytes: splitBytes,
+  "bytes-per-second": splitBytesPerSecond,
   number: (value) => [{ value: formatSignificant(value), unit: "" }],
 };
 
-export type Unit = "count" | "duration" | "ratio" | "rate" | "bytes" | "number";
+export type Unit =
+  | "count"
+  | "duration"
+  | "ratio"
+  | "rate"
+  | "bytes"
+  | "bytes-per-second"
+  | "number";
 
 interface ValuePart {
   readonly value: string;
@@ -124,6 +132,11 @@ function splitBytes(bytes: number): ValuePart[] {
       unit: BYTE_UNITS[unitIndex] ?? "",
     },
   ];
+}
+
+function splitBytesPerSecond(bytesPerSecond: number): ValuePart[] {
+  const [bytes] = splitBytes(bytesPerSecond);
+  return [{ value: bytes?.value ?? "", unit: `${bytes?.unit ?? ""}/s` }];
 }
 
 function formatSignificant(number: number, digits = 3): string {

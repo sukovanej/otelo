@@ -1,12 +1,13 @@
 import { A, type RouteSectionProps } from "@solidjs/router";
 import { For } from "solid-js";
 
-import { LogoIcon, LogsIcon, ServicesIcon, TracesIcon } from "@otelo/icons";
+import { LogoIcon, LogsIcon, MetricsIcon, ServicesIcon, TracesIcon } from "@otelo/icons";
 
 const SECTIONS = [
   { href: "/services", label: "Services", icon: ServicesIcon },
   { href: "/logs", label: "Logs", icon: LogsIcon },
   { href: "/traces", label: "Traces", icon: TracesIcon },
+  { href: "/metrics", label: "Metrics", icon: MetricsIcon },
 ] as const;
 
 export default function App(props: RouteSectionProps) {

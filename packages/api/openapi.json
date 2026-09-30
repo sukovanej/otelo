@@ -2151,12 +2151,18 @@
         "description": "The series of one metric, or the groups of them, each in buckets of one\nstep.",
         "required": [
           "name",
+          "start_at",
+          "end_at",
           "step_ns",
           "resolution",
           "groups",
           "truncated"
         ],
         "properties": {
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "groups": {
             "type": "array",
             "items": {
@@ -2169,6 +2175,11 @@
           },
           "resolution": {
             "$ref": "#/components/schemas/Resolution"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The range, after the retention capped it."
           },
           "step_ns": {
             "type": "integer",

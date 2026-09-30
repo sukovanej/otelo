@@ -723,6 +723,8 @@ export interface components {
          *     step.
          */
         MetricSeries: {
+            /** Format: date-time */
+            end_at: string;
             /**
              * @description The highest value over the range first: the average of a gauge and an
              *     updown, the rate of a counter, and the sum of the values of a
@@ -731,6 +733,11 @@ export interface components {
             groups: components["schemas"]["SeriesGroup"][];
             name: string;
             resolution: components["schemas"]["Resolution"];
+            /**
+             * Format: date-time
+             * @description The range, after the retention capped it.
+             */
+            start_at: string;
             /**
              * Format: int64
              * @description The length of a bucket. A query of the summaries by the minute or by

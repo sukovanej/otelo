@@ -67,8 +67,8 @@
 /* The colors of chart series, which charts set in inline styles that
    Tailwind does not see, so they are emitted whether a class uses them or
    not. `series-1` to `series-8` tell series apart in this order, which keeps
-   neighbors apart for color-blind eyes too. `p50`, `p95`, and `p99` are one
-   hue, darker for the higher percentile. */
+   neighbors apart for color-blind eyes too. `p50`, `p90`, `p95`, and `p99`
+   are one hue, darker for the higher percentile. */
 @theme static {
   --color-series-1: #2a78d6;
   --color-series-2: #eb6834;
@@ -79,6 +79,7 @@
   --color-series-7: #4a3aa7;
   --color-series-8: #e34948;
   --color-p50: #6da7ec;
+  --color-p90: #4b92e7;
   --color-p95: #3987e5;
   --color-p99: #1c5cab;
 }
@@ -131,6 +132,7 @@
       --color-series-7: #9085e9;
       --color-series-8: #e66767;
       --color-p50: #256abf;
+      --color-p90: #4589da;
       --color-p95: #5598e7;
       --color-p99: #9ec5f4;
       --raised: 0 1px 0 var(--color-line), 0 8px 20px -10px rgb(0 0 0 / 0.6);

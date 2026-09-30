@@ -8,7 +8,16 @@ import { pageContent } from "../classes";
 import type { ListResult, ListState } from "../list";
 import ListContentIndexHint from "./list-content-index-hint";
 
-interface ListContentProps<V extends string, R extends ListResult<V>> {
+interface IndexedListResult<V extends string> extends ListResult<V> {
+  readonly body: IndexedListBody;
+}
+
+interface IndexedListBody {
+  readonly truncated: boolean;
+  readonly unindexed: ReadonlyArray<string>;
+}
+
+interface ListContentProps<V extends string, R extends IndexedListResult<V>> {
   readonly list: ListState<V, R>;
   readonly signal: IndexedSignal;
   readonly singularNoun: string;
@@ -16,7 +25,7 @@ interface ListContentProps<V extends string, R extends ListResult<V>> {
   readonly children: JSX.Element;
 }
 
-export default function ListContent<V extends string, R extends ListResult<V>>(
+export default function ListContent<V extends string, R extends IndexedListResult<V>>(
   props: ListContentProps<V, R>,
 ) {
   const list = () => props.list;

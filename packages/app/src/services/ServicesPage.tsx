@@ -5,7 +5,7 @@ import { Callout } from "@otelo/ui";
 import { type Column, Panel, Sparkline, Table } from "@otelo/viz";
 
 import { pageContent } from "../classes";
-import { formatCount } from "../list";
+import { formatCount } from "../count";
 import ServiceName from "../ServiceName";
 import { createRangeFetch, useRange } from "./range";
 import RangeBar from "./range-bar";

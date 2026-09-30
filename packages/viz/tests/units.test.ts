@@ -52,6 +52,11 @@ test("bytes go up by 1024", () => {
   expect(formatValue(3.2 * 1024 ** 3, "bytes")).toBe("3.2GiB");
 });
 
+test("bytes per second go up by 1024", () => {
+  expect(formatValue(0, "bytes-per-second")).toBe("0B/s");
+  expect(formatValue(2.5 * 1024 ** 2, "bytes-per-second")).toBe("2.5MiB/s");
+});
+
 test("a value splits into its numbers and units", () => {
   expect(splitValue(185e9, "duration")).toEqual([
     { value: "3", unit: "m" },
