@@ -81,6 +81,48 @@ export function ClockIcon(props: IconProps) {
   );
 }
 
+/** A box seen from a corner, for the services. */
+export function ServicesIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <g {...line} stroke-width="1.2">
+        <path d="M8 1.7 13.5 4.8v6.4L8 14.3 2.5 11.2V4.8Z" />
+        <path d="M2.7 4.9 8 8l5.3-3.1M8 8v6.1" />
+      </g>
+    </Icon>
+  );
+}
+
+/** Lines of uneven length, each after a dot, for the logs. */
+export function LogsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.6 4h.01M2.6 8h.01M2.6 12h.01" {...line} stroke-width="1.8" />
+      <path d="M5.8 4h7.7M5.8 8h4.9M5.8 12h6.5" {...line} />
+    </Icon>
+  );
+}
+
+/** A bar across the top and shorter ones that step to the right under it,
+ * like the spans of a waterfall, for the traces. */
+export function TracesIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.3 3.2h11.4M2.3 6.4h4.2M6.5 9.6h4M10.5 12.8h3.2" {...line} stroke-width="1.6" />
+    </Icon>
+  );
+}
+
+/** A line that climbs over two axes, for the metrics. */
+export function MetricsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 2.5v11h11" {...line} stroke-width="1.2" />
+      <path d="M5.2 10.3 7.7 7l2.3 2 3.2-4.4" {...line} />
+    </Icon>
+  );
+}
+
 /** A globe, for a request over HTTP. */
 export function GlobeIcon(props: IconProps) {
   return (
