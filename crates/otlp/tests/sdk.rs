@@ -101,10 +101,9 @@ fn round_trip(transport: Transport) {
 
     let points: Vec<String> = rows(
         &conn,
-        "SELECT json_object('name', s.name, 'kind', s.kind, 'unit', s.unit,
-                            'plan', s.labels ->> 'plan', 'value', p.value,
-                            'counts', p.histogram -> 'counts', 'bounds', p.histogram -> 'bounds',
-                            'cumulative', p.histogram -> 'cumulative')
+        "SELECT json_object('name', s.name, 'kind', s.kind, 'temporality', s.temporality,
+                            'unit', s.unit, 'plan', s.labels ->> 'plan', 'value', p.value,
+                            'counts', p.histogram -> 'counts', 'bounds', p.histogram -> 'bounds')
          FROM points p
          JOIN series s ON s.id = p.series_id
          JOIN resources r ON r.id = s.resource_id
@@ -113,8 +112,9 @@ fn round_trip(transport: Transport) {
     assert_eq!(
         points,
         [
-            r#"{"name":"cart.adds","kind":"sum","unit":"{item}","plan":"free","value":3.0,"counts":null,"bounds":null,"cumulative":null}"#,
-            r#"{"name":"cart.duration","kind":"histogram","unit":"ms","plan":"free","value":55.0,"counts":[1,1,0],"bounds":[10.0,100.0],"cumulative":true}"#,
+            r#"{"name":"cart.adds","kind":"counter","temporality":"cumulative","unit":"{item}","plan":"free","value":3.0,"counts":null,"bounds":null}"#,
+            r#"{"name":"cart.duration","kind":"histogram","temporality":"cumulative","unit":"ms","plan":"free","value":55.0,"counts":[1,1,0],"bounds":[10.0,100.0]}"#,
+            r#"{"name":"cart.items","kind":"updown","temporality":null,"unit":"{item}","plan":"free","value":2.0,"counts":null,"bounds":null}"#,
         ]
     );
 }
@@ -172,6 +172,12 @@ fn send_each_signal(receiver: &Receiver, transport: Transport) {
         .build();
     duration.record(5.0, &plan);
     duration.record(50.0, &plan);
+    let items = meter
+        .i64_up_down_counter("cart.items")
+        .with_unit("{item}")
+        .build();
+    items.add(3, &plan);
+    items.add(-1, &plan);
 
     // Shutting a provider down exports what it holds.
     tracer_provider.shutdown().unwrap();

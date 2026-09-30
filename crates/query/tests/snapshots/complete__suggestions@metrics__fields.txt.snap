@@ -23,10 +23,11 @@ field name: string, built-in: The name of the metric.
 
 > kind = |
 gauge                          value                       replaces "" at 7..7
-sum                            value                       replaces "" at 7..7
+updown                         value                       replaces "" at 7..7
+counter                        value                       replaces "" at 7..7
 histogram                      value                       replaces "" at 7..7
-field kind: string, built-in: Whether the metric is a gauge, a sum, or a histogram.
-  3 values: gauge, sum, histogram
+field kind: string, built-in: Whether the metric is a gauge, an updown level, a counter, or a histogram.
+  4 values: gauge, updown, counter, histogram
 
 > st|
 state                          field    string, 6          replaces "st" at 0..2

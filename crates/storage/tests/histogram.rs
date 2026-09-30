@@ -1,33 +1,101 @@
-use otelo_storage::{Histogram, Merger};
+use otelo_storage::{
+    Buckets, Distribution, ExplicitBuckets, ExponentialBuckets, Histogram, IndexedCounts,
+    StepHistograms, Temporality,
+};
 
-fn point(counts: &[u64], sum: f64, cumulative: bool) -> Histogram {
+fn point(counts: &[u64], sum: f64) -> Histogram {
+    point_with_bounds(&[10.0, 100.0], counts, sum)
+}
+
+fn point_with_bounds(bounds: &[f64], counts: &[u64], sum: f64) -> Histogram {
     Histogram {
-        bounds: vec![10.0, 100.0],
-        counts: counts.to_vec(),
         count: counts.iter().sum(),
         sum: Some(sum),
         min: None,
         max: None,
-        cumulative,
+        buckets: Buckets::Explicit(ExplicitBuckets {
+            bounds: bounds.to_vec(),
+            counts: counts.to_vec(),
+        }),
     }
+}
+
+fn exponential(
+    scale: i32,
+    zero_count: u64,
+    positive: (i32, &[u64]),
+    negative: (i32, &[u64]),
+) -> Histogram {
+    let side = |(offset, counts): (i32, &[u64])| IndexedCounts {
+        offset,
+        counts: counts.to_vec(),
+    };
+    Histogram {
+        count: zero_count + positive.1.iter().sum::<u64>() + negative.1.iter().sum::<u64>(),
+        sum: Some(0.0),
+        min: None,
+        max: None,
+        buckets: Buckets::Exponential(ExponentialBuckets {
+            scale,
+            zero_count,
+            positive: side(positive),
+            negative: side(negative),
+        }),
+    }
+}
+
+fn steps(temporality: Temporality, points: Vec<(i64, Histogram)>) -> Vec<(i64, Distribution)> {
+    let mut histograms = StepHistograms::new(temporality);
+    for (step, point) in points {
+        histograms.add_point(step, point);
+    }
+    histograms
+        .into_histograms_by_step()
+        .into_iter()
+        .map(|(step, merged)| (step, Distribution::from(merged)))
+        .collect()
 }
 
 #[test]
 fn checks_the_counts_against_the_bounds() {
-    assert!(point(&[1, 2, 3], 1.0, false).check().is_ok());
-    assert!(point(&[1, 2], 1.0, false).check().is_err());
-    let mut descending = point(&[1, 2, 3], 1.0, false);
-    descending.bounds = vec![100.0, 10.0];
-    assert!(descending.check().is_err());
+    assert!(point(&[1, 2, 3], 1.0).check_buckets().is_ok());
+    assert!(point(&[1, 2], 1.0).check_buckets().is_err());
+    assert!(
+        point_with_bounds(&[100.0, 10.0], &[1, 2, 3], 1.0)
+            .check_buckets()
+            .is_err()
+    );
+}
+
+#[test]
+fn checks_the_scale_of_an_exponential_histogram() {
+    assert!(
+        exponential(20, 0, (0, &[1]), (0, &[]))
+            .check_buckets()
+            .is_ok()
+    );
+    assert!(
+        exponential(21, 0, (0, &[1]), (0, &[]))
+            .check_buckets()
+            .is_err()
+    );
+    assert!(
+        exponential(-11, 0, (0, &[1]), (0, &[]))
+            .check_buckets()
+            .is_err()
+    );
 }
 
 #[test]
 fn adds_the_deltas_of_a_step() {
-    let mut merger = Merger::default();
-    merger.push(0, point(&[1, 0, 0], 5.0, false));
-    merger.push(0, point(&[1, 2, 0], 70.0, false));
-    merger.push(60, point(&[0, 0, 1], 500.0, false));
-    let steps = merger.finish();
+    let steps = steps(
+        Temporality::Delta,
+        vec![
+            (0, point(&[1, 0, 0], 5.0)),
+            (0, point(&[1, 2, 0], 70.0)),
+            (60, point(&[0, 0, 1], 500.0)),
+        ],
+    );
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0].1.counts, [2, 2, 0]);
     assert_eq!(steps[0].1.count, 4);
@@ -37,14 +105,17 @@ fn adds_the_deltas_of_a_step() {
 
 #[test]
 fn counts_the_increase_of_cumulative_points_and_a_restart() {
-    let mut merger = Merger::default();
-    // The first point sets the start.
-    merger.push(0, point(&[5, 5, 0], 100.0, true));
-    merger.push(0, point(&[6, 7, 0], 130.0, true));
-    merger.push(60, point(&[6, 9, 1], 400.0, true));
-    // The app restarted: the counts fell.
-    merger.push(60, point(&[1, 0, 0], 2.0, true));
-    let steps = merger.finish();
+    let steps = steps(
+        Temporality::Cumulative,
+        vec![
+            // The first point sets the start.
+            (0, point(&[5, 5, 0], 100.0)),
+            (0, point(&[6, 7, 0], 130.0)),
+            (60, point(&[6, 9, 1], 400.0)),
+            // The app restarted: the counts fell.
+            (60, point(&[1, 0, 0], 2.0)),
+        ],
+    );
     assert_eq!(steps[0].1.counts, [1, 2, 0]);
     assert_eq!(steps[0].1.sum, Some(30.0));
     assert_eq!(steps[1].1.counts, [1, 2, 1]);
@@ -54,27 +125,118 @@ fn counts_the_increase_of_cumulative_points_and_a_restart() {
 
 #[test]
 fn a_step_keeps_the_newest_bounds() {
-    let mut merger = Merger::default();
-    merger.push(0, point(&[1, 1, 1], 1.0, false));
-    let mut other = point(&[4, 0], 1.0, false);
-    other.bounds = vec![50.0];
-    merger.push(0, other);
-    let steps = merger.finish();
+    let steps = steps(
+        Temporality::Delta,
+        vec![
+            (0, point(&[1, 1, 1], 1.0)),
+            (0, point_with_bounds(&[50.0], &[4, 0], 1.0)),
+        ],
+    );
     assert_eq!(steps[0].1.bounds, [50.0]);
     assert_eq!(steps[0].1.counts, [4, 0]);
 }
 
 #[test]
 fn estimates_percentiles_inside_the_buckets() {
-    let mut merger = Merger::default();
-    merger.push(0, point(&[50, 40, 10], 0.0, false));
-    let steps = merger.finish();
+    let steps = steps(Temporality::Delta, vec![(0, point(&[50, 40, 10], 0.0))]);
     let d = &steps[0].1;
     assert_eq!(d.p50, Some(10.0));
     assert_eq!(d.p90, Some(100.0));
     // The last bucket has no upper bound, so its lower bound stands in.
     assert_eq!(d.p99, Some(100.0));
-    let mut empty = Merger::default();
-    empty.push(0, point(&[0, 0, 0], 0.0, false));
-    assert_eq!(empty.finish()[0].1.p50, None);
+    let empty = Distribution::from(point(&[0, 0, 0], 0.0));
+    assert_eq!(empty.p50, None);
+}
+
+#[test]
+fn an_exponential_histogram_gets_the_bounds_of_its_buckets() {
+    // At scale 0 bucket `i` holds the values from 2^i to 2^(i + 1).
+    let positive = Distribution::from(exponential(0, 0, (0, &[10, 10]), (0, &[])));
+    assert_eq!(positive.bounds, [1.0, 2.0, 4.0]);
+    assert_eq!(positive.counts, [0, 10, 10, 0]);
+    assert_eq!(positive.p50, Some(2.0));
+    assert_eq!(positive.p90, Some(3.6));
+
+    let both_sides = Distribution::from(exponential(0, 3, (1, &[5]), (0, &[2])));
+    assert_eq!(both_sides.bounds, [-2.0, -1.0, 0.0, 2.0, 4.0]);
+    assert_eq!(both_sides.counts, [0, 2, 3, 0, 5, 0]);
+    assert_eq!(both_sides.count, 10);
+}
+
+#[test]
+fn exponential_points_of_different_scales_add_at_the_lower_scale() {
+    let steps = steps(
+        Temporality::Delta,
+        vec![
+            // At scale 1 two buckets make one of scale 0.
+            (0, exponential(1, 1, (0, &[1, 1, 1, 1]), (-3, &[1, 1, 1]))),
+            (0, exponential(0, 0, (1, &[5, 5]), (0, &[]))),
+        ],
+    );
+    let d = &steps[0].1;
+    // Negative: the indexes -3, -2, -1 of scale 1 are -2, -1, -1 of scale 0.
+    assert_eq!(d.bounds, [-1.0, -0.5, -0.25, 0.0, 1.0, 2.0, 4.0, 8.0]);
+    assert_eq!(d.counts, [0, 2, 1, 1, 0, 2, 7, 5, 0]);
+    assert_eq!(d.count, 18);
+}
+
+#[test]
+fn a_cumulative_exponential_histogram_counts_its_increase_across_a_change_of_scale() {
+    let steps = steps(
+        Temporality::Cumulative,
+        vec![
+            (0, exponential(1, 0, (0, &[1, 1, 1, 1]), (0, &[]))),
+            // The sender halved its scale once the values spread.
+            (60, exponential(0, 0, (0, &[3, 4, 2]), (0, &[]))),
+            // It restarted: a count fell.
+            (120, exponential(0, 0, (0, &[1]), (0, &[]))),
+        ],
+    );
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].0, 60);
+    assert_eq!(steps[0].1.counts, [0, 1, 2, 2, 0]);
+    assert_eq!(steps[0].1.count, 5);
+    assert_eq!(steps[1].1.counts, [0, 1, 0]);
+}
+
+#[test]
+fn an_explicit_and_an_exponential_point_do_not_merge() {
+    let steps = steps(
+        Temporality::Delta,
+        vec![
+            (0, point(&[1, 1, 1], 1.0)),
+            (0, exponential(0, 0, (0, &[4]), (0, &[]))),
+        ],
+    );
+    assert_eq!(steps[0].1.bounds, [1.0, 2.0]);
+    assert_eq!(steps[0].1.count, 4);
+}
+
+#[test]
+fn a_distribution_shows_at_most_64_buckets_of_an_exponential_histogram() {
+    let counts = vec![1; 200];
+    let wide = Distribution::from(exponential(3, 0, (0, &counts), (0, &[])));
+    assert_eq!(wide.count, 200);
+    assert_eq!(wide.counts.iter().sum::<u64>(), 200);
+    // The first bound is where the first bucket starts, and the last count is above all bounds.
+    assert!(wide.bounds.len() <= 65, "{} bounds", wide.bounds.len());
+    // The estimate reads the buckets before they are joined: the median sits in bucket 99
+    // of scale 3, which ends at 2^(100 / 8).
+    let median = wide.p50.unwrap();
+    assert!((median - 12.5_f64.exp2()).abs() < 1e-6, "{median}");
+}
+
+#[test]
+fn a_stored_histogram_reads_back_in_its_shape() {
+    for histogram in [
+        point(&[1, 2, 3], 9.0),
+        exponential(2, 1, (-4, &[1, 2]), (3, &[4])),
+    ] {
+        let json = serde_json::to_string(&histogram).unwrap();
+        assert_eq!(serde_json::from_str::<Histogram>(&json).unwrap(), histogram);
+    }
+    assert_eq!(
+        serde_json::to_string(&point(&[1, 2, 3], 9.0)).unwrap(),
+        r#"{"count":6,"sum":9.0,"min":null,"max":null,"bounds":[10.0,100.0],"counts":[1,2,3]}"#
+    );
 }

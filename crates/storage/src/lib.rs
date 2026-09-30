@@ -2,20 +2,29 @@ mod attributes;
 mod channel;
 mod error;
 mod histogram;
+mod increase;
 mod indexes;
+mod metric;
 mod otel;
 pub mod query;
 mod range;
 mod storage;
+mod summary;
 
 pub use attributes::{AttributeValue, Attributes, SpanEvent};
 pub use channel::{Inbox, Sender, batch_channel};
 pub use error::{Error, Result};
-pub use histogram::{Distribution, Histogram, Merger};
+pub use histogram::{
+    Buckets, Distribution, ExplicitBuckets, ExponentialBuckets, Histogram, IndexedCounts,
+    StepHistograms,
+};
+pub use increase::{Increase, StepIncreases};
 pub use indexes::{IndexedAttribute, IndexedSignal};
+pub use metric::{HistogramPoint, Metric, MetricKind, NumberPoint, Points, Temporality};
 pub use otel::{Severity, SpanId, SpanKind, SpanStatus, TraceId};
 pub use range::TimeRange;
-pub use storage::{RangeQueries, Storage};
+pub use storage::{MetricRetention, RangeQueries, Storage, StorageSize};
+pub use summary::{Change, Level, SeriesSteps, StepSummary};
 
 #[must_use]
 pub fn now_unix_nanos() -> i64 {
@@ -61,38 +70,4 @@ pub struct Span {
     pub status: SpanStatus,
     pub attributes: Attributes,
     pub events: Vec<SpanEvent>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Metric {
-    pub name: String,
-    pub kind: MetricKind,
-    pub unit: String,
-    pub labels: Attributes,
-    pub points: Vec<Point>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MetricKind {
-    Gauge,
-    Sum,
-    Histogram,
-}
-
-impl MetricKind {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Gauge => "gauge",
-            Self::Sum => "sum",
-            Self::Histogram => "histogram",
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Point {
-    pub recorded_at: i64,
-    pub value: f64,
-    pub histogram: Option<Histogram>,
 }

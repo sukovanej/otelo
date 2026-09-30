@@ -8,14 +8,15 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value};
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use opentelemetry_proto::tonic::metrics::v1::{
-    AggregationTemporality, DataPointFlags, HistogramDataPoint, NumberDataPoint, metric,
-    number_data_point,
+    AggregationTemporality, DataPointFlags, ExponentialHistogramDataPoint, HistogramDataPoint,
+    NumberDataPoint, exponential_histogram_data_point, metric, number_data_point,
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
 use otelo_storage::{
-    AttributeValue, Attributes, Batch, Histogram, Log, Metric, MetricKind, Point, Records,
-    Resource, Severity, Span, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId, now_unix_nanos,
+    AttributeValue, Attributes, Batch, Buckets, ExplicitBuckets, ExponentialBuckets, Histogram,
+    HistogramPoint, IndexedCounts, Log, Metric, NumberPoint, Points, Records, Resource, Severity,
+    Span, SpanEvent, SpanId, SpanKind, SpanStatus, Temporality, TraceId, now_unix_nanos,
 };
 
 // The name the OpenTelemetry SDKs give a resource without `service.name`.
@@ -39,6 +40,11 @@ impl MappedExport {
     fn reject_items(&mut self, count: usize, reason: impl Into<String>) {
         self.rejected_count += i64::try_from(count).unwrap_or(i64::MAX);
         self.rejection_reasons.insert(reason.into());
+    }
+
+    fn reject_every_item(&mut self, count: usize, reason: impl Into<String>) {
+        self.item_count += i64::try_from(count).unwrap_or(i64::MAX);
+        self.reject_items(count, reason);
     }
 }
 
@@ -101,40 +107,51 @@ pub fn metrics(request: ExportMetricsServiceRequest) -> MappedExport {
                             &mut mapped,
                             &mut records,
                             &descriptor,
-                            MetricKind::Gauge,
+                            NumberKind::Gauge,
                             gauge.data_points,
                         );
                     }
                     Some(metric::Data::Sum(sum)) => {
-                        numbers(
-                            &mut mapped,
-                            &mut records,
-                            &descriptor,
-                            MetricKind::Sum,
-                            sum.data_points,
-                        );
-                    }
-                    Some(metric::Data::Histogram(histogram)) => {
-                        let cumulative = histogram.aggregation_temporality
-                            == AggregationTemporality::Cumulative as i32;
-                        for point in histogram.data_points {
-                            mapped.item_count += 1;
-                            match descriptor.histogram_metric(point, cumulative) {
-                                Ok(Some(metric)) => records.metrics.push(metric),
-                                Ok(None) => {}
-                                Err(error) => mapped.reject_items(1, format!("{error:#}")),
+                        match kind_of_sum(sum.is_monotonic, sum.aggregation_temporality) {
+                            Ok(kind) => {
+                                numbers(
+                                    &mut mapped,
+                                    &mut records,
+                                    &descriptor,
+                                    kind,
+                                    sum.data_points,
+                                );
                             }
+                            Err(reason) => mapped.reject_every_item(sum.data_points.len(), reason),
                         }
                     }
-                    Some(metric::Data::ExponentialHistogram(histogram)) => {
-                        let count = histogram.data_points.len();
-                        mapped.item_count += i64::try_from(count).unwrap_or(i64::MAX);
-                        mapped.reject_items(count, "otelo does not store exponential histograms");
-                    }
+                    Some(metric::Data::Histogram(histogram)) => histograms(
+                        &mut mapped,
+                        &mut records,
+                        &descriptor,
+                        histogram.aggregation_temporality,
+                        histogram
+                            .data_points
+                            .into_iter()
+                            .map(explicit_histogram_point)
+                            .collect(),
+                    ),
+                    Some(metric::Data::ExponentialHistogram(histogram)) => histograms(
+                        &mut mapped,
+                        &mut records,
+                        &descriptor,
+                        histogram.aggregation_temporality,
+                        histogram
+                            .data_points
+                            .into_iter()
+                            .map(exponential_histogram_point)
+                            .collect(),
+                    ),
                     Some(metric::Data::Summary(summary)) => {
-                        let count = summary.data_points.len();
-                        mapped.item_count += i64::try_from(count).unwrap_or(i64::MAX);
-                        mapped.reject_items(count, "otelo does not store summaries");
+                        mapped.reject_every_item(
+                            summary.data_points.len(),
+                            "otelo does not store summaries",
+                        );
                     }
                     None => {}
                 }
@@ -247,50 +264,147 @@ struct MetricDescriptor<'a> {
 
 impl MetricDescriptor<'_> {
     // The writer merges the metrics of equal labels into one series.
-    fn single_point_metric(&self, kind: MetricKind, labels: Vec<KeyValue>, point: Point) -> Metric {
+    fn metric_of_points(&self, labels: Vec<KeyValue>, points: Points) -> Metric {
         Metric {
             name: self.name.clone(),
-            kind,
             unit: self.unit.clone(),
             labels: overlay_on_scope_attributes(self.scope, labels),
-            points: vec![point],
+            points,
         }
     }
 
     fn histogram_metric(
         &self,
-        point: HistogramDataPoint,
-        cumulative: bool,
-    ) -> anyhow::Result<Option<Metric>> {
-        if has_no_recorded_value(point.flags) {
-            return Ok(None);
-        }
-        // The store needs one more count than bounds, and OTLP allows a point without buckets.
-        let counts = if point.bucket_counts.is_empty() && point.explicit_bounds.is_empty() {
-            vec![point.count]
-        } else {
-            point.bucket_counts
+        temporality: Temporality,
+        point: MappedHistogramPoint,
+    ) -> anyhow::Result<Metric> {
+        point.histogram.check_buckets()?;
+        let stored = HistogramPoint {
+            recorded_at: signed_nanos(point.time_unix_nano),
+            histogram: point.histogram,
         };
-        let histogram = Histogram {
-            bounds: point.explicit_bounds,
-            counts,
+        Ok(self.metric_of_points(point.labels, Points::Histogram(temporality, vec![stored])))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NumberKind {
+    Gauge,
+    UpDown,
+    Counter(Temporality),
+}
+
+impl NumberKind {
+    const fn wrap_points(self, points: Vec<NumberPoint>) -> Points {
+        match self {
+            Self::Gauge => Points::Gauge(points),
+            Self::UpDown => Points::UpDown(points),
+            Self::Counter(temporality) => Points::Counter(temporality, points),
+        }
+    }
+}
+
+fn temporality_of(aggregation_temporality: i32) -> Option<Temporality> {
+    match AggregationTemporality::try_from(aggregation_temporality) {
+        Ok(AggregationTemporality::Cumulative) => Some(Temporality::Cumulative),
+        Ok(AggregationTemporality::Delta) => Some(Temporality::Delta),
+        Ok(AggregationTemporality::Unspecified) | Err(_) => None,
+    }
+}
+
+fn kind_of_sum(
+    is_monotonic: bool,
+    aggregation_temporality: i32,
+) -> Result<NumberKind, &'static str> {
+    match (is_monotonic, temporality_of(aggregation_temporality)) {
+        (_, None) => Err("a sum needs an aggregation temporality"),
+        (true, Some(temporality)) => Ok(NumberKind::Counter(temporality)),
+        (false, Some(Temporality::Cumulative)) => Ok(NumberKind::UpDown),
+        // Its level is a running total with no known start.
+        (false, Some(Temporality::Delta)) => {
+            Err("otelo does not store delta sums that are not monotonic")
+        }
+    }
+}
+
+struct MappedHistogramPoint {
+    flags: u32,
+    labels: Vec<KeyValue>,
+    time_unix_nano: u64,
+    histogram: Histogram,
+}
+
+fn explicit_histogram_point(point: HistogramDataPoint) -> MappedHistogramPoint {
+    // The store needs one more count than bounds, and OTLP allows a point without buckets.
+    let counts = if point.bucket_counts.is_empty() && point.explicit_bounds.is_empty() {
+        vec![point.count]
+    } else {
+        point.bucket_counts
+    };
+    MappedHistogramPoint {
+        flags: point.flags,
+        labels: point.attributes,
+        time_unix_nano: point.time_unix_nano,
+        histogram: Histogram {
             count: point.count,
             sum: point.sum,
             min: point.min,
             max: point.max,
-            cumulative,
-        };
-        histogram.check()?;
-        let stored = Point {
-            recorded_at: signed_nanos(point.time_unix_nano),
-            value: histogram.sum.unwrap_or(0.0),
-            histogram: Some(histogram),
-        };
-        Ok(Some(self.single_point_metric(
-            MetricKind::Histogram,
-            point.attributes,
-            stored,
-        )))
+            buckets: Buckets::Explicit(ExplicitBuckets {
+                bounds: point.explicit_bounds,
+                counts,
+            }),
+        },
+    }
+}
+
+fn exponential_histogram_point(point: ExponentialHistogramDataPoint) -> MappedHistogramPoint {
+    MappedHistogramPoint {
+        flags: point.flags,
+        labels: point.attributes,
+        time_unix_nano: point.time_unix_nano,
+        histogram: Histogram {
+            count: point.count,
+            sum: point.sum,
+            min: point.min,
+            max: point.max,
+            buckets: Buckets::Exponential(ExponentialBuckets {
+                scale: point.scale,
+                zero_count: point.zero_count,
+                positive: indexed_counts(point.positive),
+                negative: indexed_counts(point.negative),
+            }),
+        },
+    }
+}
+
+fn indexed_counts(buckets: Option<exponential_histogram_data_point::Buckets>) -> IndexedCounts {
+    buckets.map_or_else(IndexedCounts::default, |buckets| IndexedCounts {
+        offset: buckets.offset,
+        counts: buckets.bucket_counts,
+    })
+}
+
+fn histograms(
+    mapped: &mut MappedExport,
+    records: &mut Records,
+    descriptor: &MetricDescriptor,
+    aggregation_temporality: i32,
+    points: Vec<MappedHistogramPoint>,
+) {
+    let Some(temporality) = temporality_of(aggregation_temporality) else {
+        mapped.reject_every_item(points.len(), "a histogram needs an aggregation temporality");
+        return;
+    };
+    for point in points {
+        mapped.item_count += 1;
+        if has_no_recorded_value(point.flags) {
+            continue;
+        }
+        match descriptor.histogram_metric(temporality, point) {
+            Ok(metric) => records.metrics.push(metric),
+            Err(error) => mapped.reject_items(1, format!("{error:#}")),
+        }
     }
 }
 
@@ -298,7 +412,7 @@ fn numbers(
     mapped: &mut MappedExport,
     records: &mut Records,
     descriptor: &MetricDescriptor,
-    kind: MetricKind,
+    kind: NumberKind,
     points: Vec<NumberDataPoint>,
 ) {
     for point in points {
@@ -315,14 +429,13 @@ fn numbers(
                 continue;
             }
         };
-        let stored = Point {
+        let stored = NumberPoint {
             recorded_at: signed_nanos(point.time_unix_nano),
             value,
-            histogram: None,
         };
         records
             .metrics
-            .push(descriptor.single_point_metric(kind, point.attributes, stored));
+            .push(descriptor.metric_of_points(point.attributes, kind.wrap_points(vec![stored])));
     }
 }
 

@@ -6,6 +6,8 @@ fn names_the_file_by_the_utc_date() {
     assert_eq!(day.file_name(), "2026-09-21.sqlite");
     assert_eq!(Day::from_file_name("2026-09-21.sqlite"), Some(day));
     assert_eq!(Day::from_file_name("2026-09-21.sqlite-wal"), Some(day));
+    assert_eq!(Day::from_file_name("2026-09-21.sqlite.schema-0"), Some(day));
+    assert_eq!(Day::from_file_name("2026-09-21.sqlite.backup"), None);
     assert_eq!(Day::from_file_name("state.sqlite"), None);
 }
 

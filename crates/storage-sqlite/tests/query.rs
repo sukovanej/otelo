@@ -3,11 +3,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use otelo_query::{FieldOrigin, MAX_HELP_VALUES, Signal, complete, parse};
-use otelo_storage::query::{MetricFilter, SqlValue, default_step};
+use otelo_storage::query::{
+    Bucket, BucketChange, MetricFilter, Resolution, SqlValue, default_step,
+};
 use otelo_storage::{
-    AttributeValue, Attributes, Batch, Error, IndexedAttribute, IndexedSignal, Log, Metric,
-    MetricKind, Point, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
-    SpanStatus, TimeRange, TraceId, batch_channel,
+    AttributeValue, Attributes, Batch, Buckets, Distribution, Error, ExplicitBuckets,
+    ExponentialBuckets, Histogram, HistogramPoint, IndexedAttribute, IndexedCounts, IndexedSignal,
+    Log, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource, Severity, Span,
+    SpanId, SpanKind, SpanStatus, Temporality, TimeRange, TraceId, batch_channel,
 };
 use otelo_storage_sqlite::{Config, Day, Indexes, Reader, Writer};
 use rusqlite::Connection;
@@ -57,6 +60,20 @@ fn records(service: &str, attributes: &Value) -> Records {
         logs: Vec::new(),
         spans: Vec::new(),
         metrics: Vec::new(),
+    }
+}
+
+fn distribution_of(bucket: &Bucket) -> &Distribution {
+    match &bucket.change {
+        BucketChange::Distribution(distribution) => distribution,
+        other => panic!("a distribution, not {other:?}"),
+    }
+}
+
+const fn rate_of(bucket: &Bucket) -> Option<f64> {
+    match bucket.change {
+        BucketChange::Rate { per_second } => Some(per_second),
+        BucketChange::None | BucketChange::Distribution(_) => None,
     }
 }
 
@@ -150,21 +167,18 @@ impl Fixture {
         ];
         api.metrics = vec![Metric {
             name: "process.memory.usage".into(),
-            kind: MetricKind::Gauge,
             unit: "By".into(),
             labels: attributes_from_json(json!({"state": "used"})),
-            points: [
-                (t, 100.0),
-                (t + 10 * SECOND, 300.0),
-                (t + 70 * SECOND, 50.0),
-            ]
-            .into_iter()
-            .map(|(recorded_at, value)| Point {
-                recorded_at,
-                value,
-                histogram: None,
-            })
-            .collect(),
+            points: Points::UpDown(
+                [
+                    (t, 100.0),
+                    (t + 10 * SECOND, 300.0),
+                    (t + 70 * SECOND, 50.0),
+                ]
+                .into_iter()
+                .map(|(recorded_at, value)| NumberPoint { recorded_at, value })
+                .collect(),
+            ),
         }];
         let mut caddy = records("caddy", &json!({"service.name": "caddy"}));
         caddy.logs = vec![log(
@@ -433,7 +447,7 @@ fn metrics_filter_series_by_labels_and_resource() {
     let reader = fixture.reader_around_midnight();
     let metrics = |query: &str| {
         let list = reader
-            .metrics(&parse(query, Signal::Metrics).unwrap(), 10)
+            .metrics(&parse(query, Signal::Metrics).unwrap(), Resolution::Raw, 10)
             .unwrap();
         list.series.into_iter().map(|s| s.name).collect::<Vec<_>>()
     };
@@ -448,9 +462,11 @@ fn metrics_filter_series_by_labels_and_resource() {
         name: "process.memory.usage".into(),
         query: parse("state = used", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
+        resolution: Resolution::Raw,
     };
     let metric = reader.metric(&filter, 10).unwrap();
     assert_eq!(metric.series.len(), 1);
+    assert_eq!(metric.series[0].kind, MetricKind::UpDown);
     assert_eq!(metric.series[0].resource["host.name"], "droplet");
     let buckets: Vec<(u64, f64, f64, f64, f64)> = metric.series[0]
         .buckets
@@ -655,34 +671,35 @@ fn a_day_file_from_before_the_catalog_gets_its_tables() {
 fn a_histogram_returns_the_bucket_counts_of_each_step() {
     let dir = tempfile::tempdir().unwrap();
     let start = Day::today().start();
-    let histogram = |counts: [u64; 3], sum: f64| otelo_storage::Histogram {
-        bounds: vec![0.1, 1.0],
-        counts: counts.to_vec(),
+    let histogram = |counts: &[u64], sum: f64| Histogram {
         count: counts.iter().sum(),
         sum: Some(sum),
         min: None,
         max: None,
-        cumulative: true,
+        buckets: Buckets::Explicit(ExplicitBuckets {
+            bounds: vec![0.1, 1.0],
+            counts: counts.to_vec(),
+        }),
     };
-    let point = |offset: i64, histogram| Point {
+    let point = |offset: i64, histogram| HistogramPoint {
         recorded_at: start + offset * SECOND,
-        value: 0.0,
-        histogram: Some(histogram),
+        histogram,
     };
-    let mut broken = histogram([1, 1, 1], 1.0);
-    broken.counts.pop();
+    let broken = histogram(&[1, 1], 1.0);
     let mut api = records("api", &json!({"service.name": "api"}));
     api.metrics = vec![Metric {
         name: "http.server.request.duration".into(),
-        kind: MetricKind::Histogram,
         unit: "s".into(),
         labels: attributes_from_json(json!({"http.route": "/matches"})),
-        points: vec![
-            point(1, histogram([10, 2, 0], 3.0)),
-            point(30, histogram([14, 5, 1], 7.5)),
-            point(40, broken),
-            point(70, histogram([20, 5, 1], 8.0)),
-        ],
+        points: Points::Histogram(
+            Temporality::Cumulative,
+            vec![
+                point(1, histogram(&[10, 2, 0], 3.0)),
+                point(30, histogram(&[14, 5, 1], 7.5)),
+                point(40, broken),
+                point(70, histogram(&[20, 5, 1], 8.0)),
+            ],
+        ),
     }];
     write(dir.path(), vec![api], &Indexes::default());
     let reader = Reader::open(
@@ -694,18 +711,19 @@ fn a_histogram_returns_the_bucket_counts_of_each_step() {
         name: "http.server.request.duration".into(),
         query: parse("", Signal::Metrics).unwrap(),
         step_ns: 60 * SECOND,
+        resolution: Resolution::Raw,
     };
     let metric = reader.metric(&filter, 10).unwrap();
     let buckets = &metric.series[0].buckets;
     assert_eq!(buckets[0].count, 2);
-    let first = buckets[0].histogram.as_ref().unwrap();
+    let first = distribution_of(&buckets[0]);
     assert_eq!(first.bounds, [0.1, 1.0]);
     assert_eq!(first.counts, [4, 3, 1]);
     assert_eq!(first.count, 8);
     assert_eq!(first.sum, Some(4.5));
     assert!(first.p50.unwrap() > 0.0 && first.p50.unwrap() <= 0.1);
     assert_eq!(first.p99, Some(1.0));
-    let second = buckets[1].histogram.as_ref().unwrap();
+    let second = distribution_of(&buckets[1]);
     assert_eq!(second.counts, [6, 0, 0]);
 }
 
@@ -795,4 +813,177 @@ fn the_catalog_marks_a_key_with_a_value_too_long_to_list() {
         .unwrap();
     assert_eq!(question.distinct_value_count, 1);
     assert!(question.many_values);
+}
+
+#[test]
+fn a_counter_returns_its_rate_from_the_point_before_the_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let start = Day::today().start() + 3600 * SECOND;
+    let bytes = |labels: Value, points: &[(i64, f64)]| Metric {
+        name: "system.network.io".into(),
+        unit: "By".into(),
+        labels: attributes_from_json(labels),
+        points: Points::Counter(
+            Temporality::Cumulative,
+            points
+                .iter()
+                .map(|&(offset, value)| NumberPoint {
+                    recorded_at: start + offset * SECOND,
+                    value,
+                })
+                .collect(),
+        ),
+    };
+    let mut api = records("api", &json!({"service.name": "api"}));
+    api.metrics = vec![
+        bytes(
+            json!({"network.interface.name": "eth0"}),
+            // The last value fell: the machine started again.
+            &[(-30, 1000.0), (30, 1600.0), (90, 1900.0), (150, 100.0)],
+        ),
+        bytes(json!({"network.interface.name": "gone"}), &[(-30, 5.0)]),
+    ];
+    write(dir.path(), vec![api], &Indexes::default());
+    let reader = Reader::open(
+        dir.path(),
+        TimeRange::new(start, start + 600 * SECOND).unwrap(),
+    )
+    .unwrap();
+    let filter = MetricFilter {
+        name: "system.network.io".into(),
+        query: parse("", Signal::Metrics).unwrap(),
+        step_ns: 60 * SECOND,
+        resolution: Resolution::Raw,
+    };
+    let metric = reader.metric(&filter, 10).unwrap();
+    assert_eq!(metric.series.len(), 1);
+    assert!(!metric.truncated);
+    let series = &metric.series[0];
+    assert_eq!(series.kind, MetricKind::Counter(Temporality::Cumulative));
+    let rates: Vec<(u64, f64, Option<f64>)> = series
+        .buckets
+        .iter()
+        .map(|b| (b.count, b.last, rate_of(b)))
+        .collect();
+    assert_eq!(
+        rates,
+        [
+            (1, 1600.0, Some(10.0)),
+            (1, 1900.0, Some(5.0)),
+            (1, 100.0, Some(100.0 / 60.0)),
+        ]
+    );
+
+    let list = reader
+        .metrics(
+            &parse("kind = counter", Signal::Metrics).unwrap(),
+            Resolution::Raw,
+            10,
+        )
+        .unwrap();
+    assert_eq!(list.series.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&list.series[0]).unwrap(),
+        json!({
+            "name": "system.network.io",
+            "kind": "counter",
+            "temporality": "cumulative",
+            "unit": "By",
+            "service": "api",
+            "labels": {"network.interface.name": "eth0"},
+            "resource": {"service.name": "api"},
+        })
+    );
+}
+
+#[test]
+fn a_series_past_the_limit_is_cut_by_the_points_of_the_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let start = Day::today().start() + 3600 * SECOND;
+    let gauge = |queue: &str, offset: i64| Metric {
+        name: "queue.lag".into(),
+        unit: "s".into(),
+        labels: attributes_from_json(json!({"queue": queue})),
+        points: Points::Gauge(vec![NumberPoint {
+            recorded_at: start + offset * SECOND,
+            value: 1.0,
+        }]),
+    };
+    let mut api = records("api", &json!({"service.name": "api"}));
+    api.metrics = vec![gauge("ended", -30), gauge("email", 10), gauge("sms", 20)];
+    write(dir.path(), vec![api], &Indexes::default());
+    let reader = Reader::open(
+        dir.path(),
+        TimeRange::new(start, start + 600 * SECOND).unwrap(),
+    )
+    .unwrap();
+    let filter = MetricFilter {
+        name: "queue.lag".into(),
+        query: parse("", Signal::Metrics).unwrap(),
+        step_ns: 60 * SECOND,
+        resolution: Resolution::Raw,
+    };
+    let both = reader.metric(&filter, 2).unwrap();
+    assert_eq!(both.series.len(), 2);
+    assert!(!both.truncated);
+    let one = reader.metric(&filter, 1).unwrap();
+    assert_eq!(one.series.len(), 1);
+    assert_eq!(one.series[0].labels["queue"], "email");
+    assert!(one.truncated);
+}
+
+#[test]
+fn an_exponential_histogram_returns_the_bounds_of_its_buckets() {
+    let dir = tempfile::tempdir().unwrap();
+    let start = Day::today().start();
+    let point = |offset: i64, scale: i32, counts: &[u64]| HistogramPoint {
+        recorded_at: start + offset * SECOND,
+        histogram: Histogram {
+            count: counts.iter().sum(),
+            sum: Some(1.0),
+            min: None,
+            max: None,
+            buckets: Buckets::Exponential(ExponentialBuckets {
+                scale,
+                zero_count: 0,
+                positive: IndexedCounts {
+                    offset: 0,
+                    counts: counts.to_vec(),
+                },
+                negative: IndexedCounts::default(),
+            }),
+        },
+    };
+    let mut api = records("api", &json!({"service.name": "api"}));
+    api.metrics = vec![Metric {
+        name: "http.server.request.duration".into(),
+        unit: "s".into(),
+        labels: Attributes::new(),
+        points: Points::Histogram(
+            Temporality::Delta,
+            vec![point(1, 0, &[10, 10]), point(30, 1, &[2, 2])],
+        ),
+    }];
+    write(dir.path(), vec![api], &Indexes::default());
+    let reader = Reader::open(
+        dir.path(),
+        TimeRange::new(start, start + 600 * SECOND).unwrap(),
+    )
+    .unwrap();
+    let filter = MetricFilter {
+        name: "http.server.request.duration".into(),
+        query: parse("", Signal::Metrics).unwrap(),
+        step_ns: 60 * SECOND,
+        resolution: Resolution::Raw,
+    };
+    let metric = reader.metric(&filter, 10).unwrap();
+    assert_eq!(
+        metric.series[0].kind,
+        MetricKind::Histogram(Temporality::Delta)
+    );
+    let merged = distribution_of(&metric.series[0].buckets[0]);
+    // The point of scale 1 joins its two buckets into the first one of scale 0.
+    assert_eq!(merged.bounds, [1.0, 2.0, 4.0]);
+    assert_eq!(merged.counts, [0, 14, 10, 0]);
+    assert_eq!(merged.count, 24);
 }

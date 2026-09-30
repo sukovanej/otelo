@@ -362,7 +362,7 @@
     },
     "/api/metrics": {
       "get": {
-        "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the labels, and\nthe resource.",
+        "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the labels, and\nthe resource. A range of metrics can go back 90 days, further than the\nlogs and the spans.",
         "operationId": "metrics",
         "parameters": [
           {
@@ -429,7 +429,7 @@
     },
     "/api/metrics/{name}": {
       "get": {
-        "summary": "The series of one metric, each in buckets of one step with the count, the\nminimum, the average, the maximum, and the last value.",
+        "summary": "The series of one metric, each in buckets of one step with the count, the\nminimum, the average, the maximum, and the last value, the rate of a\ncounter, and the distribution of a histogram.",
         "operationId": "metric",
         "parameters": [
           {
@@ -485,6 +485,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Which points to read: `raw`, `1m`, or `1h`. When missing, the raw\npoints for a range of 6 hours at most, the summaries by the minute\nfor one of 14 days at most, and the summaries by the hour for a longer\none, or the next of them that is still kept where the range starts.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Resolution"
             }
           }
         ],
@@ -1292,28 +1301,20 @@
           "max",
           "avg",
           "last",
-          "histogram"
+          "change"
         ],
         "properties": {
           "avg": {
             "type": "number",
             "format": "double"
           },
+          "change": {
+            "$ref": "#/components/schemas/BucketChange"
+          },
           "count": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
-          },
-          "histogram": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Distribution",
-                "description": "The values a histogram recorded in the step: the counts of its\nbuckets and percentile estimates. `None` for a gauge or a sum, and for\nthe first step of a cumulative histogram, which only sets where the\ncounting starts."
-              }
-            ]
           },
           "last": {
             "type": "number",
@@ -1334,6 +1335,65 @@
             "description": "The start of the bucket."
           }
         }
+      },
+      "BucketChange": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "per_second",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "rate"
+                ]
+              },
+              "per_second": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Distribution"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "distribution"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "description": "What the points of a step say beyond their values.\n\n`none` for a gauge and an updown, and for a step with only the first\npoint of a cumulative series, which has nothing to count from. `rate` is\nhow much a counter grew per second: its increase between neighbouring\npoints, over the time between them. A value that goes down is a restart,\nand the increase counts from zero. `distribution` is the merged buckets\nof a histogram with percentile estimates."
       },
       "CallDetail": {
         "allOf": [
@@ -1517,7 +1577,7 @@
               "type": "number",
               "format": "double"
             },
-            "description": "The upper bounds of the buckets. The last bucket has no upper bound."
+            "description": "The upper bounds of the buckets. The last bucket has no upper bound.\nAn exponential histogram gets the bounds of its buckets, joined until\n64 of them are left."
           },
           "count": {
             "type": "integer",
@@ -1890,6 +1950,75 @@
           }
         }
       },
+      "MetricKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "gauge"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "updown"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "temporality",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "counter"
+                ]
+              },
+              "temporality": {
+                "$ref": "#/components/schemas/Temporality"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "temporality",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "histogram"
+                ]
+              },
+              "temporality": {
+                "$ref": "#/components/schemas/Temporality"
+              }
+            }
+          }
+        ],
+        "description": "How the points of a series combine over time.\n\nA `gauge` is a value at an instant, such as a CPU share. An `updown` is a\nlevel that goes up and down, such as the memory in use, and the series of\none metric add up. A `counter` is a total that only grows, such as the\nbytes sent, and a chart shows its rate. A `histogram` is the distribution\nof many values, such as request durations. A `counter` and a `histogram`\nhave a temporality."
+      },
       "MetricList": {
         "type": "object",
         "description": "The series in a range, by name.",
@@ -1916,12 +2045,16 @@
         "required": [
           "name",
           "step_ns",
+          "resolution",
           "series",
           "truncated"
         ],
         "properties": {
           "name": {
             "type": "string"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/Resolution"
           },
           "series": {
             "type": "array",
@@ -1931,7 +2064,8 @@
           },
           "step_ns": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "The length of a bucket. A query of the summaries by the minute or by\nthe hour rounds the step up to whole minutes or hours."
           },
           "truncated": {
             "type": "boolean",
@@ -2081,73 +2215,87 @@
           }
         }
       },
+      "Resolution": {
+        "type": "string",
+        "description": "Which points a metric query reads.\n\n`raw` is the points as they arrived. `1m` and `1h` are their summaries\nby the minute and by the hour, which outlive them.",
+        "enum": [
+          "raw",
+          "1m",
+          "1h"
+        ]
+      },
       "Series": {
-        "type": "object",
-        "required": [
-          "service",
-          "kind",
-          "unit",
-          "labels",
-          "resource",
-          "buckets"
-        ],
-        "properties": {
-          "buckets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Bucket"
-            },
-            "description": "The buckets that have points, oldest first."
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MetricKind"
           },
-          "kind": {
-            "type": "string"
-          },
-          "labels": {
-            "$ref": "#/components/schemas/Attributes"
-          },
-          "resource": {
-            "$ref": "#/components/schemas/Attributes"
-          },
-          "service": {
-            "type": "string"
-          },
-          "unit": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "service",
+              "unit",
+              "labels",
+              "resource",
+              "buckets"
+            ],
+            "properties": {
+              "buckets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Bucket"
+                },
+                "description": "The buckets that have points, oldest first."
+              },
+              "labels": {
+                "$ref": "#/components/schemas/Attributes"
+              },
+              "resource": {
+                "$ref": "#/components/schemas/Attributes"
+              },
+              "service": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              }
+            }
           }
-        }
+        ]
       },
       "SeriesInfo": {
-        "type": "object",
-        "required": [
-          "name",
-          "kind",
-          "unit",
-          "service",
-          "labels",
-          "resource"
-        ],
-        "properties": {
-          "kind": {
-            "type": "string",
-            "description": "`gauge`, `sum`, or `histogram`."
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MetricKind"
           },
-          "labels": {
-            "$ref": "#/components/schemas/Attributes"
-          },
-          "name": {
-            "type": "string"
-          },
-          "resource": {
-            "$ref": "#/components/schemas/Attributes",
-            "description": "The attributes of the resource that sends the series."
-          },
-          "service": {
-            "type": "string"
-          },
-          "unit": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "unit",
+              "service",
+              "labels",
+              "resource"
+            ],
+            "properties": {
+              "labels": {
+                "$ref": "#/components/schemas/Attributes"
+              },
+              "name": {
+                "type": "string"
+              },
+              "resource": {
+                "$ref": "#/components/schemas/Attributes",
+                "description": "The attributes of the resource that sends the series."
+              },
+              "service": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              }
+            }
           }
-        }
+        ]
       },
       "Service": {
         "type": "object",
@@ -2583,6 +2731,14 @@
           "rpc",
           "messaging",
           "other"
+        ]
+      },
+      "Temporality": {
+        "type": "string",
+        "description": "What a point of a series counts: `cumulative` since the series started, or\n`delta` since the point before.",
+        "enum": [
+          "cumulative",
+          "delta"
         ]
       },
       "Trace": {

@@ -130,7 +130,8 @@ export interface paths {
         /**
          * The series that have points in the range and that the query keeps, by
          *     name. The query reads `name`, `service`, `kind`, `unit`, the labels, and
-         *     the resource.
+         *     the resource. A range of metrics can go back 90 days, further than the
+         *     logs and the spans.
          */
         get: operations["metrics"];
         put?: never;
@@ -150,7 +151,8 @@ export interface paths {
         };
         /**
          * The series of one metric, each in buckets of one step with the count, the
-         *     minimum, the average, the maximum, and the last value.
+         *     minimum, the average, the maximum, and the last value, the rate of a
+         *     counter, and the distribution of a histogram.
          */
         get: operations["metric"];
         put?: never;
@@ -386,9 +388,9 @@ export interface components {
         Bucket: {
             /** Format: double */
             avg: number;
+            change: components["schemas"]["BucketChange"];
             /** Format: int64 */
             count: number;
-            histogram: null | components["schemas"]["Distribution"];
             /**
              * Format: double
              * @description The value of the newest point.
@@ -404,6 +406,28 @@ export interface components {
              */
             start_at: string;
         };
+        /**
+         * @description What the points of a step say beyond their values.
+         *
+         *     `none` for a gauge and an updown, and for a step with only the first
+         *     point of a cumulative series, which has nothing to count from. `rate` is
+         *     how much a counter grew per second: its increase between neighbouring
+         *     points, over the time between them. A value that goes down is a restart,
+         *     and the increase counts from zero. `distribution` is the merged buckets
+         *     of a histogram with percentile estimates.
+         */
+        BucketChange: {
+            /** @enum {string} */
+            kind: "none";
+        } | {
+            /** @enum {string} */
+            kind: "rate";
+            /** Format: double */
+            per_second: number;
+        } | (components["schemas"]["Distribution"] & {
+            /** @enum {string} */
+            kind: "distribution";
+        });
         /** @description The calls of a service to one target that do one thing, over a range. */
         CallDetail: components["schemas"]["OperationDetail"] & {
             /**
@@ -480,7 +504,11 @@ export interface components {
          *     merged, with the increases of cumulative points.
          */
         Distribution: {
-            /** @description The upper bounds of the buckets. The last bucket has no upper bound. */
+            /**
+             * @description The upper bounds of the buckets. The last bucket has no upper bound.
+             *     An exponential histogram gets the bounds of its buckets, joined until
+             *     64 of them are left.
+             */
             bounds: number[];
             /** Format: int64 */
             count: number;
@@ -638,6 +666,31 @@ export interface components {
              */
             unindexed: string[];
         };
+        /**
+         * @description How the points of a series combine over time.
+         *
+         *     A `gauge` is a value at an instant, such as a CPU share. An `updown` is a
+         *     level that goes up and down, such as the memory in use, and the series of
+         *     one metric add up. A `counter` is a total that only grows, such as the
+         *     bytes sent, and a chart shows its rate. A `histogram` is the distribution
+         *     of many values, such as request durations. A `counter` and a `histogram`
+         *     have a temporality.
+         */
+        MetricKind: {
+            /** @enum {string} */
+            kind: "gauge";
+        } | {
+            /** @enum {string} */
+            kind: "updown";
+        } | {
+            /** @enum {string} */
+            kind: "counter";
+            temporality: components["schemas"]["Temporality"];
+        } | {
+            /** @enum {string} */
+            kind: "histogram";
+            temporality: components["schemas"]["Temporality"];
+        };
         /** @description The series in a range, by name. */
         MetricList: {
             series: components["schemas"]["SeriesInfo"][];
@@ -647,8 +700,13 @@ export interface components {
         /** @description The series of one metric, each in buckets of one step. */
         MetricSeries: {
             name: string;
+            resolution: components["schemas"]["Resolution"];
             series: components["schemas"]["Series"][];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The length of a bucket. A query of the summaries by the minute or by
+             *     the hour rounds the step up to whole minutes or hours.
+             */
             step_ns: number;
             /** @description More series match than the limit let through. */
             truncated: boolean;
@@ -728,18 +786,23 @@ export interface components {
              */
             total_ns: number;
         };
-        Series: {
+        /**
+         * @description Which points a metric query reads.
+         *
+         *     `raw` is the points as they arrived. `1m` and `1h` are their summaries
+         *     by the minute and by the hour, which outlive them.
+         * @enum {string}
+         */
+        Resolution: "raw" | "1m" | "1h";
+        Series: components["schemas"]["MetricKind"] & {
             /** @description The buckets that have points, oldest first. */
             buckets: components["schemas"]["Bucket"][];
-            kind: string;
             labels: components["schemas"]["Attributes"];
             resource: components["schemas"]["Attributes"];
             service: string;
             unit: string;
         };
-        SeriesInfo: {
-            /** @description `gauge`, `sum`, or `histogram`. */
-            kind: string;
+        SeriesInfo: components["schemas"]["MetricKind"] & {
             labels: components["schemas"]["Attributes"];
             name: string;
             /** @description The attributes of the resource that sends the series. */
@@ -929,6 +992,12 @@ export interface components {
          * @enum {string}
          */
         TargetType: "database" | "http" | "rpc" | "messaging" | "other";
+        /**
+         * @description What a point of a series counts: `cumulative` since the series started, or
+         *     `delta` since the point before.
+         * @enum {string}
+         */
+        Temporality: "cumulative" | "delta";
         /** @description One trace: its spans by start time, and the logs that carry its ID. */
         Trace: {
             /** @description Newest first. */
@@ -1310,6 +1379,13 @@ export interface operations {
                  *     most when missing.
                  */
                 step?: string;
+                /**
+                 * @description Which points to read: `raw`, `1m`, or `1h`. When missing, the raw
+                 *     points for a range of 6 hours at most, the summaries by the minute
+                 *     for one of 14 days at most, and the summaries by the hour for a longer
+                 *     one, or the next of them that is still kept where the range starts.
+                 */
+                resolution?: components["schemas"]["Resolution"];
             };
             header?: never;
             path: {

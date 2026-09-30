@@ -29,4 +29,9 @@ fn caps_the_range_at_the_retention() {
     assert_eq!(range.start_at(), Day::today().plus(-6).start());
     assert!(api.resolve_range(Some("1h"), Some("2h"), None).is_err());
     assert!(api.resolve_range(Some("30d"), Some("20d"), None).is_err());
+    // The summaries of the metrics are kept longer.
+    let range = api.resolve_metric_range(Some("30d"), None).unwrap();
+    assert!(range.start_at() < Day::today().plus(-29).start());
+    let range = api.resolve_metric_range(Some("200d"), None).unwrap();
+    assert_eq!(range.start_at(), Day::today().plus(-89).start());
 }

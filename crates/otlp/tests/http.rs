@@ -146,9 +146,76 @@ fn rejects_the_metric_types_the_store_lacks() {
     let points: Vec<String> = rows(
         &open_todays_day_file(dir.path()),
         "SELECT s.name || ' ' || p.value FROM points p JOIN series s ON s.id = p.series_id
-         WHERE s.name != 'otelo.telemetry.dropped_batches'",
+         WHERE s.name NOT LIKE 'otelo.%'",
     );
     assert_eq!(points, ["queue.depth 4.0"]);
+}
+
+#[test]
+fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
+    let dir = tempfile::tempdir().unwrap();
+    let receiver = Receiver::start_writing_into(dir.path());
+    let ts = now_unix_nanos().to_string();
+    let sum = |name: &str, monotonic: bool, temporality: Value| {
+        let mut sum = json!({
+            "isMonotonic": monotonic,
+            "dataPoints": [{"timeUnixNano": ts, "asInt": "7"}],
+        });
+        if !temporality.is_null() {
+            sum["aggregationTemporality"] = temporality;
+        }
+        json!({"name": name, "sum": sum})
+    };
+    let body = json!({"resourceMetrics": [{"scopeMetrics": [{"metrics": [
+        sum("bytes.sent", true, json!(1)),
+        sum("emails.sent", true, json!(2)),
+        sum("requests.active", false, json!(2)),
+        sum("queue.drift", false, json!(1)),
+        sum("untold", true, Value::Null),
+        {"name": "request.duration", "exponentialHistogram": {
+            "aggregationTemporality": 2,
+            "dataPoints": [
+                {
+                    "timeUnixNano": ts, "count": "4", "sum": 7.0, "scale": 1, "zeroCount": "1",
+                    "positive": {"offset": -2, "bucketCounts": ["1", "2"]},
+                },
+                // No value was recorded: the series ended.
+                {"timeUnixNano": ts, "flags": 1, "attributes": [
+                    {"key": "route", "value": {"stringValue": "/gone"}},
+                ]},
+            ],
+        }},
+    ]}]}]});
+    let (status, response) = post_json(&receiver, "/v1/metrics", &body);
+    assert_eq!(status, 200);
+    assert_eq!(
+        response["partialSuccess"],
+        json!({
+            "rejectedDataPoints": 2,
+            "errorMessage": "a sum needs an aggregation temporality; \
+                             otelo does not store delta sums that are not monotonic",
+        })
+    );
+    receiver.stop_and_wait_for_writer();
+    let series: Vec<String> = rows(
+        &open_todays_day_file(dir.path()),
+        "SELECT json_object('name', s.name, 'kind', s.kind, 'temporality', s.temporality,
+                            'value', p.value, 'scale', p.histogram -> 'scale',
+                            'zero', p.histogram -> 'zero_count',
+                            'positive', p.histogram -> 'positive',
+                            'negative', p.histogram -> 'negative')
+         FROM points p JOIN series s ON s.id = p.series_id
+         WHERE s.name NOT LIKE 'otelo.%' ORDER BY s.name",
+    );
+    assert_eq!(
+        series,
+        [
+            r#"{"name":"bytes.sent","kind":"counter","temporality":"delta","value":7.0,"scale":null,"zero":null,"positive":null,"negative":null}"#,
+            r#"{"name":"emails.sent","kind":"counter","temporality":"cumulative","value":7.0,"scale":null,"zero":null,"positive":null,"negative":null}"#,
+            r#"{"name":"request.duration","kind":"histogram","temporality":"cumulative","value":7.0,"scale":1,"zero":1,"positive":{"offset":-2,"counts":[1,2]},"negative":{"offset":0,"counts":[]}}"#,
+            r#"{"name":"requests.active","kind":"updown","temporality":null,"value":7.0,"scale":null,"zero":null,"positive":null,"negative":null}"#,
+        ]
+    );
 }
 
 #[test]

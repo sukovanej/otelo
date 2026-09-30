@@ -5,12 +5,30 @@ use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
     AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
-    OperationDetail, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
+    OperationDetail, Resolution, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
 };
 use crate::{IndexedAttribute, Result, SpanKind, TimeRange, TraceId};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StorageSize {
+    pub telemetry_bytes: u64,
+    pub rollup_bytes: u64,
+    pub state_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MetricRetention {
+    pub oldest_raw_at: i64,
+    pub oldest_minute_at: i64,
+    pub oldest_hour_at: i64,
+}
+
 pub trait Storage: Send + Sync {
     fn oldest_retained_at(&self) -> i64;
+
+    fn metric_retention(&self) -> MetricRetention;
+
+    fn size(&self) -> Result<StorageSize>;
 
     fn open_range(&self, range: TimeRange, time_limit: Duration) -> Result<Box<dyn RangeQueries>>;
 
@@ -32,7 +50,7 @@ pub trait RangeQueries: Catalog {
 
     fn trace(&self, id: TraceId, limit: usize) -> Result<Option<Trace>>;
 
-    fn metrics(&self, query: &Query, limit: usize) -> Result<MetricList>;
+    fn metrics(&self, query: &Query, resolution: Resolution, limit: usize) -> Result<MetricList>;
 
     fn metric(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries>;
 

@@ -14,7 +14,7 @@ use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequ
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use otelo_storage::Sender;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
@@ -92,7 +92,7 @@ impl Format {
             Self::Json => {
                 let mut value = serde_json::from_slice(body)
                     .map_err(|error| Refusal::bad(error.to_string()))?;
-                convert_as_int_strings_to_numbers(&mut value);
+                fit_json_to_decoder(&mut value);
                 R::deserialize(value).map_err(|error| Refusal::bad(error.to_string()))
             }
         }
@@ -114,24 +114,58 @@ impl Format {
 
 // Proto3 JSON writes an int64 as a string, but the decoder of opentelemetry-proto
 // takes only a number for `asInt`, and would lose the value.
-fn convert_as_int_strings_to_numbers(value: &mut Value) {
+fn fit_json_to_decoder(value: &mut Value) {
     match value {
         Value::Object(object) => {
             for (key, value) in object {
+                if key == "exponentialHistogram" {
+                    insert_missing_fields_of_exponential_points(value);
+                }
                 match value {
                     Value::String(text) if key == "asInt" => {
                         if let Ok(int) = text.parse::<i64>() {
                             *value = int.into();
                         }
                     }
-                    _ => convert_as_int_strings_to_numbers(value),
+                    _ => fit_json_to_decoder(value),
                 }
             }
         }
-        Value::Array(values) => values
-            .iter_mut()
-            .for_each(convert_as_int_strings_to_numbers),
+        Value::Array(values) => values.iter_mut().for_each(fit_json_to_decoder),
         _ => {}
+    }
+}
+
+// Proto3 JSON leaves out a field at its default, but the decoder of opentelemetry-proto takes
+// a point of an exponential histogram only with every field, and would lose the metric.
+fn insert_missing_fields_of_exponential_points(histogram: &mut Value) {
+    let points = histogram
+        .get_mut("dataPoints")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object_mut);
+    for point in points {
+        let defaults = [
+            ("attributes", json!([])),
+            ("startTimeUnixNano", json!("0")),
+            ("timeUnixNano", json!("0")),
+            ("count", json!("0")),
+            ("scale", json!(0)),
+            ("zeroCount", json!("0")),
+            ("flags", json!(0)),
+            ("exemplars", json!([])),
+            ("zeroThreshold", json!(0.0)),
+        ];
+        for (field, default) in defaults {
+            point.entry(field).or_insert(default);
+        }
+        for side in ["positive", "negative"] {
+            if let Some(buckets) = point.get_mut(side).and_then(Value::as_object_mut) {
+                buckets.entry("offset").or_insert(json!(0));
+                buckets.entry("bucketCounts").or_insert(json!([]));
+            }
+        }
     }
 }
 
