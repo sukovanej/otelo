@@ -109,16 +109,17 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 |---|---|---|---|
 | `system.cpu.utilization` | gauge | `1` | `cpu.mode` on Linux: `user`, `nice`, `system`, `interrupt`, `iowait`, `steal`, `idle`. The shares add up to 1. |
 | `system.cpu.load_average.1m`, `.5m`, `.15m` | gauge | `{thread}` | |
-| `system.memory.usage` | sum | `By` | `system.memory.state`: `used`, `free`, and on Linux `cached` and `buffers` |
-| `system.memory.limit` | sum | `By` | |
-| `system.paging.usage` | sum | `By` | `system.paging.state`: `used`, `free` |
-| `system.filesystem.usage` | sum | `By` | `system.device`, `system.filesystem.mountpoint`, `system.filesystem.type`, and `system.filesystem.state`: `used`, `free` |
-| `system.network.io` | sum, a counter | `By` | `network.interface.name`, and `network.io.direction`: `receive`, `transmit` |
-| `process.cpu.time` | sum, a counter | `s` | |
-| `process.memory.usage` | sum | `By` | |
-| `process.cgroup.memory.usage` | sum | `By` | |
-| `otelo.storage.size` | sum | `By` | `otelo.storage.file`: `telemetry`, `rollup`, `state` |
+| `system.memory.usage` | updown | `By` | `system.memory.state`: `used`, `free`, and on Linux `cached` and `buffers` |
+| `system.memory.limit` | updown | `By` | |
+| `system.paging.usage` | updown | `By` | `system.paging.state`: `used`, `free` |
+| `system.filesystem.usage` | updown | `By` | `system.device`, `system.filesystem.mountpoint`, `system.filesystem.type`, and `system.filesystem.state`: `used`, `free` |
+| `system.network.io` | counter | `By` | `network.interface.name`, and `network.io.direction`: `receive`, `transmit` |
+| `process.cpu.time` | counter | `s` | |
+| `process.memory.usage` | updown | `By` | |
+| `process.cgroup.memory.usage` | updown | `By` | |
+| `otelo.storage.size` | updown | `By` | `otelo.storage.file`: `telemetry`, `rollup`, `state` |
 
+- The kinds are the four of the model in [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]. A counter is cumulative, and a chart shows its rate.
 - The names, units, and labels are the OpenTelemetry semantic conventions for system and process metrics, which are still in development and can change. Three names are not from there: the load averages have the names the OpenTelemetry Collector gives them, and `process.cgroup.memory.usage` and `otelo.storage.size` are otelo's.
 - `iowait` is the time the CPUs sat idle waiting for the disk, and `steal` the time the hypervisor gave to another tenant. Without the two, a slow droplet at 30% CPU looks healthy.
 - The `process.*` metrics cover a whole service, every process of its unit, and otelo's own process. `process.memory.usage` is the memory the processes hold themselves. `process.cgroup.memory.usage`, on Linux only, adds the page cache the unit filled, which is what `MemoryMax` and the OOM killer count.
