@@ -1634,7 +1634,7 @@
               "type",
               "values",
               "distinct_values",
-              "many_values"
+              "has_more_values"
             ],
             "properties": {
               "distinct_values": {
@@ -1642,7 +1642,7 @@
                 "description": "How many distinct values the daemon knows.",
                 "minimum": 0
               },
-              "many_values": {
+              "has_more_values": {
                 "type": "boolean",
                 "description": "Whether the field has more distinct values than the daemon keeps, so\n`distinct_values` counts only some of them."
               },

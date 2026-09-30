@@ -1,4 +1,6 @@
+use std::fs::{self, File};
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use otelo_query::{Signal, parse_query};
 use otelo_storage::query::{Bucket, BucketChange, MetricFilter, MetricSeries, Resolution};
@@ -289,10 +291,13 @@ fn an_hour_adds_up_its_minutes() {
 fn query_summary_rows(directory: &Path, table: &str) -> Vec<String> {
     let connection = Connection::open(directory.join("metrics-rollup.sqlite")).unwrap();
     let sql = format!(
-        "SELECT json_array(s.name, m.start, m.count, m.min, m.max, m.sum, m.last, m.increase,
-                           m.seconds, m.histogram)
-         FROM {table} m JOIN series s ON s.id = m.series_id
-         WHERE s.name NOT LIKE 'otelo.%' ORDER BY s.name, m.start"
+        "SELECT json_array(series.name, summary.start_at, summary.count, summary.min,
+                           summary.max, summary.sum, summary.last, summary.increase,
+                           summary.seconds, summary.histogram)
+         FROM {table} summary
+         JOIN series ON series.id = summary.series_id
+         WHERE series.name NOT LIKE 'otelo.%'
+         ORDER BY series.name, summary.start_at"
     );
     connection
         .prepare(&sql)
@@ -443,4 +448,49 @@ fn deletes_the_summaries_past_their_retention_and_the_series_without_any() {
         )
         .unwrap();
     assert_eq!(remaining_row_count, 0);
+}
+
+#[test]
+fn sets_aside_a_rollup_file_of_another_schema() {
+    let directory = tempfile::tempdir().unwrap();
+    Connection::open(directory.path().join("metrics-rollup.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE minutes (series_id INTEGER, start INTEGER);
+             INSERT INTO minutes VALUES (1, 2);",
+        )
+        .unwrap();
+    write_metrics(directory.path(), metrics_of_each_kind());
+    roll_up_all_due(directory.path(), ten_tomorrow() + 10 * MINUTE);
+
+    let set_aside_connection =
+        Connection::open(directory.path().join("metrics-rollup.sqlite.schema-0")).unwrap();
+    let old_minute_count: i64 = set_aside_connection
+        .query_row("SELECT count(*) FROM minutes WHERE start = 2", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(old_minute_count, 1);
+    assert!(!query_summary_rows(directory.path(), "minutes").is_empty());
+}
+
+#[test]
+fn deletes_a_rollup_file_set_aside_once_its_hours_are_past_the_retention() {
+    let directory = tempfile::tempdir().unwrap();
+    let expired_path = directory.path().join("metrics-rollup.sqlite.schema-0");
+    let kept_path = directory.path().join("metrics-rollup.sqlite.schema-1");
+    for path in [&expired_path, &kept_path] {
+        fs::write(path, "").unwrap();
+    }
+    let ninety_one_days = Duration::from_hours(91 * 24);
+    File::options()
+        .write(true)
+        .open(&expired_path)
+        .unwrap()
+        .set_modified(SystemTime::now() - ninety_one_days)
+        .unwrap();
+    write_metrics(directory.path(), Vec::new());
+    assert!(!expired_path.exists());
+    assert!(kept_path.exists());
 }

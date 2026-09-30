@@ -61,7 +61,8 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
              'route', attributes ->> '$.\"http.route\"',
              'scope', attributes ->> '$.\"otel.scope.name\"',
              'description', attributes ->> '$.\"otel.status_description\"')
-         FROM spans ORDER BY start_ts",
+         FROM spans
+         ORDER BY started_at",
     );
     assert_eq!(
         spans,
@@ -72,14 +73,18 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
     );
     let events: Vec<String> = query_first_column(
         &connection,
-        "SELECT json_object('name', e.value ->> 'name', 'attempt', e.value ->> '$.attributes.attempt')
-         FROM spans, json_each(spans.events) e",
+        "SELECT json_object('name', event.value ->> 'name',
+                            'attempt', event.value ->> '$.attributes.attempt')
+         FROM spans, json_each(spans.events) event",
     );
     assert_eq!(events, [r#"{"name":"retry","attempt":2}"#]);
     let child_span_counts: Vec<i64> = query_first_column(
         &connection,
-        "SELECT count(*) FROM spans c
-         JOIN spans p ON p.trace_id = c.trace_id AND p.span_id = c.parent_span_id",
+        "SELECT count(*)
+         FROM spans child_span
+         JOIN spans parent_span
+           ON parent_span.trace_id = child_span.trace_id
+          AND parent_span.span_id = child_span.parent_span_id",
     );
     assert_eq!(child_span_counts, [1]);
 
@@ -96,19 +101,24 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
     );
     let spans_of_the_log: Vec<String> = query_first_column(
         &connection,
-        "SELECT s.name FROM logs l JOIN spans s ON s.trace_id = l.trace_id AND s.span_id = l.span_id",
+        "SELECT span.name
+         FROM logs log
+         JOIN spans span ON span.trace_id = log.trace_id AND span.span_id = log.span_id",
     );
     assert_eq!(spans_of_the_log, ["GET /cart"]);
 
     let points: Vec<String> = query_first_column(
         &connection,
-        "SELECT json_object('name', s.name, 'kind', s.kind, 'temporality', s.temporality,
-                            'unit', s.unit, 'plan', s.labels ->> 'plan', 'value', p.value,
-                            'counts', p.histogram -> 'counts', 'bounds', p.histogram -> 'bounds')
-         FROM points p
-         JOIN series s ON s.id = p.series_id
-         JOIN resources r ON r.id = s.resource_id
-         WHERE r.service = 'shop' ORDER BY s.name",
+        "SELECT json_object('name', series.name, 'kind', series.kind,
+                            'temporality', series.temporality, 'unit', series.unit,
+                            'plan', series.labels ->> 'plan', 'value', point.value,
+                            'counts', point.histogram -> 'counts',
+                            'bounds', point.histogram -> 'bounds')
+         FROM points point
+         JOIN series ON series.id = point.series_id
+         JOIN resources resource ON resource.id = series.resource_id
+         WHERE resource.service = 'shop'
+         ORDER BY series.name",
     );
     assert_eq!(
         points,

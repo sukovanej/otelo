@@ -23,8 +23,8 @@ use crate::rollup::{RollupTable, read_summary, summary_columns_of};
 pub const BASELINE_LOOKBACK_NS: i64 = 5 * 60 * 1_000_000_000;
 
 const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
-    record: "s",
-    resource: "r",
+    record: "series",
+    resource: "resource",
 };
 
 // Series from different day files are one series when these match.
@@ -64,7 +64,7 @@ pub fn metric_kind_from_stored_names(
     })
 }
 
-// The row has ts, value, and histogram in this order from recorded_at_column.
+// The row has recorded_at, value, and histogram in this order from recorded_at_column.
 pub fn read_series_point(
     row: &rusqlite::Row,
     recorded_at_column: usize,
@@ -109,12 +109,17 @@ pub(super) fn list_metrics(
 ) -> anyhow::Result<MetricList> {
     ensure_metrics_query(query)?;
     let rollup_table = RollupTable::from_resolution(resolution);
-    let (points_table, instant_column) =
-        rollup_table.map_or(("points", "ts"), |table| (table.name(), "start"));
+    let (points_table, point_alias, instant_column) = rollup_table
+        .map_or(("points", "point", "recorded_at"), |table| {
+            (table.name(), "summary", "start_at")
+        });
     let mut where_clause = WhereClause::new();
     where_clause.push_condition(format!(
-        "EXISTS (SELECT 1 FROM $day.{points_table} p
-                 WHERE p.series_id = s.id AND p.{instant_column} >= :since AND p.{instant_column} < :until)"
+        "EXISTS (SELECT 1
+                 FROM $day.{points_table} {point_alias}
+                 WHERE {point_alias}.series_id = series.id
+                   AND {point_alias}.{instant_column} >= :since
+                   AND {point_alias}.{instant_column} < :until)"
     ));
     where_clause.push_param(
         ":since",
@@ -133,9 +138,10 @@ pub(super) fn list_metrics(
     )?;
     let select_series_in_schema = |schema: &dyn fmt::Display, conditions: String| {
         format!(
-            "SELECT s.name, s.kind, s.temporality, s.unit, r.service, s.labels,
-                    r.attributes AS resource
-             FROM {schema}.series s JOIN {schema}.resources r ON r.id = s.resource_id
+            "SELECT series.name, series.kind, series.temporality, series.unit, resource.service,
+                    series.labels, resource.attributes AS resource_attributes
+             FROM {schema}.series
+             JOIN {schema}.resources resource ON resource.id = series.resource_id
              WHERE {conditions}"
         )
     };
@@ -204,12 +210,16 @@ fn read_buckets_of_raw_points(
     let range_start_at = reader.range().start_at();
     let mut where_clause = WhereClause::new();
     where_clause.push_condition_with_param(
-        "p.ts >= :since",
+        "point.recorded_at >= :since",
         ":since",
         range_start_at.saturating_sub(BASELINE_LOOKBACK_NS),
     );
-    where_clause.push_condition_with_param("p.ts < :until", ":until", reader.range().end_at());
-    where_clause.push_condition_with_param("s.name = :name", ":name", filter.name.clone());
+    where_clause.push_condition_with_param(
+        "point.recorded_at < :until",
+        ":until",
+        reader.range().end_at(),
+    );
+    where_clause.push_condition_with_param("series.name = :name", ":name", filter.name.clone());
     compile_query(
         &filter.query,
         SERIES_TABLE_ALIASES,
@@ -221,14 +231,15 @@ fn read_buckets_of_raw_points(
     let mut series_in_range_count = 0;
     let mut truncated = false;
     reader.scan_rows(
-        ["", " ORDER BY ts"],
+        ["", " ORDER BY recorded_at"],
         |day_schema| {
             format!(
-                "SELECT r.service, s.kind, s.temporality, s.unit, s.labels, r.attributes, p.ts,
-                        p.value, p.histogram
-                 FROM {day_schema}.points p
-                 JOIN {day_schema}.series s ON s.id = p.series_id
-                 JOIN {day_schema}.resources r ON r.id = s.resource_id
+                "SELECT resource.service, series.kind, series.temporality, series.unit,
+                        series.labels, resource.attributes, point.recorded_at, point.value,
+                        point.histogram
+                 FROM {day_schema}.points point
+                 JOIN {day_schema}.series ON series.id = point.series_id
+                 JOIN {day_schema}.resources resource ON resource.id = series.resource_id
                  WHERE {}",
                 where_clause.sql_for_day(day_schema)
             )
@@ -291,12 +302,16 @@ fn read_buckets_of_summaries(
     let step_ns = round_step_up_to_whole_summaries(filter.step_ns, table);
     let mut where_clause = WhereClause::new();
     where_clause.push_condition_with_param(
-        "m.start >= :since",
+        "summary.start_at >= :since",
         ":since",
         start_of_first_summary(reader, table),
     );
-    where_clause.push_condition_with_param("m.start < :until", ":until", reader.range().end_at());
-    where_clause.push_condition_with_param("s.name = :name", ":name", filter.name.clone());
+    where_clause.push_condition_with_param(
+        "summary.start_at < :until",
+        ":until",
+        reader.range().end_at(),
+    );
+    where_clause.push_condition_with_param("series.name = :name", ":name", filter.name.clone());
     compile_query(
         &filter.query,
         SERIES_TABLE_ALIASES,
@@ -305,12 +320,14 @@ fn read_buckets_of_summaries(
         &mut where_clause,
     )?;
     let sql = format!(
-        "SELECT r.service, s.kind, s.temporality, s.unit, s.labels, r.attributes, m.start, {}
-         FROM {ROLLUP_SCHEMA_NAME}.{} m
-         JOIN {ROLLUP_SCHEMA_NAME}.series s ON s.id = m.series_id
-         JOIN {ROLLUP_SCHEMA_NAME}.resources r ON r.id = s.resource_id
-         WHERE {} ORDER BY m.start",
-        summary_columns_of("m"),
+        "SELECT resource.service, series.kind, series.temporality, series.unit, series.labels,
+                resource.attributes, summary.start_at, {}
+         FROM {ROLLUP_SCHEMA_NAME}.{} summary
+         JOIN {ROLLUP_SCHEMA_NAME}.series ON series.id = summary.series_id
+         JOIN {ROLLUP_SCHEMA_NAME}.resources resource ON resource.id = series.resource_id
+         WHERE {}
+         ORDER BY summary.start_at",
+        summary_columns_of("summary"),
         table.name(),
         where_clause.sql_for_rollups()
     );

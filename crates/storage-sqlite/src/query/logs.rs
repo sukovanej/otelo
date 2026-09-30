@@ -24,10 +24,10 @@ fn compile_log_query(reader: &Reader, query: &Query) -> anyhow::Result<(WhereCla
         "the query is over {}, not logs",
         query.signal
     );
-    let mut where_clause = WhereClause::within_reader_range(reader, "l.ts");
+    let mut where_clause = WhereClause::within_reader_range(reader, "log.logged_at");
     let aliases = TableAliases {
-        record: "l",
-        resource: "r",
+        record: "log",
+        resource: "resource",
     };
     let unindexed = compile_query(
         query,
@@ -39,13 +39,14 @@ fn compile_log_query(reader: &Reader, query: &Query) -> anyhow::Result<(WhereCla
     Ok((where_clause, unindexed))
 }
 
-const LOG_LINE_COLUMNS: &str = "l.ts, r.service, l.severity, l.body, l.trace_id, l.span_id,
-    l.attributes, l.source, r.attributes AS resource";
+const LOG_LINE_COLUMNS: &str = "log.logged_at, resource.service, log.severity, log.body,
+    log.trace_id, log.span_id, log.attributes, log.source,
+    resource.attributes AS resource_attributes";
 
 pub(super) fn explain_logs(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
     let (where_clause, _) = compile_log_query(reader, query)?;
     reader.explain_scan(
-        ["", " ORDER BY ts DESC"],
+        ["", " ORDER BY logged_at DESC"],
         select_logs(LOG_LINE_COLUMNS, &where_clause),
         &where_clause,
     )
@@ -63,7 +64,9 @@ pub(super) fn quote_fts_words(text: &str) -> Option<String> {
 fn select_logs(columns: &str, where_clause: &WhereClause) -> impl Fn(DaySchema) -> String {
     move |day_schema| {
         format!(
-            "SELECT {columns} FROM {day_schema}.logs l JOIN {day_schema}.resources r ON r.id = l.resource_id
+            "SELECT {columns}
+             FROM {day_schema}.logs log
+             JOIN {day_schema}.resources resource ON resource.id = log.resource_id
              WHERE {}",
             where_clause.sql_for_day(day_schema)
         )
@@ -101,7 +104,7 @@ fn log_line_from_row(row: &Row) -> anyhow::Result<LogLine> {
 
 pub(super) fn read_logs(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Logs> {
     let (where_clause, unindexed) = compile_log_query(reader, query)?;
-    let tail = format!(" ORDER BY ts DESC LIMIT {}", limit + 1);
+    let tail = format!(" ORDER BY logged_at DESC LIMIT {}", limit + 1);
     let mut logs = reader.collect_rows(
         ["", &tail],
         select_logs(LOG_LINE_COLUMNS, &where_clause),
@@ -122,8 +125,11 @@ pub(super) fn group_logs(
     limit: usize,
 ) -> anyhow::Result<LogGroups> {
     let (where_clause, unindexed) = compile_log_query(reader, query)?;
-    let columns = "l.ts, r.service, l.severity, l.body";
-    let tail = format!(" ORDER BY ts DESC LIMIT {}", MAX_GROUPED_LOG_LINES + 1);
+    let columns = "log.logged_at, resource.service, log.severity, log.body";
+    let tail = format!(
+        " ORDER BY logged_at DESC LIMIT {}",
+        MAX_GROUPED_LOG_LINES + 1
+    );
     let mut groups: HashMap<String, LogGroupTally> = HashMap::new();
     let mut scanned = 0;
     let mut partial = false;

@@ -132,7 +132,9 @@ fn rejects_a_span_without_ids_and_keeps_the_rest() {
     receiver.stop_and_wait_for_writer();
     let spans: Vec<String> = query_first_column(
         &open_todays_day_file(directory.path()),
-        "SELECT r.service || ' ' || s.name FROM spans s JOIN resources r ON r.id = s.resource_id",
+        "SELECT resource.service || ' ' || span.name
+         FROM spans span
+         JOIN resources resource ON resource.id = span.resource_id",
     );
     assert_eq!(spans, ["unknown_service GET /cart"]);
 }
@@ -155,8 +157,10 @@ fn rejects_the_metric_types_the_store_lacks() {
     receiver.stop_and_wait_for_writer();
     let points: Vec<String> = query_first_column(
         &open_todays_day_file(directory.path()),
-        "SELECT s.name || ' ' || p.value FROM points p JOIN series s ON s.id = p.series_id
-         WHERE s.name NOT LIKE 'otelo.%'",
+        "SELECT series.name || ' ' || point.value
+         FROM points point
+         JOIN series ON series.id = point.series_id
+         WHERE series.name NOT LIKE 'otelo.%'",
     );
     assert_eq!(points, ["queue.depth 4.0"]);
 }
@@ -209,13 +213,16 @@ fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
     receiver.stop_and_wait_for_writer();
     let series: Vec<String> = query_first_column(
         &open_todays_day_file(directory.path()),
-        "SELECT json_object('name', s.name, 'kind', s.kind, 'temporality', s.temporality,
-                            'value', p.value, 'scale', p.histogram -> 'scale',
-                            'zero', p.histogram -> 'zero_count',
-                            'positive', p.histogram -> 'positive',
-                            'negative', p.histogram -> 'negative')
-         FROM points p JOIN series s ON s.id = p.series_id
-         WHERE s.name NOT LIKE 'otelo.%' ORDER BY s.name",
+        "SELECT json_object('name', series.name, 'kind', series.kind,
+                            'temporality', series.temporality, 'value', point.value,
+                            'scale', point.histogram -> 'scale',
+                            'zero', point.histogram -> 'zero_count',
+                            'positive', point.histogram -> 'positive',
+                            'negative', point.histogram -> 'negative')
+         FROM points point
+         JOIN series ON series.id = point.series_id
+         WHERE series.name NOT LIKE 'otelo.%'
+         ORDER BY series.name",
     );
     assert_eq!(
         series,

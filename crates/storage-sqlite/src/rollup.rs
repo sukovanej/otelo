@@ -2,6 +2,8 @@ use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
+use std::{fs, io};
 
 use anyhow::{Context, ensure};
 use otelo_storage::query::Resolution;
@@ -19,12 +21,12 @@ use crate::series::{
     ResourceId, SeriesCache, SeriesId, SeriesIdentity, StoredSeries, find_or_insert_resource_id,
     find_or_insert_series_id,
 };
-use crate::stored_schema::{StoredSchema, read_stored_schema};
+use crate::stored_schema::{StoredSchema, read_stored_schema, set_aside_file_of_another_schema};
 
 pub const ROLLUP_FILE_NAME: &str = "metrics-rollup.sqlite";
 
 const ROLLUP_SCHEMA: &str = include_str!("rollup.sql");
-const ROLLUP_SCHEMA_VERSION: i32 = 1;
+const ROLLUP_SCHEMA_VERSION: i32 = 2;
 
 pub const MINUTE_NS: i64 = 60 * 1_000_000_000;
 pub const HOUR_NS: i64 = 60 * MINUTE_NS;
@@ -168,7 +170,7 @@ impl Rollups {
 
     fn find_start_of_oldest_day_file(&self) -> anyhow::Result<Option<i64>> {
         let mut oldest_day = None;
-        for entry in std::fs::read_dir(&self.telemetry_directory)? {
+        for entry in fs::read_dir(&self.telemetry_directory)? {
             let file_name = entry?.file_name();
             let day = file_name
                 .to_str()
@@ -190,7 +192,7 @@ impl Rollups {
     fn read_start_of_first_minute(&self) -> anyhow::Result<Option<i64>> {
         Ok(self
             .connection
-            .query_row("SELECT min(start) FROM minutes", [], |row| row.get(0))?)
+            .query_row("SELECT min(start_at) FROM minutes", [], |row| row.get(0))?)
     }
 
     fn roll_up_minutes(&mut self, minute_range: TimeRange) -> anyhow::Result<()> {
@@ -245,18 +247,19 @@ impl Rollups {
         let until = minute_range.end_at();
         let reader = Reader::open(&self.telemetry_directory, TimeRange::new(since, until)?)?;
         let mut where_clause = WhereClause::new();
-        where_clause.push_condition_with_param("p.ts >= :since", ":since", since);
-        where_clause.push_condition_with_param("p.ts < :until", ":until", until);
+        where_clause.push_condition_with_param("point.recorded_at >= :since", ":since", since);
+        where_clause.push_condition_with_param("point.recorded_at < :until", ":until", until);
         let mut steps_by_series: BTreeMap<SeriesKey, SeriesSteps> = BTreeMap::new();
         reader.scan_rows(
-            ["", " ORDER BY ts"],
+            ["", " ORDER BY recorded_at"],
             |day_schema| {
                 format!(
-                    "SELECT r.service, r.attributes, s.name, s.kind, s.temporality, s.unit,
-                            s.labels, p.ts, p.value, p.histogram
-                     FROM {day_schema}.points p
-                     JOIN {day_schema}.series s ON s.id = p.series_id
-                     JOIN {day_schema}.resources r ON r.id = s.resource_id
+                    "SELECT resource.service, resource.attributes, series.name, series.kind,
+                            series.temporality, series.unit, series.labels, point.recorded_at,
+                            point.value, point.histogram
+                     FROM {day_schema}.points point
+                     JOIN {day_schema}.series ON series.id = point.series_id
+                     JOIN {day_schema}.resources resource ON resource.id = series.resource_id
                      WHERE {}",
                     where_clause.sql_for_day(day_schema)
                 )
@@ -295,8 +298,10 @@ impl Rollups {
         let mut summaries_by_series: BTreeMap<SeriesId, StepSummary> = BTreeMap::new();
         {
             let mut select_minutes = transaction.prepare_cached(&format!(
-                "SELECT series_id, {SUMMARY_COLUMNS} FROM minutes
-                 WHERE start >= ?1 AND start < ?2 ORDER BY start"
+                "SELECT series_id, {SUMMARY_COLUMNS}
+                 FROM minutes
+                 WHERE start_at >= ?1 AND start_at < ?2
+                 ORDER BY start_at"
             ))?;
             let mut rows = select_minutes.query([hour_start_at, hour_start_at + HOUR_NS])?;
             while let Some(row) = rows.next()? {
@@ -329,8 +334,11 @@ impl Rollups {
         oldest_hour_at: i64,
     ) -> anyhow::Result<()> {
         let transaction = self.connection.transaction()?;
-        transaction.execute("DELETE FROM minutes WHERE start < ?1", [oldest_minute_at])?;
-        transaction.execute("DELETE FROM hours WHERE start < ?1", [oldest_hour_at])?;
+        transaction.execute(
+            "DELETE FROM minutes WHERE start_at < ?1",
+            [oldest_minute_at],
+        )?;
+        transaction.execute("DELETE FROM hours WHERE start_at < ?1", [oldest_hour_at])?;
         transaction.execute_batch(
             "DELETE FROM series WHERE id NOT IN
                (SELECT series_id FROM minutes UNION SELECT series_id FROM hours);
@@ -341,6 +349,43 @@ impl Rollups {
         self.series_cache = SeriesCache::default();
         Ok(())
     }
+}
+
+pub fn set_aside_rollup_file_of_another_schema(telemetry_directory: &Path) -> anyhow::Result<()> {
+    let path = telemetry_directory.join(ROLLUP_FILE_NAME);
+    if path.is_file() {
+        set_aside_file_of_another_schema(&path, ROLLUP_SCHEMA_VERSION)
+            .with_context(|| format!("set {} aside", path.display()))?;
+    }
+    Ok(())
+}
+
+// A file set aside takes no more rows, so its newest summary is no newer than its last change.
+pub fn delete_rollup_files_set_aside_before(
+    telemetry_directory: &Path,
+    oldest_hour_at: i64,
+) -> io::Result<Vec<String>> {
+    let oldest_kept_change =
+        UNIX_EPOCH + Duration::from_nanos(u64::try_from(oldest_hour_at).unwrap_or(0));
+    let mut deleted_file_names = Vec::new();
+    for entry in fs::read_dir(telemetry_directory)? {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if is_rollup_file_set_aside(&name) && entry.metadata()?.modified()? < oldest_kept_change {
+            fs::remove_file(entry.path())?;
+            deleted_file_names.push(name);
+        }
+    }
+    deleted_file_names.sort();
+    Ok(deleted_file_names)
+}
+
+fn is_rollup_file_set_aside(name: &str) -> bool {
+    name.strip_prefix(ROLLUP_FILE_NAME)
+        .and_then(|rest| rest.strip_prefix(".schema-"))
+        .is_some_and(|version| version.parse::<i32>().is_ok())
 }
 
 // A summary holds what each step added, whatever the points of the series counted.
@@ -378,7 +423,7 @@ fn write_summary(
     };
     transaction
         .prepare_cached(&format!(
-            "INSERT OR REPLACE INTO {} (series_id, start, {SUMMARY_COLUMNS})
+            "INSERT OR REPLACE INTO {} (series_id, start_at, {SUMMARY_COLUMNS})
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             table.name()
         ))?

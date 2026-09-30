@@ -55,7 +55,7 @@ test("lexSql reads comments, and what lacks its end runs to the end", () => {
 });
 
 test("lexSql join back into the text", () => {
-  const sql = "  SELECT l.ts,\n   r.service FROM logs -- x\n WHERE a=$1;";
+  const sql = "  SELECT log.logged_at,\n   resource.service FROM logs -- x\n WHERE a=$1;";
   expect(
     lexSql(sql)
       .map((token) => token.text)
@@ -67,21 +67,23 @@ test("lexSql join back into the text", () => {
 test("layOutSql starts a line at each clause, and at each condition a level deeper", () => {
   expect(
     printLayout(
-      "select l.ts,r.service from logs l left outer join resources r on r.id = l.resource_id " +
-        "where l.ts > ? and r.service = $1 or l.n between 1 and 2 " +
-        "group by 1 having count(*) > 1 order by l.ts desc limit 50 offset 10",
+      "select log.logged_at,resource.service from logs log " +
+        "left outer join resources resource on resource.id = log.resource_id " +
+        "where log.logged_at > ? and resource.service = $1 or log.severity between 1 and 2 " +
+        "group by resource.service having count(*) > 1 " +
+        "order by log.logged_at desc limit 50 offset 10",
     ),
   ).toBe(
     [
-      "select l.ts, r.service",
-      "from logs l",
-      "left outer join resources r on r.id = l.resource_id",
-      "where l.ts > ?",
-      "  and r.service = $1",
-      "  or l.n between 1 and 2",
-      "group by 1",
+      "select log.logged_at, resource.service",
+      "from logs log",
+      "left outer join resources resource on resource.id = log.resource_id",
+      "where log.logged_at > ?",
+      "  and resource.service = $1",
+      "  or log.severity between 1 and 2",
+      "group by resource.service",
       "having count(*) > 1",
-      "order by l.ts desc",
+      "order by log.logged_at desc",
       "limit 50",
       "offset 10",
     ].join("\n"),

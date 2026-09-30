@@ -35,12 +35,12 @@ test("a database span has its system and its query as it is", () => {
   expect(
     readSpanMeaning({
       "db.system.name": "sqlite",
-      "db.query.text": "  SELECT l.ts,\n   r.service FROM logs",
+      "db.query.text": "  SELECT log.logged_at,\n   resource.service FROM logs",
     }),
   ).toEqual({
     kind: "database",
     system: "sqlite",
-    query: "  SELECT l.ts,\n   r.service FROM logs",
+    query: "  SELECT log.logged_at,\n   resource.service FROM logs",
   });
   expect(readSpanMeaning({ "db.system": "redis", "db.statement": "HGET k f" })).toEqual({
     kind: "database",

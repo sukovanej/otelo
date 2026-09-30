@@ -101,7 +101,7 @@ fn traces_itself() {
     assert_eq!(attributes["url.query"], "q=level%20%3E%3D%20warn");
     let children: Vec<String> = connection
         .prepare(
-            "SELECT name FROM spans WHERE trace_id = ?1 AND parent_span_id = ?2 ORDER BY start_ts",
+            "SELECT name FROM spans WHERE trace_id = ?1 AND parent_span_id = ?2 ORDER BY started_at",
         )
         .unwrap()
         .query_map((&trace_id, &span_id), |row| row.get(0))
@@ -121,7 +121,7 @@ fn traces_itself() {
     let bodies: Vec<String> = connection
         .prepare(
             "SELECT body FROM logs JOIN resources ON resources.id = resource_id
-             WHERE service = 'otelo' ORDER BY ts",
+             WHERE service = 'otelo' ORDER BY logged_at",
         )
         .unwrap()
         .query_map([], |row| row.get(0))
@@ -137,12 +137,14 @@ fn collects_the_metrics_of_its_host_when_it_starts() {
     let daemon = start_daemon_with_args(directory.path(), &["--own-telemetry", "self"]);
     let day = otelo_storage_sqlite::Day::today().file_name();
     let day_file_path = directory.path().join("telemetry").join(day);
-    let select_host_metrics = "SELECT s.name, s.kind, r.attributes FROM points p
-         JOIN series s ON s.id = p.series_id
-         JOIN resources r ON r.id = s.resource_id
-         WHERE r.service = 'otelo' AND s.name IN
+    let select_host_metrics = "SELECT series.name, series.kind, resource.attributes
+         FROM points point
+         JOIN series ON series.id = point.series_id
+         JOIN resources resource ON resource.id = series.resource_id
+         WHERE resource.service = 'otelo' AND series.name IN
              ('system.memory.limit', 'process.cpu.time', 'otelo.storage.size')
-         GROUP BY s.name ORDER BY s.name";
+         GROUP BY series.name
+         ORDER BY series.name";
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let rows: Vec<(String, String, String)> = loop {
         let rows = rusqlite::Connection::open(&day_file_path)

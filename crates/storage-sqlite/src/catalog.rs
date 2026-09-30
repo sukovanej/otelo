@@ -64,7 +64,7 @@ pub struct CatalogCache {
 struct KnownKey {
     value_type: ValueType,
     values: HashSet<String>,
-    many_values: bool,
+    has_more_values: bool,
 }
 
 struct KeyDelta {
@@ -81,8 +81,8 @@ pub struct CatalogDelta {
 impl CatalogCache {
     pub fn load(connection: &Connection) -> rusqlite::Result<Self> {
         let mut catalog = Self::default();
-        let mut keys_statement =
-            connection.prepare("SELECT signal, key, type, many_values FROM attribute_keys")?;
+        let mut keys_statement = connection
+            .prepare("SELECT key_group, key, value_type, has_more_values FROM attribute_keys")?;
         let mut rows = keys_statement.query([])?;
         while let Some(row) = rows.next()? {
             let Some(group) = KeyGroup::parse(&row.get::<_, String>(0)?) else {
@@ -93,12 +93,12 @@ impl CatalogCache {
                 KnownKey {
                     value_type: value_type_from_stored_name(&row.get::<_, String>(2)?),
                     values: HashSet::new(),
-                    many_values: row.get(3)?,
+                    has_more_values: row.get(3)?,
                 },
             );
         }
         let mut values_statement =
-            connection.prepare("SELECT signal, key, value FROM attribute_values")?;
+            connection.prepare("SELECT key_group, key, value FROM attribute_values")?;
         let mut rows = values_statement.query([])?;
         while let Some(row) = rows.next()? {
             let Some(group) = KeyGroup::parse(&row.get::<_, String>(0)?) else {
@@ -111,7 +111,7 @@ impl CatalogCache {
                 .or_insert_with(|| KnownKey {
                     value_type: ValueType::String,
                     values: HashSet::new(),
-                    many_values: false,
+                    has_more_values: false,
                 });
             known.values.insert(row.get(2)?);
         }
@@ -144,7 +144,7 @@ impl CatalogCache {
             .or_insert_with(|| KnownKey {
                 value_type,
                 values: HashSet::new(),
-                many_values: false,
+                has_more_values: false,
             });
         if known.value_type != value_type {
             known.value_type = ValueType::Mixed;
@@ -157,7 +157,7 @@ impl CatalogCache {
         key_delta.count += 1;
         let Some(value_json) = completable_value_json(value) else {
             // A string too long to list is still one of the values of the key.
-            known.many_values |= matches!(value, AttributeValue::String(_));
+            known.has_more_values |= matches!(value, AttributeValue::String(_));
             return;
         };
         if known.values.contains(&value_json) {
@@ -172,7 +172,7 @@ impl CatalogCache {
                 .entry((group, key.to_owned(), value_json))
                 .or_default() += 1;
         } else {
-            known.many_values = true;
+            known.has_more_values = true;
         }
     }
 
@@ -182,29 +182,32 @@ impl CatalogCache {
         delta: CatalogDelta,
     ) -> rusqlite::Result<()> {
         let mut insert_key = transaction.prepare_cached(
-            "INSERT INTO attribute_keys (signal, key, type, count, many_values)
+            "INSERT INTO attribute_keys (key_group, key, value_type, count, has_more_values)
              VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (signal, key) DO UPDATE SET
+             ON CONFLICT (key_group, key) DO UPDATE SET
                count = count + excluded.count,
-               type = CASE WHEN type = excluded.type THEN type ELSE 'mixed' END,
-               many_values = max(many_values, excluded.many_values)",
+               value_type = CASE
+                 WHEN value_type = excluded.value_type THEN value_type
+                 ELSE 'mixed'
+               END,
+               has_more_values = max(has_more_values, excluded.has_more_values)",
         )?;
         for ((group, key), KeyDelta { value_type, count }) in delta.keys {
-            let many_values = self
+            let has_more_values = self
                 .keys
                 .get(&(group, key.clone()))
-                .is_some_and(|known| known.many_values);
+                .is_some_and(|known| known.has_more_values);
             insert_key.execute(params![
                 group.name(),
                 key,
                 value_type.name(),
                 count,
-                many_values
+                has_more_values
             ])?;
         }
         let mut insert_value = transaction.prepare_cached(
-            "INSERT INTO attribute_values (signal, key, value, count) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (signal, key, value) DO UPDATE SET count = count + excluded.count",
+            "INSERT INTO attribute_values (key_group, key, value, count) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (key_group, key, value) DO UPDATE SET count = count + excluded.count",
         )?;
         for ((group, key, value), count) in delta.values {
             insert_value.execute(params![group.name(), key, value, count])?;
