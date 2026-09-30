@@ -649,7 +649,7 @@ fn the_catalog_knows_the_attributes_and_their_values() {
         .collect();
     assert_eq!(values, [r#""/login""#, r#""/matches""#, r#""/languages""#]);
     assert_eq!(route.distinct_value_count, 3);
-    assert!(!route.has_more_values_than_listed);
+    assert!(!route.has_more_values);
 }
 
 #[test]
@@ -884,7 +884,7 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
         .unwrap();
     assert_eq!(user.distinct_value_count, 200);
     assert_eq!(user.most_common_values.len(), MAX_HELP_VALUES);
-    assert!(user.has_more_values_than_listed);
+    assert!(user.has_more_values);
 }
 
 #[test]
@@ -917,7 +917,7 @@ fn the_catalog_marks_a_key_with_a_value_too_long_to_list() {
         .help_for_field_at_cursor
         .unwrap();
     assert_eq!(question.distinct_value_count, 1);
-    assert!(question.has_more_values_than_listed);
+    assert!(question.has_more_values);
 }
 
 #[test]

@@ -176,7 +176,7 @@ impl From<FieldHelp> for FieldBody {
                 })
                 .collect(),
             distinct_values: help.distinct_value_count,
-            has_more_values: help.has_more_values_than_listed,
+            has_more_values: help.has_more_values,
         }
     }
 }

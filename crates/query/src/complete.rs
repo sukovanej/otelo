@@ -31,7 +31,7 @@ pub struct ValueInfo {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FieldValues {
     pub listed: Vec<ValueInfo>,
-    pub has_more_values_than_listed: bool,
+    pub has_more_values: bool,
 }
 
 pub struct NoCatalog;
@@ -87,7 +87,7 @@ pub struct FieldHelp {
     pub origin: FieldOrigin,
     pub most_common_values: Vec<HelpValue>,
     pub distinct_value_count: usize,
-    pub has_more_values_than_listed: bool,
+    pub has_more_values: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,7 +296,7 @@ fn describe_field(
         origin,
         most_common_values: all_values,
         distinct_value_count,
-        has_more_values_than_listed: values.has_more_values_than_listed,
+        has_more_values: values.has_more_values,
     }
 }
 
