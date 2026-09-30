@@ -10,7 +10,7 @@ How otelo takes in logs, traces, and metrics, where it keeps them, and how a hum
 flowchart LR
   app[App with OTel SDK] -->|OTLP HTTP :4318| recv[OTLP receiver]
   app -->|OTLP gRPC :4317| recv
-  sys[sysinfo] --> host[Host collector]
+  machine[The machine and its services] --> host[Host collector]
   recv --> writer[Writer]
   host --> writer
   writer --> day[(telemetry/YYYY-MM-DD.sqlite)]
@@ -27,7 +27,7 @@ flowchart LR
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
 - SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
 - A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached.
-- `service` is the OTel `service.name` resource attribute.
+- `service` is the OTel `service.name` resource attribute. The host collector sends no OTLP, so it names its services itself.
 
 ## Schema of a day file
 
@@ -95,9 +95,39 @@ The `otelo-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 - Exponential histograms, summaries, and a span without valid IDs are rejected. Span links, severity text, and trace state are not kept.
 - A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
 
+## Host collector
+
+The `otelo-host` crate reads the machine every 15 seconds, on the wall-clock multiples of 15 seconds, and sends the points straight to the writer. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
+
+OpenTelemetry treats a host as a resource of its own and gives host metrics no service name. The `service` column needs one, so otelo names itself, as an app that reports the metrics of its host does:
+
+- The metrics of the machine and of otelo itself have the service `otelo`.
+- The metrics of a service have the name of its systemd unit without `.service`, or its launchd label. A unit named like the `service.name` its app sends puts these numbers next to the telemetry of the app.
+- Every resource carries `host.name`, `host.id`, `host.arch`, and `os.type`. A query finds the machine by `resource.host.name` and the `system.*` names, not by the service.
+
+| Metric | Kind | Unit | Labels |
+|---|---|---|---|
+| `system.cpu.utilization` | gauge | `1` | `cpu.mode` on Linux: `user`, `nice`, `system`, `interrupt`, `iowait`, `steal`, `idle`. The shares add up to 1. |
+| `system.cpu.load_average.1m`, `.5m`, `.15m` | gauge | `{thread}` | |
+| `system.memory.usage` | sum | `By` | `system.memory.state`: `used`, `free`, and on Linux `cached` and `buffers` |
+| `system.memory.limit` | sum | `By` | |
+| `system.paging.usage` | sum | `By` | `system.paging.state`: `used`, `free` |
+| `system.filesystem.usage` | sum | `By` | `system.device`, `system.filesystem.mountpoint`, `system.filesystem.type`, and `system.filesystem.state`: `used`, `free` |
+| `system.network.io` | sum, a counter | `By` | `network.interface.name`, and `network.io.direction`: `receive`, `transmit` |
+| `process.cpu.time` | sum, a counter | `s` | |
+| `process.memory.usage` | sum | `By` | |
+| `process.cgroup.memory.usage` | sum | `By` | |
+| `otelo.storage.size` | sum | `By` | `otelo.storage.file`: `telemetry`, `rollup`, `state` |
+
+- The names, units, and labels are the OpenTelemetry semantic conventions for system and process metrics, which are still in development and can change. Three names are not from there: the load averages have the names the OpenTelemetry Collector gives them, and `process.cgroup.memory.usage` and `otelo.storage.size` are otelo's.
+- `iowait` is the time the CPUs sat idle waiting for the disk, and `steal` the time the hypervisor gave to another tenant. Without the two, a slow droplet at 30% CPU looks healthy.
+- The `process.*` metrics cover a whole service, every process of its unit, and otelo's own process. `process.memory.usage` is the memory the processes hold themselves. `process.cgroup.memory.usage`, on Linux only, adds the page cache the unit filled, which is what `MemoryMax` and the OOM killer count.
+- `otelo.storage.size` is the size of the files in the data directory. A WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
+- A filesystem counts once per device, and an APFS container once for all its volumes. Filesystems without a disk, such as `tmpfs`, `overlay`, and `squashfs`, are left out. So are the loopback interface and every interface that has moved no bytes.
+
 ## The daemon's own telemetry
 
-`otelo serve` sends its own spans and logs over OTLP/HTTP to its own receiver, under the service `otelo`, so otelo can be tried and debugged on itself. `--own-telemetry off` keeps them on stderr only, and `--own-telemetry http://host:4318` sends them to another receiver. Every event also goes to stderr, where journald reads it.
+`otelo serve` sends its own spans and logs over OTLP/HTTP to its own receiver, under the service `otelo` and with the host attributes of the host collector, so otelo can be tried and debugged on itself. `--own-telemetry off` keeps them on stderr only, and `--own-telemetry http://host:4318` sends them to another receiver. Every event also goes to stderr, where journald reads it.
 
 - Each query API request gets a server span named after its route, such as `GET /api/logs`, with a child span for opening the reader and one `SELECT` span per SQLite statement, which carries the SQL and the rows it read. A 5xx response logs an error in the span.
 - Nothing on the path from the OTLP receiver to the day files opens a span. A span there would make each export of the daemon's telemetry cause another export, forever. Events of the exporter's crates (`opentelemetry`, `reqwest`, `hyper`, `h2`, `tower`) stay on stderr for the same reason.
