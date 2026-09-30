@@ -4,15 +4,13 @@ import type { FieldBody } from "@otelo/api";
 
 import { formatTypeLine, formatValuesTitle } from "../src/fieldHelp";
 
-const value = (text: string) => ({ text, count: 1 });
-
 const route: FieldBody = {
   name: "http.route",
   source: "attribute",
   type: "string",
   count: 1200,
   description: null,
-  values: [value('"/a"'), value('"/b"')],
+  values: [makeValue('"/a"'), makeValue('"/b"')],
   distinct_values: 2,
   many_values: false,
 };
@@ -31,10 +29,16 @@ test("formatTypeLine counts the records of the signal, or the resources", () => 
 
 test("formatValuesTitle says whether the values are all of them", () => {
   expect(formatValuesTitle(route)).toBe("2 values");
-  expect(formatValuesTitle({ ...route, values: [value("1")], distinct_values: 1 })).toBe("1 value");
+  expect(formatValuesTitle({ ...route, values: [makeValue("1")], distinct_values: 1 })).toBe(
+    "1 value",
+  );
   expect(formatValuesTitle({ ...route, distinct_values: 37 })).toBe("Most common of 37 values");
   expect(formatValuesTitle({ ...route, distinct_values: 200, many_values: true })).toBe(
     "Most common of 200+ values",
   );
   expect(formatValuesTitle({ ...route, many_values: true })).toBe("Most common of 2+ values");
 });
+
+function makeValue(text: string) {
+  return { text, count: 1 };
+}

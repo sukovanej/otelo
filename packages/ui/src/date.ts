@@ -1,48 +1,4 @@
-// Dates and times of day as the pickers hold them, in local time: a date as
-// `2026-09-30` and a time of day as `14:03:07`, which both sort as text.
-
-const pad = (n: number, width = 2) => String(n).padStart(width, "0");
-
-const DAY_SECONDS = 86_400;
-
-/** The seconds in an hour, a minute, and a second: the parts of a time of
- * day, in their order. */
-const PART_SECONDS = [3600, 60, 1] as const;
-
-/** The hours, the minutes, or the seconds of a time of day. */
-export type ClockPart = 0 | 1 | 2;
-
-/** `2026-09-30`, the local date of `date`. */
-export function dateOf(date: Date): string {
-  return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-/** `14:03:07`, the local time of day of `date`. */
-export function clockOf(date: Date): string {
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-const dateParts = (date: string): [number, number, number] => {
-  const [year = 0, month = 1, day = 1] = date.split("-").map(Number);
-  return [year, month, day];
-};
-
-const clockParts = (clock: string): [number, number, number] => {
-  const [hours = 0, minutes = 0, seconds = 0] = clock.split(":").map(Number);
-  return [hours, minutes, seconds];
-};
-
-/** The date of a year, a month from 1, and a day, either of which may be
- * past its ends: day 0 is the last day of the month before. */
-const dateAt = (year: number, month: number, day: number) => dateOf(new Date(year, month - 1, day));
-
-/** The local time of a date and a time of day. */
-export function at(date: string, clock: string): Date {
-  const [year, month, day] = dateParts(date);
-  return new Date(year, month - 1, day, ...clockParts(clock));
-}
-
-export const MONTHS = [
+export const MONTH_NAMES = [
   "January",
   "February",
   "March",
@@ -57,50 +13,44 @@ export const MONTHS = [
   "December",
 ];
 
-/** `Sep 30`, the month and the day of a date. */
-export function monthDay(date: string): string {
-  const [, month, day] = dateParts(date);
-  return `${MONTHS[month - 1]?.slice(0, 3) ?? ""} ${day}`;
+export const CLOCK_PART_STARTS: Record<ClockPart, number> = { hours: 0, minutes: 3, seconds: 6 };
+
+const DAY_SECONDS = 86_400;
+
+const CLOCK_PART_SECONDS: Record<ClockPart, number> = { hours: 3600, minutes: 60, seconds: 1 };
+
+type ClockPart = "hours" | "minutes" | "seconds";
+
+export function toLocalDate(date: Date): string {
+  return `${zeroPad(date.getFullYear(), 4)}-${zeroPad(date.getMonth() + 1)}-${zeroPad(date.getDate())}`;
 }
 
-/** `Sep 30, 2026`, the date as a reader takes it in. */
+export function toLocalClock(date: Date): string {
+  return `${zeroPad(date.getHours())}:${zeroPad(date.getMinutes())}:${zeroPad(date.getSeconds())}`;
+}
+
+export function joinDateAndClock(date: string, clock: string): Date {
+  const [year, month, day] = splitDate(date);
+  return new Date(year, month - 1, day, ...splitClock(clock));
+}
+
+export function formatMonthDay(date: string): string {
+  const [, month, day] = splitDate(date);
+  return `${MONTH_NAMES[month - 1]?.slice(0, 3) ?? ""} ${day}`;
+}
+
 export function formatDate(date: string): string {
-  return `${monthDay(date)}, ${date.slice(0, 4)}`;
+  return `${formatMonthDay(date)}, ${date.slice(0, 4)}`;
 }
 
-/** The month from 1 whose name starts with the three letters or more of
- * `name`, or 0 when no month does. */
-const monthNamed = (name: string) =>
-  name.length < 3
-    ? 0
-    : MONTHS.findIndex((month) => month.toLowerCase().startsWith(name.toLowerCase())) + 1;
-
-/** The year, the month from 1, and the day that the text names. */
-const typedDate = (text: string): [number, number, number] | undefined => {
-  const numbers = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text);
-  if (numbers) return [Number(numbers[1]), Number(numbers[2]), Number(numbers[3])];
-  const monthFirst = /^([a-z]+)\.? (\d{1,2}),? (\d{4})$/i.exec(text);
-  if (monthFirst) {
-    return [Number(monthFirst[3]), monthNamed(monthFirst[1] ?? ""), Number(monthFirst[2])];
-  }
-  const dayFirst = /^(\d{1,2})\.? ([a-z]+)\.?,? (\d{4})$/i.exec(text);
-  if (dayFirst) return [Number(dayFirst[3]), monthNamed(dayFirst[2] ?? ""), Number(dayFirst[1])];
-  return undefined;
-};
-
-/** The date typed as `Sep 30, 2026`, `30 September 2026`, `2026-09-30`,
- * `2026-9-30`, `2026/09/30`, or `2026.09.30`, or `undefined` when the text
- * is no date. */
 export function parseDate(text: string): string | undefined {
-  const typed = typedDate(text.trim().replace(/\s+/g, " "));
+  const typed = readTypedDate(text.trim().replace(/\s+/g, " "));
   if (!typed) return undefined;
   const [year, month, day] = typed;
-  const date = `${pad(year, 4)}-${pad(month)}-${pad(day)}`;
-  return dateAt(year, month, day) === date ? date : undefined;
+  const date = `${zeroPad(year, 4)}-${zeroPad(month)}-${zeroPad(day)}`;
+  return normalizeDate(year, month, day) === date ? date : undefined;
 }
 
-/** The time of day typed as `14`, `14:03`, `14:03:07`, `1403`, or `140307`,
- * or `undefined` when the text is no time of day. */
 export function parseClock(text: string): string | undefined {
   const typed = text.trim();
   const match =
@@ -113,50 +63,88 @@ export function parseClock(text: string): string | undefined {
     Number(match[3] ?? 0),
   ];
   if (hours > 23 || minutes > 59 || seconds > 59) return undefined;
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  return `${zeroPad(hours)}:${zeroPad(minutes)}:${zeroPad(seconds)}`;
 }
 
-/** The part of a time of day that the caret at `caret` is in or next to. */
-export function clockPart(caret: number): ClockPart {
-  if (caret <= 2) return 0;
-  return caret <= 5 ? 1 : 2;
+export function findClockPartAtCaret(caret: number): ClockPart {
+  if (caret <= 2) return "hours";
+  return caret <= 5 ? "minutes" : "seconds";
 }
 
-/** The time of day `step` hours, minutes, or seconds later, around
- * midnight. */
 export function stepClock(clock: string, part: ClockPart, step: number): string {
-  const [hours, minutes, seconds] = clockParts(clock);
-  const total = hours * 3600 + minutes * 60 + seconds + step * PART_SECONDS[part];
-  const inDay = ((total % DAY_SECONDS) + DAY_SECONDS) % DAY_SECONDS;
-  return `${pad(Math.floor(inDay / 3600))}:${pad(Math.floor(inDay / 60) % 60)}:${pad(inDay % 60)}`;
+  const [hours, minutes, seconds] = splitClock(clock);
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds + step * CLOCK_PART_SECONDS[part];
+  const secondsIntoDay = ((totalSeconds % DAY_SECONDS) + DAY_SECONDS) % DAY_SECONDS;
+  return `${zeroPad(Math.floor(secondsIntoDay / 3600))}:${zeroPad(Math.floor(secondsIntoDay / 60) % 60)}:${zeroPad(secondsIntoDay % 60)}`;
 }
 
-/** The date `days` later. */
 export function addDays(date: string, days: number): string {
-  const [year, month, day] = dateParts(date);
-  return dateAt(year, month, day + days);
+  const [year, month, day] = splitDate(date);
+  return normalizeDate(year, month, day + days);
 }
 
-/** The date `months` later, on the last day of that month when it has no
- * such day: a month after January 31 is February 28. */
 export function addMonths(date: string, months: number): string {
-  const [year, month, day] = dateParts(date);
-  const last = new Date(year, month + months, 0).getDate();
-  return dateAt(year, month + months, Math.min(day, last));
+  const [year, month, day] = splitDate(date);
+  const lastDayOfMonth = new Date(year, month + months, 0).getDate();
+  return normalizeDate(year, month + months, Math.min(day, lastDayOfMonth));
 }
 
-/** How many days after Monday the date is. */
-export function weekday(date: string): number {
-  return (at(date, "00:00:00").getDay() + 6) % 7;
+export function countDaysAfterMonday(date: string): number {
+  return (joinDateAndClock(date, "00:00:00").getDay() + 6) % 7;
 }
 
-export const sameMonth = (a: string, b: string) => a.slice(0, 7) === b.slice(0, 7);
+export function isSameMonth(date: string, otherDate: string): boolean {
+  return date.slice(0, 7) === otherDate.slice(0, 7);
+}
 
-/** The six weeks, each from Monday, that hold the month of `date`. */
-export function monthWeeks(date: string): string[][] {
-  const [year, month] = dateParts(date);
-  const lead = weekday(dateAt(year, month, 1));
-  return Array.from({ length: 6 }, (_week, week) =>
-    Array.from({ length: 7 }, (_day, day) => dateAt(year, month, 1 - lead + week * 7 + day)),
+export function listMonthWeeks(date: string): string[][] {
+  const [year, month] = splitDate(date);
+  const daysBeforeMonth = countDaysAfterMonday(normalizeDate(year, month, 1));
+  return Array.from({ length: 6 }, (_week, weekIndex) =>
+    Array.from({ length: 7 }, (_day, dayIndex) =>
+      normalizeDate(year, month, 1 - daysBeforeMonth + weekIndex * 7 + dayIndex),
+    ),
   );
+}
+
+function zeroPad(value: number, width = 2): string {
+  return String(value).padStart(width, "0");
+}
+
+function splitDate(date: string): [number, number, number] {
+  const [year = 0, month = 1, day = 1] = date.split("-").map(Number);
+  return [year, month, day];
+}
+
+function splitClock(clock: string): [number, number, number] {
+  const [hours = 0, minutes = 0, seconds = 0] = clock.split(":").map(Number);
+  return [hours, minutes, seconds];
+}
+
+function normalizeDate(year: number, month: number, day: number): string {
+  return toLocalDate(new Date(year, month - 1, day));
+}
+
+function findMonthByName(name: string): number | undefined {
+  if (name.length < 3) return undefined;
+  const monthIndex = MONTH_NAMES.findIndex((monthName) =>
+    monthName.toLowerCase().startsWith(name.toLowerCase()),
+  );
+  return monthIndex === -1 ? undefined : monthIndex + 1;
+}
+
+function readTypedDate(text: string): [number, number, number] | undefined {
+  const numbers = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text);
+  if (numbers) return [Number(numbers[1]), Number(numbers[2]), Number(numbers[3])];
+  const monthFirst = /^([a-z]+)\.? (\d{1,2}),? (\d{4})$/i.exec(text);
+  if (monthFirst) {
+    const month = findMonthByName(monthFirst[1] ?? "");
+    return month === undefined ? undefined : [Number(monthFirst[3]), month, Number(monthFirst[2])];
+  }
+  const dayFirst = /^(\d{1,2})\.? ([a-z]+)\.?,? (\d{4})$/i.exec(text);
+  if (dayFirst) {
+    const month = findMonthByName(dayFirst[2] ?? "");
+    return month === undefined ? undefined : [Number(dayFirst[3]), month, Number(dayFirst[1])];
+  }
+  return undefined;
 }

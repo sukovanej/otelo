@@ -1,188 +1,179 @@
-// The range of a query as the API takes it: `since` and `until`, each a
-// duration before now such as `2h` or an RFC 3339 timestamp, and an empty
-// `until` for now.
+import { addDays, formatDate, formatMonthDay, toLocalClock, toLocalDate } from "./date";
 
-import { addDays, clockOf, dateOf, formatDate, monthDay } from "./date";
+export const UNTIL_NOW = "";
 
-export interface Range {
-  since: string;
-  until: string;
-}
-
-/** A range in milliseconds since the epoch. */
-export interface Span {
-  start: number;
-  end: number;
-}
-
-/** A range that ends now, and what the picker calls it. */
-export interface Preset {
-  since: string;
-  label: string;
-}
-
-export const PRESETS: readonly Preset[] = [
+export const RANGE_PRESETS: ReadonlyArray<RangePreset> = [
   { since: "5m", label: "Last 5 minutes" },
   { since: "1h", label: "Last hour" },
   { since: "1d", label: "Last day" },
   { since: "7d", label: "Last week" },
 ];
 
-const SECOND = 1000;
-const MINUTE = 60 * SECOND;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+const SECOND_MS = 1000;
+const MINUTE_MS = 60 * SECOND_MS;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
 
-const UNITS: Record<string, number> = {
+const UNIT_MS: Record<string, number> = {
   ms: 1,
-  s: SECOND,
-  m: MINUTE,
-  h: HOUR,
-  d: DAY,
-  w: 7 * DAY,
+  s: SECOND_MS,
+  m: MINUTE_MS,
+  h: HOUR_MS,
+  d: DAY_MS,
+  w: 7 * DAY_MS,
 };
 
-/** The units a duration is written in, from the longest. */
-const WRITTEN = [
-  ["d", DAY],
-  ["h", HOUR],
-  ["m", MINUTE],
-  ["s", SECOND],
+const UNITS_LONGEST_FIRST = [
+  ["d", DAY_MS],
+  ["h", HOUR_MS],
+  ["m", MINUTE_MS],
+  ["s", SECOND_MS],
 ] as const;
 
-const DURATION = /^(?:\s*\d+(?:\.\d+)?\s*(?:ms|s|m|h|d|w))+\s*$/;
-const DURATION_PART = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)/g;
+const DURATION_PATTERN = /^(?:\s*\d+(?:\.\d+)?\s*(?:ms|s|m|h|d|w))+\s*$/;
+const DURATION_PART_PATTERN = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)/g;
+const RFC_3339_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
 
-/** The milliseconds of a duration such as `90s`, `2h`, or `1h 30m`, or
- * `undefined` when the text is no duration. */
+export interface Range {
+  readonly since: string;
+  readonly until: string;
+}
+
+interface ResolvedRange {
+  readonly startMs: number;
+  readonly endMs: number;
+}
+
+interface RangePreset {
+  readonly since: string;
+  readonly label: string;
+}
+
+interface RangeLabelPart {
+  readonly text: string;
+  readonly dim: boolean;
+}
+
 export function parseDuration(text: string): number | undefined {
-  if (!DURATION.test(text)) return undefined;
-  let total = 0;
-  for (const [, amount, unit = ""] of text.matchAll(DURATION_PART)) {
-    total += Number(amount) * (UNITS[unit] ?? 0);
+  if (!DURATION_PATTERN.test(text)) return undefined;
+  let totalMs = 0;
+  for (const [, amount, unit = ""] of text.matchAll(DURATION_PART_PATTERN)) {
+    totalMs += Number(amount) * (UNIT_MS[unit] ?? 0);
   }
-  return total;
+  return totalMs;
 }
 
-/** The duration as the API reads it, in the longest unit that holds it
- * whole: `2h`, `90s`. */
-export function formatDuration(ms: number): string {
-  const whole = Math.max(1, Math.round(ms));
-  for (const [unit, size] of WRITTEN) {
-    if (whole % size === 0) return `${whole / size}${unit}`;
+export function formatApiDuration(durationMs: number): string {
+  const wholeMs = Math.max(1, Math.round(durationMs));
+  for (const [unit, unitMs] of UNITS_LONGEST_FIRST) {
+    if (wholeMs % unitMs === 0) return `${wholeMs / unitMs}${unit}`;
   }
-  return `${whole}ms`;
+  return `${wholeMs}ms`;
 }
 
-/** The duration as a reader takes it in, to its two longest units: `1h`,
- * `13m 27s`, `2d 4h`. */
-export function humanDuration(ms: number): string {
-  if (ms < SECOND) return `${Math.round(ms)}ms`;
-  let rest = Math.round(ms / SECOND) * SECOND;
+export function formatHumanDuration(durationMs: number): string {
+  if (durationMs < SECOND_MS) return `${Math.round(durationMs)}ms`;
+  let restMs = Math.round(durationMs / SECOND_MS) * SECOND_MS;
   const parts: string[] = [];
-  for (const [unit, size] of WRITTEN) {
-    const count = Math.floor(rest / size);
+  for (const [unit, unitMs] of UNITS_LONGEST_FIRST) {
+    const count = Math.floor(restMs / unitMs);
     if (count > 0) parts.push(`${count}${unit}`);
-    rest -= count * size;
+    restMs -= count * unitMs;
   }
   return parts.slice(0, 2).join(" ");
 }
 
-const RFC_3339 = /^\d{4}-\d{2}-\d{2}T/;
-
-const instant = (text: string, now: number): number | undefined => {
-  const ago = parseDuration(text);
-  if (ago !== undefined) return now - ago;
-  if (!RFC_3339.test(text)) return undefined;
-  // Date reads three fractional digits at most everywhere.
-  const time = Date.parse(text.replace(/(\.\d{3})\d+/, "$1"));
-  return Number.isNaN(time) ? undefined : time;
-};
-
-/** The start and the end of the range at `now`, or `undefined` when either
- * does not read as a time or the start is not before the end. */
-export function resolve(range: Range, now: number): Span | undefined {
-  const start = instant(range.since, now);
-  const end = range.until === "" ? now : instant(range.until, now);
-  if (start === undefined || end === undefined || start >= end) return undefined;
-  return { start, end };
+export function resolveRange(range: Range, nowMs: number): ResolvedRange | undefined {
+  const startMs = parseInstant(range.since, nowMs);
+  const endMs = range.until === UNTIL_NOW ? nowMs : parseInstant(range.until, nowMs);
+  if (startMs === undefined || endMs === undefined || startMs >= endMs) return undefined;
+  return { startMs, endMs };
 }
 
-/** The preset the range is, however its duration is written: `24h` is the
- * last day. */
-export function presetOf(range: Range): Preset | undefined {
-  if (range.until !== "") return undefined;
-  const length = parseDuration(range.since);
-  return PRESETS.find((preset) => parseDuration(preset.since) === length);
+export function findPreset(range: Range): RangePreset | undefined {
+  if (range.until !== UNTIL_NOW) return undefined;
+  const lengthMs = parseDuration(range.since);
+  return RANGE_PRESETS.find((preset) => parseDuration(preset.since) === lengthMs);
 }
 
-/** The range of the same length that ends now. */
-export function toNow(range: Range, now: number): Range | undefined {
-  const span = resolve(range, now);
-  return span && { since: formatDuration(span.end - span.start), until: "" };
+export function moveRangeToNow(range: Range, nowMs: number): Range | undefined {
+  const resolved = resolveRange(range, nowMs);
+  return (
+    resolved && {
+      since: formatApiDuration(resolved.endMs - resolved.startMs),
+      until: UNTIL_NOW,
+    }
+  );
 }
 
-/**
- * The range one length of itself later for a `step` of 1, or earlier for -1:
- * the last hour goes to the hour before it. A range that would end after
- * now ends now instead.
- */
-export function shift(range: Range, step: 1 | -1, now: number): Range | undefined {
-  const span = resolve(range, now);
-  if (!span) return undefined;
-  const length = span.end - span.start;
-  const end = span.end + step * length;
-  if (end >= now) return { since: formatDuration(length), until: "" };
-  return { since: new Date(end - length).toISOString(), until: new Date(end).toISOString() };
+export function shiftRange(range: Range, step: 1 | -1, nowMs: number): Range | undefined {
+  const resolved = resolveRange(range, nowMs);
+  if (!resolved) return undefined;
+  const lengthMs = resolved.endMs - resolved.startMs;
+  const endMs = resolved.endMs + step * lengthMs;
+  if (endMs >= nowMs) return { since: formatApiDuration(lengthMs), until: UNTIL_NOW };
+  return {
+    since: new Date(endMs - lengthMs).toISOString(),
+    until: new Date(endMs).toISOString(),
+  };
 }
 
-const sameDay = (a: Date, b: Date) => dateOf(a) === dateOf(b);
-
-/** A piece of the name of a range. The days and the dash between the ends
- * are `dim`, so the times of day stand out. */
-export interface LabelPart {
-  text: string;
-  dim: boolean;
+export function splitRangeLabel(range: Range, nowMs: number): RangeLabelPart[] {
+  const preset = findPreset(range);
+  if (preset) return [toPlainPart(preset.label)];
+  const endsNow = range.until === UNTIL_NOW;
+  const lengthMs = parseDuration(range.since);
+  if (endsNow && lengthMs !== undefined) {
+    return [toPlainPart(`Last ${formatHumanDuration(lengthMs)}`)];
+  }
+  const resolved = resolveRange(range, nowMs);
+  if (!resolved) {
+    return [toPlainPart(endsNow ? range.since : `${range.since} – ${range.until}`)];
+  }
+  const [start, end, today] = [
+    new Date(resolved.startMs),
+    new Date(resolved.endMs),
+    new Date(nowMs),
+  ];
+  const showsSeconds = start.getSeconds() !== 0 || (!endsNow && end.getSeconds() !== 0);
+  const toClockPart = (date: Date) =>
+    toPlainPart(showsSeconds ? toLocalClock(date) : toLocalClock(date).slice(0, 5));
+  const startParts = [toDimPart(formatDayName(start, today)), toClockPart(start), toDimPart("–")];
+  if (endsNow) return [...startParts, toPlainPart("now")];
+  if (isSameDay(start, end)) return [...startParts, toClockPart(end)];
+  return [...startParts, toDimPart(formatDayName(end, today)), toClockPart(end)];
 }
 
-const plain = (text: string): LabelPart => ({ text, dim: false });
-const dim = (text: string): LabelPart => ({ text, dim: true });
-
-/** `Today`, `Yesterday`, `Sep 27`, or `Sep 27, 2025` in another year than
- * that of `now`. */
-const dayName = (date: Date, now: Date): string => {
-  const [day, today] = [dateOf(date), dateOf(now)];
-  if (day === today) return "Today";
-  if (day === addDays(today, -1)) return "Yesterday";
-  return date.getFullYear() === now.getFullYear() ? monthDay(day) : formatDate(day);
-};
-
-/**
- * What the picker calls the range, in pieces: `Last hour`, `Last 13m 27s`,
- * `Today 14:05 – 15:05`, `Sep 27 14:05 – Sep 28 15:05`, or
- * `Yesterday 14:05 – now`. The times have seconds when either is not on a
- * whole minute.
- */
-export function rangeParts(range: Range, now: number): LabelPart[] {
-  const preset = presetOf(range);
-  if (preset) return [plain(preset.label)];
-  const endsNow = range.until === "";
-  const length = parseDuration(range.since);
-  if (endsNow && length !== undefined) return [plain(`Last ${humanDuration(length)}`)];
-  const span = resolve(range, now);
-  if (!span) return [plain(endsNow ? range.since : `${range.since} – ${range.until}`)];
-  const [start, end, today] = [new Date(span.start), new Date(span.end), new Date(now)];
-  const seconds = start.getSeconds() !== 0 || (!endsNow && end.getSeconds() !== 0);
-  const time = (date: Date) => plain(seconds ? clockOf(date) : clockOf(date).slice(0, 5));
-  const from = [dim(dayName(start, today)), time(start), dim("–")];
-  if (endsNow) return [...from, plain("now")];
-  if (sameDay(start, end)) return [...from, time(end)];
-  return [...from, dim(dayName(end, today)), time(end)];
-}
-
-/** The name of the range in one line, for a reader that cannot see it. */
-export function rangeLabel(range: Range, now: number): string {
-  return rangeParts(range, now)
+export function formatRangeLabel(range: Range, nowMs: number): string {
+  return splitRangeLabel(range, nowMs)
     .map((part) => part.text)
     .join(" ");
+}
+
+function parseInstant(text: string, nowMs: number): number | undefined {
+  const agoMs = parseDuration(text);
+  if (agoMs !== undefined) return nowMs - agoMs;
+  if (!RFC_3339_PATTERN.test(text)) return undefined;
+  // Date reads three fractional digits at most everywhere.
+  const instantMs = Date.parse(text.replace(/(\.\d{3})\d+/, "$1"));
+  return Number.isNaN(instantMs) ? undefined : instantMs;
+}
+
+function isSameDay(date: Date, otherDate: Date): boolean {
+  return toLocalDate(date) === toLocalDate(otherDate);
+}
+
+function toPlainPart(text: string): RangeLabelPart {
+  return { text, dim: false };
+}
+
+function toDimPart(text: string): RangeLabelPart {
+  return { text, dim: true };
+}
+
+function formatDayName(date: Date, now: Date): string {
+  const [day, today] = [toLocalDate(date), toLocalDate(now)];
+  if (day === today) return "Today";
+  if (day === addDays(today, -1)) return "Yesterday";
+  return date.getFullYear() === now.getFullYear() ? formatMonthDay(day) : formatDate(day);
 }

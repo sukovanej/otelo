@@ -3,27 +3,27 @@ import { expect, test } from "vitest";
 import {
   addDays,
   addMonths,
-  at,
-  clockOf,
-  clockPart,
-  dateOf,
+  countDaysAfterMonday,
+  findClockPartAtCaret,
   formatDate,
-  monthDay,
-  monthWeeks,
+  formatMonthDay,
+  joinDateAndClock,
+  listMonthWeeks,
   parseClock,
   parseDate,
   stepClock,
-  weekday,
+  toLocalClock,
+  toLocalDate,
 } from "../src/date";
 
-test("dateOf and clockOf read the local date and time of day", () => {
+test("toLocalDate and toLocalClock read the local date and time of day", () => {
   const date = new Date(2026, 8, 30, 14, 3, 7);
-  expect(dateOf(date)).toBe("2026-09-30");
-  expect(clockOf(date)).toBe("14:03:07");
+  expect(toLocalDate(date)).toBe("2026-09-30");
+  expect(toLocalClock(date)).toBe("14:03:07");
 });
 
-test("at joins a date and a time of day", () => {
-  expect(at("2026-09-30", "14:03:07")).toEqual(new Date(2026, 8, 30, 14, 3, 7));
+test("joinDateAndClock joins a date and a time of day", () => {
+  expect(joinDateAndClock("2026-09-30", "14:03:07")).toEqual(new Date(2026, 8, 30, 14, 3, 7));
 });
 
 test("parseDate reads a date with its usual separators", () => {
@@ -46,7 +46,7 @@ test("parseDate reads a date with the name of its month", () => {
 });
 
 test("formatDate names the month, and parseDate reads it back", () => {
-  expect(monthDay("2026-09-03")).toBe("Sep 3");
+  expect(formatMonthDay("2026-09-03")).toBe("Sep 3");
   expect(formatDate("2026-09-03")).toBe("Sep 3, 2026");
   expect(parseDate(formatDate("2026-12-31"))).toBe("2026-12-31");
 });
@@ -76,21 +76,21 @@ test("parseClock refuses what is no time of day", () => {
   expect(parseClock("")).toBeUndefined();
 });
 
-test("clockPart finds the part around the caret", () => {
-  expect([0, 1, 2].map(clockPart)).toEqual([0, 0, 0]);
-  expect([3, 4, 5].map(clockPart)).toEqual([1, 1, 1]);
-  expect([6, 7, 8].map(clockPart)).toEqual([2, 2, 2]);
+test("findClockPartAtCaret finds the part around the caret", () => {
+  expect([0, 1, 2].map(findClockPartAtCaret)).toEqual(["hours", "hours", "hours"]);
+  expect([3, 4, 5].map(findClockPartAtCaret)).toEqual(["minutes", "minutes", "minutes"]);
+  expect([6, 7, 8].map(findClockPartAtCaret)).toEqual(["seconds", "seconds", "seconds"]);
 });
 
 test("stepClock steps one part and carries into the others", () => {
-  expect(stepClock("14:03:07", 0, 1)).toBe("15:03:07");
-  expect(stepClock("14:03:07", 1, -1)).toBe("14:02:07");
-  expect(stepClock("14:59:59", 2, 1)).toBe("15:00:00");
+  expect(stepClock("14:03:07", "hours", 1)).toBe("15:03:07");
+  expect(stepClock("14:03:07", "minutes", -1)).toBe("14:02:07");
+  expect(stepClock("14:59:59", "seconds", 1)).toBe("15:00:00");
 });
 
 test("stepClock goes around midnight", () => {
-  expect(stepClock("23:30:00", 0, 1)).toBe("00:30:00");
-  expect(stepClock("00:00:00", 2, -1)).toBe("23:59:59");
+  expect(stepClock("23:30:00", "hours", 1)).toBe("00:30:00");
+  expect(stepClock("00:00:00", "seconds", -1)).toBe("23:59:59");
 });
 
 test("addDays crosses months and years", () => {
@@ -107,14 +107,14 @@ test("addMonths stays in a month that is shorter", () => {
   expect(addMonths("2026-01-15", -1)).toBe("2025-12-15");
 });
 
-test("weekday counts from Monday", () => {
-  expect(weekday("2026-09-28")).toBe(0);
-  expect(weekday("2026-09-30")).toBe(2);
-  expect(weekday("2026-10-04")).toBe(6);
+test("countDaysAfterMonday counts from Monday", () => {
+  expect(countDaysAfterMonday("2026-09-28")).toBe(0);
+  expect(countDaysAfterMonday("2026-09-30")).toBe(2);
+  expect(countDaysAfterMonday("2026-10-04")).toBe(6);
 });
 
-test("monthWeeks holds the month in six weeks from Monday", () => {
-  const weeks = monthWeeks("2026-09-30");
+test("listMonthWeeks holds the month in six weeks from Monday", () => {
+  const weeks = listMonthWeeks("2026-09-30");
   expect(weeks).toHaveLength(6);
   expect(weeks[0]).toEqual([
     "2026-08-31",
@@ -126,9 +126,9 @@ test("monthWeeks holds the month in six weeks from Monday", () => {
     "2026-09-06",
   ]);
   expect(weeks[5]?.[6]).toBe("2026-10-11");
-  expect(monthWeeks("2026-09")).toEqual(weeks);
+  expect(listMonthWeeks("2026-09")).toEqual(weeks);
 });
 
-test("monthWeeks starts a month that begins on Monday with its first day", () => {
-  expect(monthWeeks("2026-06-10")[0]?.[0]).toBe("2026-06-01");
+test("listMonthWeeks starts a month that begins on Monday with its first day", () => {
+  expect(listMonthWeeks("2026-06-10")[0]?.[0]).toBe("2026-06-01");
 });

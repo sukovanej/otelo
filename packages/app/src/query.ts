@@ -1,14 +1,8 @@
-// Writes pieces of the query language of `otelo-query`: field names, value
-// literals, and edits of a query as typed. The rules follow `Display for
-// Field` and `quote` in crates/query/src/lib.rs.
-
 import type { AttributeValue } from "@otelo/api";
 
 import { isKeyword, isWordChar, lexQuery } from "./lexer";
 
-/** The built-in fields of every signal. An attribute with one of these names
- * is written as `attr.<key>`. */
-const BUILTINS = new Set([
+const BUILTIN_FIELD_NAMES = new Set([
   "service",
   "level",
   "body",
@@ -24,81 +18,69 @@ const BUILTINS = new Set([
   "unit",
 ]);
 
-/** Whether `key` reads back as one word that is not a number. */
-function isPlainKey(key: string): boolean {
-  const [first, ...rest] = Array.from(key);
-  return first !== undefined && /[\p{Alphabetic}_@]/u.test(first) && rest.every(isWordChar);
-}
-
-/** The name a query uses for a record attribute. */
-export function attributeField(key: string): string {
-  if (!isPlainKey(key)) return `\`${key}\``;
+// Follows `Display for Field` and `quote` in crates/query/src/lib.rs.
+export function writeAttributeField(key: string): string {
+  if (!isBareWord(key)) return `\`${key}\``;
   if (
     key.startsWith("resource.") ||
     key.startsWith("attr.") ||
     isKeyword(key) ||
-    BUILTINS.has(key)
+    BUILTIN_FIELD_NAMES.has(key)
   ) {
     return `attr.${key}`;
   }
   return key;
 }
 
-/** The name a query uses for a resource attribute, or `undefined` when the
- * language cannot name the key. */
-export function resourceField(key: string): string | undefined {
+export function writeResourceField(key: string): string | undefined {
   return Array.from(key).every(isWordChar) && key !== "" ? `resource.${key}` : undefined;
 }
 
-/** A string literal, with the escapes the lexer reads. */
-export function quote(text: string): string {
+export function quoteString(text: string): string {
   const escaped = text
-    .replace(/[\\"]/g, (c) => `\\${c}`)
+    .replace(/[\\"]/g, (char) => `\\${char}`)
     .replace(/\n/g, "\\n")
     .replace(/\t/g, "\\t");
   return `"${escaped}"`;
 }
 
-/** The literal of an attribute value, or `undefined` for arrays, objects,
- * and null, which a comparison cannot match. */
-export function literal(value: AttributeValue): string | undefined {
-  if (typeof value === "string") return quote(value);
+export function writeLiteral(value: AttributeValue): string | undefined {
+  if (typeof value === "string") return quoteString(value);
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : undefined;
   if (typeof value === "boolean") return String(value);
   return undefined;
 }
 
-/** Whether the query has an `OR` outside of parentheses and strings, so a
- * term joined to it with `AND` needs the query in parentheses. */
-function hasTopLevelOr(q: string): boolean {
-  let depth = 0;
-  for (const { type, start, end } of lexQuery(q)) {
-    if (type === "(") depth++;
-    else if (type === ")") depth = Math.max(0, depth - 1);
-    else if (type === "word" && depth === 0 && q.slice(start, end).toLowerCase() === "or") {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** The query with `term` joined to it by `AND`. A query that already ends in
- * the term stays as it is. */
-export function addTerm(q: string, term: string): string {
-  const current = q.trim();
+export function addTerm(query: string, term: string): string {
+  const current = query.trim();
   if (current === "") return term;
   if (current === term || current.endsWith(` ${term}`)) return current;
   return hasTopLevelOr(current) ? `(${current}) ${term}` : `${current} ${term}`;
 }
 
-/** The words of a message template without its placeholders, as a `body ~`
- * term that finds the lines of the group, or `undefined` when no word is
- * left. The words are matched with full-text search, so the term can also
- * find lines of other templates with the same words. */
-export function templateTerm(template: string): string | undefined {
+// The words match with full-text search, so the term can also find lines of
+// other templates with the same words.
+export function writeTemplateTerm(template: string): string | undefined {
   const words = template
     .split(/\s+/)
     .filter((word) => word !== "" && !/<(num|str|uuid|hex)>/.test(word))
     .filter((word) => /[\p{L}\p{N}]/u.test(word));
-  return words.length === 0 ? undefined : `body ~ ${quote(words.join(" "))}`;
+  return words.length === 0 ? undefined : `body ~ ${quoteString(words.join(" "))}`;
+}
+
+function isBareWord(key: string): boolean {
+  const [first, ...rest] = Array.from(key);
+  return first !== undefined && /[\p{Alphabetic}_@]/u.test(first) && rest.every(isWordChar);
+}
+
+function hasTopLevelOr(query: string): boolean {
+  let depth = 0;
+  for (const { type, start, end } of lexQuery(query)) {
+    if (type === "(") depth++;
+    else if (type === ")") depth = Math.max(0, depth - 1);
+    else if (type === "word" && depth === 0 && query.slice(start, end).toLowerCase() === "or") {
+      return true;
+    }
+  }
+  return false;
 }

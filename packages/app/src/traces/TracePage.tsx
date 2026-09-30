@@ -1,4 +1,11 @@
-import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
+import {
+  A,
+  type Params,
+  type SearchParams,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "@solidjs/router";
 
 import { search } from "@otelo/api";
 
@@ -6,19 +13,24 @@ import { link } from "../classes";
 import { usePageKeys } from "../list";
 import TraceView, { closePanel, createTraceState } from "./TraceView";
 
-/**
- * The page of one trace. The tab and the selected span live in the URL, so
- * a link opens the same span.
- */
+interface TracePageParams extends Params {
+  readonly id: string;
+}
+
+interface TracePageSearchParams extends SearchParams {
+  readonly view?: string;
+  readonly span?: string;
+}
+
 export default function TracePage() {
-  const params = useParams<{ id: string }>();
-  const [query, setQuery] = useSearchParams<{ view?: string; span?: string }>();
+  const params = useParams<TracePageParams>();
+  const [searchParams, setSearchParams] = useSearchParams<TracePageSearchParams>();
   const navigate = useNavigate();
   const state = createTraceState(
-    () => (query.view === "logs" ? "logs" : "spans"),
-    (tab) => setQuery({ view: tab === "spans" ? undefined : tab }),
-    () => query.span,
-    (id) => setQuery({ span: id }, { replace: true }),
+    () => (searchParams.view === "logs" ? "logs" : "spans"),
+    (tab) => setSearchParams({ view: tab === "spans" ? undefined : tab }),
+    () => searchParams.span,
+    (spanId) => setSearchParams({ span: spanId }, { replace: true }),
   );
   usePageKeys({ onEscape: () => closePanel(state) });
 

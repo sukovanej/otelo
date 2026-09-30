@@ -1,9 +1,9 @@
 import { expect, test } from "vitest";
 
-import { levelName } from "../src/logs/level";
+import { toLevelName } from "../src/logs/level";
 
-test("levelName names each band of four severity numbers", () => {
-  expect([1, 4, 5, 9, 13, 16, 17, 21, 24].map(levelName)).toEqual([
+test("toLevelName names each band of four severity numbers", () => {
+  expect([1, 4, 5, 9, 13, 16, 17, 21, 24].map(toLevelName)).toEqual([
     "TRACE",
     "TRACE",
     "DEBUG",
@@ -14,5 +14,5 @@ test("levelName names each band of four severity numbers", () => {
     "FATAL",
     "FATAL",
   ]);
-  expect([0, 25, -1].map(levelName)).toEqual(["UNSPECIFIED", "UNSPECIFIED", "UNSPECIFIED"]);
+  expect([0, 25, -1].map(toLevelName)).toEqual(["UNSPECIFIED", "UNSPECIFIED", "UNSPECIFIED"]);
 });

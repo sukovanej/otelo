@@ -1,12 +1,9 @@
-// What the calls of a service go to, as the calls API names them: a
-// database, a host, an RPC service, or a message destination.
-
 import type { Attributes, TargetKey, TargetType } from "@otelo/api";
 import { databaseName } from "@otelo/icons";
 
-import { databaseId } from "../semantics";
+import { toDatabaseIconId } from "../semantics";
 
-const TYPE_NAMES: Record<TargetType, string> = {
+const TARGET_TYPE_NAMES: Record<TargetType, string> = {
   database: "Database",
   http: "HTTP",
   rpc: "RPC",
@@ -14,51 +11,41 @@ const TYPE_NAMES: Record<TargetType, string> = {
   other: "Other",
 };
 
-/** The system of a target by its name, such as `PostgreSQL` or `grpc`, or
- * the name of its type when it has no system, such as `HTTP`. */
-export function targetSystem(key: TargetKey): string {
-  if (key.system === null) return TYPE_NAMES[key.type];
-  return key.type === "database" ? databaseName(databaseId(key.system)) : key.system;
+export function nameTargetSystem(target: TargetKey): string {
+  if (target.system === null) return TARGET_TYPE_NAMES[target.type];
+  return target.type === "database" ? databaseName(toDatabaseIconId(target.system)) : target.system;
 }
 
-/** A target in a few words, such as `PostgreSQL app` or `api.stripe.com`,
- * for a legend or a title. */
-export function targetLabel(key: TargetKey): string {
-  if (key.type === "http" || key.type === "other") return key.name ?? targetSystem(key);
-  return key.name === null ? targetSystem(key) : `${targetSystem(key)} ${key.name}`;
+export function toTargetLabel(target: TargetKey): string {
+  if (target.type === "http" || target.type === "other") {
+    return target.name ?? nameTargetSystem(target);
+  }
+  return target.name === null
+    ? nameTargetSystem(target)
+    : `${nameTargetSystem(target)} ${target.name}`;
 }
 
-export const sameTarget = (a: TargetKey, b: TargetKey) =>
-  a.type === b.type && a.system === b.system && a.name === b.name;
+export const isSameTarget = (target: TargetKey, other: TargetKey) =>
+  target.type === other.type && target.system === other.system && target.name === other.name;
 
-/** The parameters of the calls API that name a target, without the ones it
- * lacks. */
-export const targetParams = (key: TargetKey) => ({
-  type: key.type,
-  ...(key.system === null ? {} : { system: key.system }),
-  ...(key.name === null ? {} : { target: key.name }),
+export const toTargetParams = (target: TargetKey) => ({
+  type: target.type,
+  ...(target.system === null ? {} : { system: target.system }),
+  ...(target.name === null ? {} : { target: target.name }),
 });
 
-const isType = (type: string): type is TargetType => Object.hasOwn(TYPE_NAMES, type);
-
-/** A target from the parameters of a URL, or `undefined` for a type the API
- * does not know. */
 export function parseTarget(
   type: string | undefined,
   system: string | undefined,
   name: string | undefined,
 ): TargetKey | undefined {
-  if (type === undefined || !isType(type)) return undefined;
+  if (type === undefined || !isTargetType(type)) return undefined;
   return { type, system: system ?? null, name: name ?? null };
 }
 
-/**
- * The attributes that show a call as a span that does what its summary
- * says: the summary as the query of a database call, and its path as the
- * route of an HTTP request. A summary takes the values out of a query and
- * the ids out of a path, which the attributes of one call keep.
- */
-export function summaryAttributes(
+// A summary takes the values out of a query and the ids out of a path, which
+// the attributes of one call keep.
+export function applySummaryToAttributes(
   type: TargetType,
   summary: string,
   attributes: Attributes,
@@ -67,4 +54,8 @@ export function summaryAttributes(
   const path = summary.slice(summary.indexOf(" ") + 1);
   if (type === "http" && path.startsWith("/")) return { ...attributes, "http.route": path };
   return attributes;
+}
+
+function isTargetType(type: string): type is TargetType {
+  return Object.hasOwn(TARGET_TYPE_NAMES, type);
 }

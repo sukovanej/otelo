@@ -1,26 +1,39 @@
-// Keys that move the highlight through a list: the arrows, and Ctrl+J and
-// Ctrl+K as j and k move in Vim.
+export const NO_ITEM = -1;
 
-type Key = Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey">;
+interface KeyPress {
+  readonly key: string;
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly metaKey: boolean;
+  readonly shiftKey: boolean;
+}
 
-const ctrl = (e: Key, letter: string) =>
-  e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === letter;
+type ListStep = -1 | 0 | 1;
 
-/** 1 for a key that moves down, -1 for one that moves up, else 0. */
-export function listStep(e: Key): number {
-  if (e.key === "ArrowDown" || ctrl(e, "j")) return 1;
-  if (e.key === "ArrowUp" || ctrl(e, "k")) return -1;
+export function toListStep(keyPress: KeyPress): ListStep {
+  if (keyPress.key === "ArrowDown" || isCtrlLetter(keyPress, "j")) return 1;
+  if (keyPress.key === "ArrowUp" || isCtrlLetter(keyPress, "k")) return -1;
   return 0;
 }
 
-/**
- * The index `step` items away from `index` in a list of `count`, wrapping at
- * the ends. With `none`, -1 is a stop before the first item, which stands for
- * no highlight.
- */
-export function move(index: number, step: number, count: number, none = false): number {
-  const low = none ? -1 : 0;
-  const size = count - low;
-  if (size <= 0) return low;
-  return ((((index - low + step) % size) + size) % size) + low;
+export function moveListIndex(
+  index: number,
+  step: number,
+  count: number,
+  hasNoItemStop = false,
+): number {
+  const lowestIndex = hasNoItemStop ? NO_ITEM : 0;
+  const stopCount = count - lowestIndex;
+  if (stopCount <= 0) return lowestIndex;
+  return ((((index - lowestIndex + step) % stopCount) + stopCount) % stopCount) + lowestIndex;
+}
+
+function isCtrlLetter(keyPress: KeyPress, letter: string): boolean {
+  return (
+    keyPress.ctrlKey &&
+    !keyPress.altKey &&
+    !keyPress.metaKey &&
+    !keyPress.shiftKey &&
+    keyPress.key.toLowerCase() === letter
+  );
 }

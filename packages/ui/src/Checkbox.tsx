@@ -1,13 +1,14 @@
 import type { JSX } from "solid-js";
 
-/** A checkbox with its label. */
-export default function Checkbox(props: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-  title?: string;
-  children: JSX.Element;
-}) {
+interface CheckboxProps {
+  readonly checked: boolean;
+  readonly onChange: (checked: boolean) => void;
+  readonly disabled?: boolean;
+  readonly title?: string;
+  readonly children: JSX.Element;
+}
+
+export default function Checkbox(props: CheckboxProps) {
   return (
     <label class="flex cursor-pointer items-center gap-1" title={props.title}>
       <input

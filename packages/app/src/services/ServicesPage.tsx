@@ -5,32 +5,26 @@ import { Callout } from "@otelo/ui";
 import { type Column, Panel, Sparkline, Table } from "@otelo/viz";
 
 import { pageContent } from "../classes";
-import { count } from "../list";
-import Service from "../Service";
+import { formatCount } from "../list";
+import ServiceName from "../ServiceName";
 import { createRangeFetch, useRange } from "./range";
-import { rate, seconds, share } from "./stats";
-import Toolbar from "./Toolbar";
+import RangeBar from "./range-bar";
+import { measureSeconds, toRate, toShare } from "./stats";
 
-/**
- * Every service that sent spans or logs in the range, with its requests over
- * time, its rate, its error rate, its latency, and its logs. A request is a
- * span that enters the service: a root span, or a server or consumer span. A
- * service opens its own page. The range and live mode live in the URL.
- */
 export default function ServicesPage() {
   const range = useRange();
   const fetched = createRangeFetch(range, () => ({}), getServices);
   const rangeSeconds = () => {
-    const data = fetched.data();
-    return data ? seconds(data.start_at, data.end_at) : 0;
+    const services = fetched.data();
+    return services ? measureSeconds(services.start_at, services.end_at) : 0;
   };
 
   const columns: Column<ServiceSummary>[] = [
     {
       id: "service",
       label: "Service",
-      value: (s) => s.service,
-      cell: (s) => <Service name={s.service} resource={s.resource} />,
+      value: (service) => service.service,
+      cell: (service) => <ServiceName name={service.service} resource={service.resource} />,
     },
     {
       id: "traffic",
@@ -38,83 +32,92 @@ export default function ServicesPage() {
       value: () => null,
       sortable: false,
       width: "max-content",
-      cell: (s) => (
+      cell: (service) => (
         <Sparkline
           kind="bar"
           series={[
             {
-              values: s.buckets.map((b) => b.requests.count - b.requests.errors),
+              values: service.buckets.map(
+                (bucket) => bucket.requests.count - bucket.requests.errors,
+              ),
               color: "series-1",
             },
-            { values: s.buckets.map((b) => b.requests.errors), color: "error" },
+            { values: service.buckets.map((bucket) => bucket.requests.errors), color: "error" },
           ]}
         />
       ),
     },
-    { id: "requests", label: "Requests", unit: "count", value: (s) => s.stats.requests.count },
+    {
+      id: "requests",
+      label: "Requests",
+      unit: "count",
+      value: (service) => service.stats.requests.count,
+    },
     {
       id: "rate",
       label: "Rate",
       unit: "rate",
-      value: (s) => rate(s.stats.requests.count, rangeSeconds()),
+      value: (service) => toRate(service.stats.requests.count, rangeSeconds()),
     },
     {
       id: "errors",
       label: "Error rate",
       unit: "ratio",
-      value: (s) => share(s.stats.requests.errors, s.stats.requests.count),
-      tone: (s) => (s.stats.requests.errors > 0 ? "error" : undefined),
+      value: (service) => toShare(service.stats.requests.errors, service.stats.requests.count),
+      tone: (service) => (service.stats.requests.errors > 0 ? "error" : undefined),
     },
-    ...(["p50", "p95", "p99"] as const).map((p): Column<ServiceSummary> => ({
-      id: p,
-      label: p.toUpperCase(),
+    ...(["p50", "p95", "p99"] as const).map((percentile): Column<ServiceSummary> => ({
+      id: percentile,
+      label: percentile.toUpperCase(),
       unit: "duration",
-      value: (s) => s.stats.requests.latency?.[p] ?? null,
+      value: (service) => service.stats.requests.latency?.[percentile] ?? null,
     })),
-    { id: "logs", label: "Logs", unit: "count", value: (s) => s.stats.logs },
+    { id: "logs", label: "Logs", unit: "count", value: (service) => service.stats.logs },
     {
       id: "error_logs",
       label: "Error logs",
       unit: "count",
-      value: (s) => s.stats.error_logs,
-      tone: (s) => (s.stats.error_logs > 0 ? "error" : "muted"),
+      value: (service) => service.stats.error_logs,
+      tone: (service) => (service.stats.error_logs > 0 ? "error" : "muted"),
     },
   ];
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
-      <Toolbar
+      <RangeBar
         range={range}
         fetched={fetched}
         title={<h1 class="m-0 font-mono text-md font-semibold">Services</h1>}
       >
         <Show when={fetched.data()}>
-          {(data) => (
+          {(services) => (
             <span>
-              {count(data().services.length, "service")}
-              {data().truncated ? ", the busiest; more sent telemetry" : ""}
+              {formatCount(services().services.length, "service")}
+              {services().truncated ? ", the busiest; more sent telemetry" : ""}
             </span>
           )}
         </Show>
-      </Toolbar>
+      </RangeBar>
 
       <div class={`min-h-0 flex-1 ${pageContent}`}>
-        <Show when={fetched.error()}>
-          {(error) => (
+        <Show when={fetched.errorMessage()}>
+          {(errorMessage) => (
             <div class="mb-3">
-              <Callout tone="error">{error()}</Callout>
+              <Callout tone="error">{errorMessage()}</Callout>
             </div>
           )}
         </Show>
         <Show when={fetched.data()}>
-          {(data) => (
+          {(services) => (
             <Panel flush>
               <Table
                 label="Services"
-                rows={data().services}
+                rows={services().services}
                 columns={columns}
                 sort={{ column: "requests", descending: true }}
-                href={(s) => `/services/${encodeURIComponent(s.service)}${range.search()}`}
+                href={(service) =>
+                  `/services/${encodeURIComponent(service.service)}${range.toSearch()}`
+                }
                 loading={fetched.loading()}
                 empty="No service sent spans or logs in this range."
               />

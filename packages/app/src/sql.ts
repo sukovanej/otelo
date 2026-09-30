@@ -1,23 +1,4 @@
-// SQL as the UI shows it: split into tokens, for their colors, and laid out
-// over lines, a clause on each. It reads every dialect loosely and never
-// fails: what it does not know is plain text.
-
-export type SqlKind =
-  | "keyword"
-  | "string"
-  | "number"
-  | "placeholder"
-  | "comment"
-  | "punctuation"
-  | "space"
-  | "text";
-
-export interface SqlToken {
-  kind: SqlKind;
-  text: string;
-}
-
-const KEYWORDS = new Set(
+const SQL_KEYWORDS = new Set(
   `ADD ALL ALTER ANALYZE AND ANY AS ASC BEGIN BETWEEN BY CALL CASE CAST CHECK COLLATE COLUMN
   COMMIT CONFLICT CONSTRAINT CREATE CROSS DATABASE DECLARE DEFAULT DELETE DESC DISTINCT DO DROP
   DUPLICATE ELSE END ESCAPE EXCEPT EXEC EXECUTE EXISTS EXPLAIN FALSE FETCH FILTER FIRST FOR
@@ -29,10 +10,10 @@ const KEYWORDS = new Set(
   USE USING VACUUM VALUES VIEW WHEN WHERE WINDOW WITH`.split(/\s+/),
 );
 
-// The first rule that matches at a place makes the token there. A string
-// or a comment without its end runs to the end of the text. A quoted name
-// is text, as a bare one is, and a word is a keyword when `KEYWORDS` has it.
-const RULES: [SqlKind, RegExp][] = [
+// The first rule that matches at a place makes the token there. The keyword
+// rule takes every word, and `lexSql` keeps it a keyword only when
+// `SQL_KEYWORDS` has it.
+const TOKEN_RULES: ReadonlyArray<SqlRule> = [
   ["space", /\s+/],
   ["comment", /--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/],
   ["string", /'(?:[^']|'')*(?:'|$)/],
@@ -46,72 +27,171 @@ const RULES: [SqlKind, RegExp][] = [
   ["text", /[\s\S]/],
 ];
 
-const TOKEN = new RegExp(RULES.map(([, rule]) => `(${rule.source})`).join("|"), "gu");
+const TOKEN_PATTERN = new RegExp(
+  TOKEN_RULES.map(([, pattern]) => `(${pattern.source})`).join("|"),
+  "gu",
+);
 
-/** The tokens of `text`, which join back into it. */
-export function sqlTokens(text: string): SqlToken[] {
+const SPACE_TOKEN: SqlToken = { kind: "space", text: " " };
+
+const CLAUSE_KEYWORDS = new Set(
+  "SELECT WHERE HAVING LIMIT OFFSET RETURNING WINDOW QUALIFY UNION INTERSECT EXCEPT SET".split(" "),
+);
+
+const JOIN_MODIFIERS = new Set("INNER LEFT RIGHT FULL OUTER CROSS NATURAL".split(" "));
+
+const SUBQUERY_FIRST_KEYWORDS = new Set("SELECT WITH VALUES INSERT UPDATE DELETE".split(" "));
+
+export type SqlTokenKind =
+  | "keyword"
+  | "string"
+  | "number"
+  | "placeholder"
+  | "comment"
+  | "punctuation"
+  | "space"
+  | "text";
+
+export interface SqlToken {
+  readonly kind: SqlTokenKind;
+  readonly text: string;
+}
+
+interface SqlLine {
+  readonly indentLevel: number;
+  readonly tokens: SqlToken[];
+}
+
+type SqlRule = readonly [kind: SqlTokenKind, pattern: RegExp];
+
+interface LayoutToken {
+  readonly token: SqlToken;
+  readonly normalizedText: string;
+  readonly followsSpace: boolean;
+}
+
+export function lexSql(text: string): SqlToken[] {
   const tokens: SqlToken[] = [];
-  for (const match of text.matchAll(TOKEN)) {
+  for (const match of text.matchAll(TOKEN_PATTERN)) {
     // The group that took part is the rule that matched: no rule matches
     // nothing, so the group of each other rule is not a string.
-    const rule = RULES[match.slice(1).findIndex(Boolean)];
+    const rule = TOKEN_RULES[match.slice(1).findIndex(Boolean)];
     const kind = rule?.[0] ?? "text";
     tokens.push({
-      kind: kind === "keyword" && !KEYWORDS.has(match[0].toUpperCase()) ? "text" : kind,
+      kind: kind === "keyword" && !SQL_KEYWORDS.has(match[0].toUpperCase()) ? "text" : kind,
       text: match[0],
     });
   }
   return tokens;
 }
 
-/** One line of a query laid out: its tokens, without the space that leads
- * it, and how many levels deep it is. */
-export interface SqlLine {
-  indent: number;
-  tokens: SqlToken[];
+export function layOutSql(text: string): SqlLine[] {
+  const layoutTokens: LayoutToken[] = [];
+  let sawSpace = false;
+  for (const token of lexSql(text)) {
+    if (token.kind === "space") {
+      sawSpace = true;
+      continue;
+    }
+    const nonKeywordText = token.kind === "string" || token.kind === "comment" ? "" : token.text;
+    layoutTokens.push({
+      token,
+      normalizedText: token.kind === "keyword" ? token.text.toUpperCase() : nonKeywordText,
+      followsSpace: sawSpace,
+    });
+    sawSpace = false;
+  }
+
+  const lines: SqlLine[] = [];
+  let line: SqlLine = { indentLevel: 0, tokens: [] };
+  const startLine = (indentLevel: number) => {
+    if (line.tokens.length > 0) lines.push(line);
+    line = { indentLevel, tokens: [] };
+  };
+  const openParenSubqueryIndents: (number | undefined)[] = [];
+  let clauseIndent = 0;
+  let openCaseCount = 0;
+  let betweenAwaitsAnd = false;
+  let nextStartsLine = false;
+
+  layoutTokens.forEach(({ token, normalizedText, followsSpace }, index) => {
+    let lineIndent: number | undefined;
+    if (normalizedText === ")") {
+      const closedSubqueryIndent = openParenSubqueryIndents.pop();
+      if (closedSubqueryIndent !== undefined) {
+        clauseIndent =
+          openParenSubqueryIndents.findLast((subqueryIndent) => subqueryIndent !== undefined) ?? 0;
+        lineIndent = closedSubqueryIndent - 1;
+      }
+    }
+    const inArguments =
+      openParenSubqueryIndents.length > 0 &&
+      openParenSubqueryIndents[openParenSubqueryIndents.length - 1] === undefined;
+    if (lineIndent === undefined && nextStartsLine) {
+      lineIndent = inArguments ? line.indentLevel : clauseIndent;
+    }
+    if (lineIndent === undefined && !inArguments && normalizedText !== ")") {
+      if (startsClause(layoutTokens, index)) {
+        lineIndent = clauseIndent;
+      } else if (
+        openCaseCount === 0 &&
+        (normalizedText === "OR" || (normalizedText === "AND" && !betweenAwaitsAnd))
+      ) {
+        lineIndent = clauseIndent + 1;
+      }
+    }
+
+    if (normalizedText === "AND") betweenAwaitsAnd = false;
+    else if (normalizedText === "BETWEEN") betweenAwaitsAnd = true;
+    else if (normalizedText === "CASE") openCaseCount++;
+    else if (normalizedText === "END" && openCaseCount > 0) openCaseCount--;
+
+    if (lineIndent !== undefined) {
+      startLine(lineIndent);
+    } else if (
+      line.tokens.length > 0 &&
+      (followsSpace || layoutTokens[index - 1]?.normalizedText === ",")
+    ) {
+      line.tokens.push(SPACE_TOKEN);
+    }
+    line.tokens.push(token);
+
+    nextStartsLine =
+      normalizedText === ";" || (token.kind === "comment" && token.text.startsWith("--"));
+    if (normalizedText === "(") {
+      const subqueryIndent = SUBQUERY_FIRST_KEYWORDS.has(
+        layoutTokens[index + 1]?.normalizedText ?? "",
+      )
+        ? line.indentLevel + 1
+        : undefined;
+      openParenSubqueryIndents.push(subqueryIndent);
+      if (subqueryIndent !== undefined) {
+        clauseIndent = subqueryIndent;
+        nextStartsLine = true;
+      }
+    }
+  });
+  startLine(0);
+  return lines;
 }
 
-/** A token that is not space, as the layout reads it. */
-interface Word {
-  token: SqlToken;
-  /** The keyword in upper case, or the text of any other token that is not
-   * a string or a comment. */
-  word: string;
-  /** Whether space comes before it in the text. */
-  gap: boolean;
-}
-
-const SPACE: SqlToken = { kind: "space", text: " " };
-
-/** The keywords that start a clause wherever they are. */
-const CLAUSES = new Set(
-  "SELECT WHERE HAVING LIMIT OFFSET RETURNING WINDOW QUALIFY UNION INTERSECT EXCEPT SET".split(" "),
-);
-
-/** The keywords that come before `JOIN` in the name of a join. */
-const JOINS = new Set("INNER LEFT RIGHT FULL OUTER CROSS NATURAL".split(" "));
-
-/** What a query in parentheses starts with. */
-const QUERIES = new Set("SELECT WITH VALUES INSERT UPDATE DELETE".split(" "));
-
-/** Whether the word at `i` starts a clause, which starts a line. */
-function startsClause(words: Word[], i: number): boolean {
-  const word = words[i]?.word ?? "";
-  const prev = words[i - 1]?.word ?? "";
-  const next = words[i + 1]?.word ?? "";
-  if (CLAUSES.has(word)) return true;
-  switch (word) {
+function startsClause(layoutTokens: ReadonlyArray<LayoutToken>, index: number): boolean {
+  const current = layoutTokens[index]?.normalizedText ?? "";
+  const previous = layoutTokens[index - 1]?.normalizedText ?? "";
+  const next = layoutTokens[index + 1]?.normalizedText ?? "";
+  if (CLAUSE_KEYWORDS.has(current)) return true;
+  switch (current) {
     case "FROM":
-      return prev !== "DELETE" && prev !== "DISTINCT";
+      return previous !== "DELETE" && previous !== "DISTINCT";
     case "VALUES":
-      return prev !== "=" && prev !== "DEFAULT";
+      return previous !== "=" && previous !== "DEFAULT";
     case "GROUP":
     case "ORDER":
       return next === "BY";
     case "INSERT":
     case "UPDATE":
     case "DELETE":
-      return prev === ")";
+      return previous === ")";
     case "ON":
       return next === "CONFLICT" || next === "DUPLICATE";
     case "FOR":
@@ -119,93 +199,12 @@ function startsClause(words: Word[], i: number): boolean {
     case "FETCH":
       return next === "FIRST" || next === "NEXT";
     case "JOIN":
-      return !JOINS.has(prev);
+      return !JOIN_MODIFIERS.has(previous);
     default: {
-      if (!JOINS.has(word) || JOINS.has(prev)) return false;
-      let join = i + 1;
-      while (JOINS.has(words[join]?.word ?? "")) join++;
-      return words[join]?.word === "JOIN";
+      if (!JOIN_MODIFIERS.has(current) || JOIN_MODIFIERS.has(previous)) return false;
+      let joinIndex = index + 1;
+      while (JOIN_MODIFIERS.has(layoutTokens[joinIndex]?.normalizedText ?? "")) joinIndex++;
+      return layoutTokens[joinIndex]?.normalizedText === "JOIN";
     }
   }
-}
-
-/**
- * A query laid out over lines, whatever lines and spaces it came with: each
- * clause starts a line, each `AND` and `OR` between conditions starts one a
- * level deeper, and a query in parentheses is a level deeper than the line
- * that opens it. What other parentheses hold, such as the arguments of a
- * function, stays on its line. The tokens keep their text and their case.
- */
-export function sqlLines(text: string): SqlLine[] {
-  const words: Word[] = [];
-  let spaced = false;
-  for (const token of sqlTokens(text)) {
-    if (token.kind === "space") {
-      spaced = true;
-      continue;
-    }
-    const plain = token.kind === "string" || token.kind === "comment" ? "" : token.text;
-    words.push({
-      token,
-      word: token.kind === "keyword" ? token.text.toUpperCase() : plain,
-      gap: spaced,
-    });
-    spaced = false;
-  }
-
-  const lines: SqlLine[] = [];
-  let line: SqlLine = { indent: 0, tokens: [] };
-  const startLine = (indent: number) => {
-    if (line.tokens.length > 0) lines.push(line);
-    line = { indent, tokens: [] };
-  };
-  // The indent of the query each open parenthesis holds, or `undefined` for
-  // one that holds no query.
-  const parens: (number | undefined)[] = [];
-  // The indent of a clause here.
-  let depth = 0;
-  // How many `CASE` are open, whose `AND` and `OR` stay on their line.
-  let cases = 0;
-  // Whether a `BETWEEN` waits for its `AND`.
-  let between = false;
-  // Whether the next token starts a line whatever it is.
-  let forced = false;
-
-  words.forEach(({ token, word, gap }, i) => {
-    let indent: number | undefined;
-    if (word === ")") {
-      const inner = parens.pop();
-      if (inner !== undefined) {
-        depth = parens.findLast((held) => held !== undefined) ?? 0;
-        indent = inner - 1;
-      }
-    }
-    const inArguments = parens.length > 0 && parens[parens.length - 1] === undefined;
-    if (indent === undefined && forced) indent = inArguments ? line.indent : depth;
-    if (indent === undefined && !inArguments && word !== ")") {
-      if (startsClause(words, i)) indent = depth;
-      else if (cases === 0 && (word === "OR" || (word === "AND" && !between))) indent = depth + 1;
-    }
-
-    if (word === "AND") between = false;
-    else if (word === "BETWEEN") between = true;
-    else if (word === "CASE") cases++;
-    else if (word === "END" && cases > 0) cases--;
-
-    if (indent !== undefined) startLine(indent);
-    else if (line.tokens.length > 0 && (gap || words[i - 1]?.word === ",")) line.tokens.push(SPACE);
-    line.tokens.push(token);
-
-    forced = word === ";" || (token.kind === "comment" && token.text.startsWith("--"));
-    if (word === "(") {
-      const inner = QUERIES.has(words[i + 1]?.word ?? "") ? line.indent + 1 : undefined;
-      parens.push(inner);
-      if (inner !== undefined) {
-        depth = inner;
-        forced = true;
-      }
-    }
-  });
-  startLine(0);
-  return lines;
 }

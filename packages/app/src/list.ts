@@ -1,160 +1,156 @@
-// The state of a page that lists records for a query and a range: the logs
-// page and the traces page. The query, the range, the view, and live mode
-// live in the URL, so a link opens the same page.
-
-import { useSearchParams } from "@solidjs/router";
+import { type SearchParams, useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
-import { createFetch, type Fetched } from "./fetch";
+import { createFetch, type FetchState } from "./fetch";
 import { addTerm } from "./query";
 
-/** The most rows the API returns. */
-export const MAX_LIMIT = 10_000;
-
-/** How often a live page reloads. */
-export const LIVE_MS = 5_000;
+export const LIVE_RELOAD_MS = 5_000;
 
 export const DEFAULT_SINCE = "1h";
 
-/** What every list answers besides its rows. */
-interface ListBody {
-  truncated: boolean;
-  unindexed: string[];
-}
+const API_MAX_ROWS = 10_000;
 
-/** The answer of one view: its name, so a page shows it only in that view,
- * and its body. */
 export interface ListResult<V extends string> {
-  view: V;
-  body: ListBody;
+  readonly view: V;
+  readonly body: ListBody;
 }
 
-export interface List<V extends string, R extends ListResult<V>> {
-  q: () => string;
-  since: () => string;
-  until: () => string;
-  view: () => V;
-  /** Whether the page reloads by itself, which needs a range that ends now. */
-  live: () => boolean;
-  /** The query as typed; it runs on Enter. */
-  draft: () => string;
-  setDraft: (q: string) => void;
-  /** Runs the draft, or the query again when it is the same. */
-  run: () => void;
-  /** Joins `term` to the query with `AND`, and goes to `view` when given. */
-  filter: (term: string, view?: V) => void;
-  setView: (view: V) => void;
-  setRange: (since: string, until: string) => void;
-  setLive: (live: boolean) => void;
-  fetched: Fetched<R>;
-  /** The last answer, when it is of the view the page shows. */
-  current: () => R | undefined;
-  /** Whether "Show more" can raise the limit. */
-  canShowMore: () => boolean;
-  showMore: () => void;
+export interface ListState<V extends string, R extends ListResult<V>> {
+  readonly query: () => string;
+  readonly since: () => string;
+  readonly until: () => string;
+  readonly view: () => V;
+  readonly live: () => boolean;
+  readonly draftQuery: () => string;
+  readonly setDraftQuery: (query: string) => void;
+  readonly runDraftQuery: () => void;
+  readonly addTerm: (term: string, view?: V) => void;
+  readonly setView: (view: V) => void;
+  readonly setRange: (since: string, until: string) => void;
+  readonly setLive: (live: boolean) => void;
+  readonly fetched: FetchState<R>;
+  readonly shownResult: () => R | undefined;
+  readonly canShowMore: () => boolean;
+  readonly showMore: () => void;
 }
 
-/**
- * The state of a list with `views`, the first of them the default. `page`
- * is the first limit of each view, and "Show more" doubles it.
- */
-export function createList<V extends string, R extends ListResult<V>>(options: {
-  views: readonly [V, ...V[]];
-  page: Record<V, number>;
-  fetch: (key: ListQuery & { view: V }, signal: AbortSignal) => Promise<R>;
-}): List<V, R> {
-  const [params, setParams] = useSearchParams<{
-    q?: string;
-    since?: string;
-    until?: string;
-    view?: string;
-    live?: string;
-  }>();
-  const [first] = options.views;
-  const q = () => params.q ?? "";
+interface ListBody {
+  readonly truncated: boolean;
+  readonly unindexed: ReadonlyArray<string>;
+}
+
+interface ListKey<V extends string> extends ListQuery {
+  readonly view: V;
+}
+
+type ListViews<V extends string> = readonly [defaultView: V, ...otherViews: V[]];
+
+interface ListOptions<V extends string, R extends ListResult<V>> {
+  readonly views: ListViews<V>;
+  readonly firstLimits: Record<V, number>;
+  readonly fetch: (key: ListKey<V>, signal: AbortSignal) => Promise<R>;
+}
+
+interface ListSearchParams extends SearchParams {
+  readonly q?: string;
+  readonly since?: string;
+  readonly until?: string;
+  readonly view?: string;
+  readonly live?: string;
+}
+
+export function createListState<V extends string, R extends ListResult<V>>(
+  options: ListOptions<V, R>,
+): ListState<V, R> {
+  const [params, setParams] = useSearchParams<ListSearchParams>();
+  const [defaultView] = options.views;
+  const query = () => params.q ?? "";
   const since = () => params.since || DEFAULT_SINCE;
   const until = () => params.until ?? "";
-  const view = () => options.views.find((v) => v === params.view) ?? first;
+  const view = () => options.views.find((knownView) => knownView === params.view) ?? defaultView;
   const live = () => params.live === "1" && until() === "";
-  // The default view stays out of the URL.
-  const viewParam = (v: V) => (v === first ? undefined : v);
+  const toViewParam = (newView: V) => (newView === defaultView ? undefined : newView);
 
-  const [draft, setDraft] = createSignal(q());
-  createEffect(on(q, setDraft, { defer: true }));
+  const [draftQuery, setDraftQuery] = createSignal(query());
+  createEffect(on(query, setDraftQuery, { defer: true }));
 
-  // "Show more" raises the limit of one query; any other query starts over.
-  const base = () => JSON.stringify([view(), q(), since(), until()]);
-  const [more, setMore] = createSignal({ base: "", limit: 0 });
-  const limit = () => (more().base === base() ? more().limit : options.page[view()]);
+  const queryIdentity = () => JSON.stringify([view(), query(), since(), until()]);
+  const [raisedLimit, setRaisedLimit] = createSignal({ forQuery: "", limit: 0 });
+  const limit = () =>
+    raisedLimit().forQuery === queryIdentity() ? raisedLimit().limit : options.firstLimits[view()];
 
-  const key = createMemo(
-    () => ({ view: view(), q: q().trim(), since: since(), until: until(), limit: limit() }),
+  const requestKey = createMemo(
+    () => ({ view: view(), q: query().trim(), since: since(), until: until(), limit: limit() }),
     undefined,
-    { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+    { equals: (previous, next) => JSON.stringify(previous) === JSON.stringify(next) },
   );
-  const fetched = createFetch(key, options.fetch);
+  const fetched = createFetch(requestKey, options.fetch);
 
   createEffect(() => {
     if (!live()) return;
     const timer = setInterval(() => {
       if (!fetched.loading()) fetched.reload();
-    }, LIVE_MS);
+    }, LIVE_RELOAD_MS);
     onCleanup(() => clearInterval(timer));
   });
 
-  const current = () => {
+  const shownResult = () => {
     const result = fetched.data();
     return result?.view === view() ? result : undefined;
   };
 
   return {
-    q,
+    query,
     since,
     until,
     view,
     live,
-    draft,
-    setDraft,
-    run: () => {
-      if (draft() === q()) fetched.reload();
-      else setParams({ q: draft() || undefined });
+    draftQuery,
+    setDraftQuery,
+    runDraftQuery: () => {
+      if (draftQuery() === query()) fetched.reload();
+      else setParams({ q: draftQuery() || undefined });
     },
-    filter: (term, v = view()) => setParams({ q: addTerm(q(), term), view: viewParam(v) }),
-    setView: (v) => setParams({ view: viewParam(v) }),
-    setRange: (s, u) =>
-      setParams({ since: s === DEFAULT_SINCE ? undefined : s, until: u || undefined }),
+    addTerm: (term, newView = view()) =>
+      setParams({ q: addTerm(query(), term), view: toViewParam(newView) }),
+    setView: (newView) => setParams({ view: toViewParam(newView) }),
+    setRange: (newSince, newUntil) =>
+      setParams({
+        since: newSince === DEFAULT_SINCE ? undefined : newSince,
+        until: newUntil || undefined,
+      }),
     setLive: (enabled) => setParams({ live: enabled ? "1" : undefined }),
     fetched,
-    current,
-    canShowMore: () => (current()?.body.truncated ?? false) && limit() < MAX_LIMIT,
-    showMore: () => setMore({ base: base(), limit: Math.min(MAX_LIMIT, limit() * 2) }),
+    shownResult,
+    canShowMore: () => (shownResult()?.body.truncated ?? false) && limit() < API_MAX_ROWS,
+    showMore: () =>
+      setRaisedLimit({ forQuery: queryIdentity(), limit: Math.min(API_MAX_ROWS, limit() * 2) }),
   };
 }
 
-/**
- * `/` focuses the query of a page that has one, and Escape calls `onEscape`,
- * unless the focus is in a field, which takes the key.
- */
-export function usePageKeys(keys: {
-  query?: () => HTMLInputElement | undefined;
-  onEscape: () => void;
-}) {
-  const onKey = (e: KeyboardEvent) => {
-    const typing =
+interface PageKeys {
+  readonly queryInput?: () => HTMLInputElement | undefined;
+  readonly onEscape: () => void;
+}
+
+export function usePageKeys(keys: PageKeys): void {
+  const onKeyDown = (e: KeyboardEvent) => {
+    const isTyping =
       e.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
-    if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === "/" && keys.query) {
+    if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "/" && keys.queryInput) {
       e.preventDefault();
-      keys.query()?.focus();
+      keys.queryInput()?.focus();
     } else if (e.key === "Escape") {
       keys.onEscape();
     }
   };
-  document.addEventListener("keydown", onKey);
-  onCleanup(() => document.removeEventListener("keydown", onKey));
+  document.addEventListener("keydown", onKeyDown);
+  onCleanup(() => document.removeEventListener("keydown", onKeyDown));
 }
 
-export const count = (n: number, noun: string) =>
-  `${n.toLocaleString()} ${noun}${n === 1 ? "" : "s"}`;
+export function formatCount(count: number, noun: string): string {
+  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
