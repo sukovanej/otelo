@@ -1,5 +1,5 @@
 ---
-status: backlog
+status: in_progress
 created: 2026-09-30T12:33:34Z
 parent: ./00001-collect-and-query-telemetry.md
 dependencies:
