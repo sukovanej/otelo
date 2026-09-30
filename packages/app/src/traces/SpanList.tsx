@@ -1,15 +1,11 @@
 import type { TraceSpan } from "@otelo/api";
 import { type Column, Table } from "@otelo/viz";
 
-import Service from "../Service";
+import ServiceName from "../ServiceName";
 import { formatTime, parseTime } from "../time";
-import KindBadge from "./KindBadge";
-import { spanFailed } from "./span";
+import { isFailedSpan, toKindName } from "./span";
+import SpanKindBadge from "./SpanKindBadge";
 import SpanTitle from "./SpanTitle";
-
-/** What tells a span apart, so it stays selected when a reload brings it
- * again. */
-export const spanKey = (span: TraceSpan) => `${span.trace_id} ${span.span_id}`;
 
 const COLUMNS: Column<TraceSpan>[] = [
   {
@@ -30,7 +26,7 @@ const COLUMNS: Column<TraceSpan>[] = [
     width: "minmax(6ch,16ch)",
     value: (span) => span.service,
     tone: () => "muted",
-    cell: (span) => <Service name={span.service} resource={span.resource} />,
+    cell: (span) => <ServiceName name={span.service} resource={span.resource} />,
   },
   {
     id: "name",
@@ -38,7 +34,12 @@ const COLUMNS: Column<TraceSpan>[] = [
     width: "minmax(0,1fr)",
     value: (span) => span.name,
     cell: (span) => (
-      <SpanTitle name={span.name} attributes={span.attributes} error={spanFailed(span)} />
+      <SpanTitle
+        variant="span"
+        name={span.name}
+        attributes={span.attributes}
+        error={isFailedSpan(span)}
+      />
     ),
   },
   {
@@ -46,7 +47,7 @@ const COLUMNS: Column<TraceSpan>[] = [
     label: "Kind",
     width: "max-content",
     value: (span) => span.kind,
-    cell: (span) => <KindBadge kind={span.kind} />,
+    cell: (span) => <SpanKindBadge kind={toKindName(span.kind)} />,
   },
   {
     id: "duration",
@@ -58,22 +59,27 @@ const COLUMNS: Column<TraceSpan>[] = [
   },
 ];
 
-/** Spans, newest first. A click on a span selects it, and a click on the
- * selected one lets it go. */
-export default function SpanList(props: {
-  spans: TraceSpan[];
-  /** The key of the selected span. */
-  selected: string | undefined;
-  onSelect: (span: TraceSpan | undefined) => void;
-}) {
+interface SpanListProps {
+  readonly spans: ReadonlyArray<TraceSpan>;
+  readonly selectedKey: string | undefined;
+  readonly onSelect: (span: TraceSpan | undefined) => void;
+}
+
+export default function SpanList(props: SpanListProps) {
   return (
     <Table
       label="Spans"
       rows={props.spans}
       columns={COLUMNS}
-      selected={(span) => props.selected === spanKey(span)}
-      tone={(span) => (spanFailed(span) ? "error" : undefined)}
-      onRowClick={(span) => props.onSelect(props.selected === spanKey(span) ? undefined : span)}
+      selected={(span) => props.selectedKey === toSpanKey(span)}
+      tone={(span) => (isFailedSpan(span) ? "error" : undefined)}
+      onRowClick={(span) =>
+        props.onSelect(props.selectedKey === toSpanKey(span) ? undefined : span)
+      }
     />
   );
+}
+
+export function toSpanKey(span: TraceSpan): string {
+  return `${span.trace_id} ${span.span_id}`;
 }

@@ -1,10 +1,10 @@
 import { createEffect, createMemo, createSignal, type JSX, on, onCleanup, Show } from "solid-js";
 
-import { textX } from "../caret";
+import { measureCaretX } from "../caret";
 import { control, cx, plain, type Size, sizes, textInput } from "../classes";
 import { applySuggestion, type Suggestion, toChars, toUtf16 } from "../completion";
 import { type QueryToken, splitIntoPieces } from "../highlight";
-import { listStep, move } from "../keys";
+import { moveListIndex, NO_ITEM, toListStep } from "../keys";
 import QueryInputColors from "./query-input-colors";
 import QueryInputHelp from "./query-input-help";
 import QueryInputSuggestions, {
@@ -14,7 +14,7 @@ import QueryInputSuggestions, {
 
 const COMPLETE_DELAY_MS = 60;
 
-const NO_SUGGESTION_PICKED = -1;
+const NO_SUGGESTION_PICKED = NO_ITEM;
 
 type HighlightQuery = (query: string) => QueryToken[];
 
@@ -100,7 +100,7 @@ export default function QueryInput(props: QueryInputProps) {
         (list) => {
           if (completeController !== controller || document.activeElement !== input) return;
           const first = list[0];
-          if (first) setListLeft(textX(input, toUtf16(query, first.start)));
+          if (first) setListLeft(measureCaretX(input, toUtf16(query, first.start)));
           setSuggestions(list);
           setActiveIndex(NO_SUGGESTION_PICKED);
           setListOpen(list.length > 0);
@@ -170,14 +170,14 @@ export default function QueryInput(props: QueryInputProps) {
     dismissHelp();
     const list = suggestions();
     const shown = listOpen() && list.length > 0;
-    const step = listStep(e);
+    const step = toListStep(e);
     if (step !== 0) {
       e.preventDefault();
       if (!shown) {
         if (step > 0) requestSuggestions();
         return;
       }
-      setActiveIndex((index) => move(index, step, list.length, true));
+      setActiveIndex((index) => moveListIndex(index, step, list.length, true));
       listbox?.querySelector("[aria-selected=true]")?.scrollIntoView({ block: "nearest" });
       return;
     }

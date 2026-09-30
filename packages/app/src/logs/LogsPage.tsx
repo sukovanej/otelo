@@ -2,53 +2,61 @@ import { createSignal, Match, Show, Switch } from "solid-js";
 
 import { getLogGroups, getLogs, type LogGroups, type LogLine, type Logs } from "@otelo/api";
 
-import { count, createList, usePageKeys } from "../list";
-import { Empty, ListContent, QueryBar } from "../ListFrame";
+import EmptyMessage from "../EmptyMessage";
+import { createListState, formatCount, usePageKeys } from "../list";
+import ListContent from "../ListContent";
+import QueryBar from "../QueryBar";
 import LinePanel from "./LinePanel";
 import LogGroupList from "./LogGroupList";
-import LogLines, { lineKey } from "./LogLines";
-
-type View = "lines" | "groups";
+import LogLines, { toLineKey } from "./LogLines";
 
 const VIEWS = [
   { value: "lines", label: "Lines" },
   { value: "groups", label: "Templates" },
 ] as const;
 
-type Result = { view: "lines"; body: Logs } | { view: "groups"; body: LogGroups };
+const NO_LINES_MESSAGE = "No lines in this range match the query.";
 
-/**
- * Log lines or their message templates for a query and a range. The query,
- * the range, the view, and live mode live in the URL, so a link opens the
- * same page.
- */
+type LogsView = "lines" | "groups";
+
+type LogsResult = LinesResult | GroupsResult;
+
+interface LinesResult {
+  readonly view: "lines";
+  readonly body: Logs;
+}
+
+interface GroupsResult {
+  readonly view: "groups";
+  readonly body: LogGroups;
+}
+
 export default function LogsPage() {
-  const list = createList<View, Result>({
+  const list = createListState<LogsView, LogsResult>({
     views: ["lines", "groups"],
-    page: { lines: 200, groups: 50 },
-    fetch: async (k, signal) =>
-      k.view === "groups"
-        ? { view: "groups", body: await getLogGroups(k, signal) }
-        : { view: "lines", body: await getLogs(k, signal) },
+    firstLimits: { lines: 200, groups: 50 },
+    fetch: async (key, signal) =>
+      key.view === "groups"
+        ? { view: "groups", body: await getLogGroups(key, signal) }
+        : { view: "lines", body: await getLogs(key, signal) },
   });
 
-  // The line open in the panel. It stays open when a reload or another
-  // query no longer brings it.
-  const [selected, setSelected] = createSignal<LogLine>();
+  // The line stays open when a reload or another query no longer brings it.
+  const [selectedLine, setSelectedLine] = createSignal<LogLine>();
   const selectedKey = () => {
-    const line = selected();
-    return line && lineKey(line);
+    const line = selectedLine();
+    return line && toLineKey(line);
   };
 
   let queryInput: HTMLInputElement | undefined;
-  usePageKeys({ query: () => queryInput, onEscape: () => setSelected(undefined) });
+  usePageKeys({ queryInput: () => queryInput, onEscape: () => setSelectedLine(undefined) });
 
   const lines = () => {
-    const result = list.current();
+    const result = list.shownResult();
     return result?.view === "lines" ? result.body : undefined;
   };
   const groups = () => {
-    const result = list.current();
+    const result = list.shownResult();
     return result?.view === "groups" ? result.body : undefined;
   };
 
@@ -65,7 +73,7 @@ export default function LogsPage() {
           <Match when={lines()}>
             {(body) => (
               <>
-                {count(body().logs.length, "line")}
+                {formatCount(body().logs.length, "line")}
                 {body().truncated ? ", newest first; more match" : ""}
               </>
             )}
@@ -73,7 +81,8 @@ export default function LogsPage() {
           <Match when={groups()}>
             {(body) => (
               <>
-                {count(body().groups.length, "template")} of {count(body().scanned, "line")}
+                {formatCount(body().groups.length, "template")} of{" "}
+                {formatCount(body().scanned, "line")}
                 {body().partial ? " (the newest only)" : ""}
               </>
             )}
@@ -84,14 +93,15 @@ export default function LogsPage() {
       <ListContent
         list={list}
         signal="logs"
-        noun="line"
+        singularNoun="line"
         panel={
-          <Show when={list.view() === "lines" && selected()}>
+          <Show when={list.view() === "lines" && selectedLine()}>
             {(line) => (
               <LinePanel
                 line={line()}
-                onFilter={list.filter}
-                onClose={() => setSelected(undefined)}
+                linksToTrace
+                onFilter={list.addTerm}
+                onClose={() => setSelectedLine(undefined)}
               />
             )}
           </Show>
@@ -100,17 +110,27 @@ export default function LogsPage() {
         <Switch>
           <Match when={lines()}>
             {(body) => (
-              <Show when={body().logs.length > 0} fallback={<Empty>{NO_LINES}</Empty>}>
-                <LogLines lines={body().logs} selected={selectedKey()} onSelect={setSelected} />
+              <Show
+                when={body().logs.length > 0}
+                fallback={<EmptyMessage>{NO_LINES_MESSAGE}</EmptyMessage>}
+              >
+                <LogLines
+                  lines={body().logs}
+                  selectedKey={selectedKey()}
+                  onSelect={setSelectedLine}
+                />
               </Show>
             )}
           </Match>
           <Match when={groups()}>
             {(body) => (
-              <Show when={body().groups.length > 0} fallback={<Empty>{NO_LINES}</Empty>}>
+              <Show
+                when={body().groups.length > 0}
+                fallback={<EmptyMessage>{NO_LINES_MESSAGE}</EmptyMessage>}
+              >
                 <LogGroupList
                   groups={body().groups}
-                  onShowLines={(term) => list.filter(term, "lines")}
+                  onShowLines={(term) => list.addTerm(term, "lines")}
                 />
               </Show>
             )}
@@ -120,5 +140,3 @@ export default function LogsPage() {
     </div>
   );
 }
-
-const NO_LINES = "No lines in this range match the query.";

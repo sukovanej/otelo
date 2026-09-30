@@ -1,139 +1,135 @@
-// What a number means and how it reads: every chart, table, and stat takes a
-// unit by name, so a dashboard can name it in JSON.
-
-/**
- * - `count`: things counted, `1,284` or `12.9K`.
- * - `duration`: nanoseconds, in the units of the CLI, `4.56ms` or `3m05s`.
- * - `ratio`: a share from 0 to 1, as a percentage, `2.67%`.
- * - `rate`: events per second, `0.42/s`.
- * - `bytes`: `512B`, `1.5KiB`, `3.2GiB`.
- * - `number`: any other number, to three significant digits.
- */
-export type Unit = "count" | "duration" | "ratio" | "rate" | "bytes" | "number";
-
-/** One number of a value and the unit after it, such as `4.56` and `ms`. A
- * duration of a minute and more has two parts: `3` `m`, `05` `s`. */
-export interface ValuePart {
-  value: string;
-  unit: string;
-  /** The unit sticks to the number without a gap, such as `%` or `K`. */
-  tight?: boolean;
-}
-
-/** A number with three significant digits at most, without trailing zeros. */
-const significant = (n: number, digits = 3) => String(Number(n.toPrecision(digits)));
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** The units under a minute, each a thousand of the one before it. */
-const SMALL_UNITS = [
-  { unit: "µs", size: 1e3 },
-  { unit: "ms", size: 1e6 },
-  { unit: "s", size: 1e9 },
+const SUBMINUTE_UNITS: ReadonlyArray<DurationUnit> = [
+  { unit: "µs", nanos: 1e3 },
+  { unit: "ms", nanos: 1e6 },
+  { unit: "s", nanos: 1e9 },
 ];
 
-/** A duration in nanoseconds in the units of the CLI, to three significant
- * digits: `850ns`, `12.3µs`, `4.56ms`, `1.2s`, or two parts at a minute and
- * more, `3m05s` or `2h10m`. */
-export function durationParts(nanos: number): ValuePart[] {
-  const size = Math.abs(nanos);
-  if (size === 0) return [{ value: "0", unit: "s" }];
-  if (size < 1e3) return [{ value: String(Math.round(nanos)), unit: "ns" }];
-  // A value that rounds up to 1000 goes to the next unit: 999.9µs is 1ms.
-  const small = SMALL_UNITS.find(
-    ({ size: unit }) => Math.abs(Number((nanos / unit).toPrecision(3))) < 1000,
-  );
-  if (small && size < 60e9) {
-    const value = Number((nanos / small.size).toPrecision(3));
-    if (small.unit !== "s" || Math.abs(value) < 60)
-      return [{ value: String(value), unit: small.unit }];
-  }
-  const seconds = Math.round(nanos / 1e9);
-  if (Math.abs(seconds) < 3600) {
-    const rest = seconds % 60;
-    const minutes = { value: String(Math.trunc(seconds / 60)), unit: "m" };
-    return rest === 0 ? [minutes] : [minutes, { value: pad(rest), unit: "s" }];
-  }
-  const minutes = Math.round(nanos / 60e9);
-  const rest = minutes % 60;
-  const hours = { value: String(Math.trunc(minutes / 60)), unit: "h" };
-  return rest === 0 ? [hours] : [hours, { value: pad(rest), unit: "m" }];
+const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+
+const VALUE_SPLITTERS: Record<Unit, (value: number) => ValuePart[]> = {
+  count: splitCount,
+  duration: splitDuration,
+  ratio: splitRatio,
+  rate: splitRate,
+  bytes: splitBytes,
+  number: (value) => [{ value: formatSignificant(value), unit: "" }],
+};
+
+export type Unit = "count" | "duration" | "ratio" | "rate" | "bytes" | "number";
+
+interface ValuePart {
+  readonly value: string;
+  readonly unit: string;
+  readonly unitAttached?: boolean;
 }
 
-/** `1,284`, or `12.9K`, `4.2M`, `1.1B` from ten thousand up. */
-function countParts(n: number): ValuePart[] {
-  const size = Math.abs(n);
-  if (size < 10_000) {
-    const value = Number.isInteger(n) ? n.toLocaleString("en-US") : significant(n);
+interface DurationUnit {
+  readonly unit: string;
+  readonly nanos: number;
+}
+
+export function splitValue(value: number, unit: Unit): ValuePart[] {
+  return Number.isFinite(value) ? VALUE_SPLITTERS[unit](value) : [{ value: "–", unit: "" }];
+}
+
+export function formatValue(value: number | null | undefined, unit: Unit): string {
+  return value === null || value === undefined
+    ? "–"
+    : splitValue(value, unit)
+        .map((part) => part.value + part.unit)
+        .join("");
+}
+
+function splitDuration(nanos: number): ValuePart[] {
+  const absoluteNanos = Math.abs(nanos);
+  if (absoluteNanos === 0) return [{ value: "0", unit: "s" }];
+  if (absoluteNanos < 1e3) return [{ value: String(Math.round(nanos)), unit: "ns" }];
+  // A value that rounds up to 1000 goes to the next unit: 999.9µs is 1ms.
+  const subminuteUnit = SUBMINUTE_UNITS.find(
+    (durationUnit) => Math.abs(Number((nanos / durationUnit.nanos).toPrecision(3))) < 1000,
+  );
+  if (subminuteUnit && absoluteNanos < 60e9) {
+    const value = Number((nanos / subminuteUnit.nanos).toPrecision(3));
+    if (subminuteUnit.unit !== "s" || Math.abs(value) < 60) {
+      return [{ value: String(value), unit: subminuteUnit.unit }];
+    }
+  }
+  const totalSeconds = Math.round(nanos / 1e9);
+  if (Math.abs(totalSeconds) < 3600) {
+    const restSeconds = totalSeconds % 60;
+    const minutesPart = { value: String(Math.trunc(totalSeconds / 60)), unit: "m" };
+    return restSeconds === 0
+      ? [minutesPart]
+      : [minutesPart, { value: padToTwoDigits(restSeconds), unit: "s" }];
+  }
+  const totalMinutes = Math.round(nanos / 60e9);
+  const restMinutes = totalMinutes % 60;
+  const hoursPart = { value: String(Math.trunc(totalMinutes / 60)), unit: "h" };
+  return restMinutes === 0
+    ? [hoursPart]
+    : [hoursPart, { value: padToTwoDigits(restMinutes), unit: "m" }];
+}
+
+function splitCount(count: number): ValuePart[] {
+  const absoluteCount = Math.abs(count);
+  if (absoluteCount < 10_000) {
+    const value = Number.isInteger(count)
+      ? count.toLocaleString("en-US")
+      : formatSignificant(count);
     return [{ value, unit: "" }];
   }
-  if (size < 999_500) return [{ value: significant(n / 1e3), unit: "K", tight: true }];
-  if (size < 999_500_000) return [{ value: significant(n / 1e6), unit: "M", tight: true }];
-  return [{ value: significant(n / 1e9), unit: "B", tight: true }];
+  if (absoluteCount < 999_500) {
+    return [{ value: formatSignificant(count / 1e3), unit: "K", unitAttached: true }];
+  }
+  if (absoluteCount < 999_500_000) {
+    return [{ value: formatSignificant(count / 1e6), unit: "M", unitAttached: true }];
+  }
+  return [{ value: formatSignificant(count / 1e9), unit: "B", unitAttached: true }];
 }
 
-/** A share as a percentage. A share above zero never shows as `0%`, and one
- * below 1 never as `100%`. */
-function ratioParts(share: number): ValuePart[] {
+function splitRatio(share: number): ValuePart[] {
   const percent = share * 100;
   let value: string;
   if (percent === 0) value = "0";
   else if (percent < 0.01) value = "<0.01";
-  else if (percent < 1) value = significant(percent, 2);
-  else if (percent < 99.95) value = significant(percent);
-  else value = percent >= 100 ? significant(percent) : ">99.9";
-  return [{ value, unit: "%", tight: true }];
+  else if (percent < 1) value = formatSignificant(percent, 2);
+  else if (percent < 99.95) value = formatSignificant(percent);
+  else value = percent >= 100 ? formatSignificant(percent) : ">99.9";
+  return [{ value, unit: "%", unitAttached: true }];
 }
 
-/** A rate per second: `12.3/s`, `0.05/s`, `<0.01/s`, or `0/s`. */
-function rateParts(rate: number): ValuePart[] {
+function splitRate(rate: number): ValuePart[] {
   let value: string;
   if (rate === 0) value = "0";
   else if (rate < 0.01) value = "<0.01";
   else if (rate < 1) value = rate.toFixed(2).replace(/0$/, "");
-  else if (rate < 10_000) value = significant(rate);
+  else if (rate < 10_000) value = formatSignificant(rate);
   else {
-    const [compact] = countParts(rate);
-    return [{ value: compact?.value ?? "", unit: `${compact?.unit ?? ""}/s`, tight: true }];
+    const [compact] = splitCount(rate);
+    return [{ value: compact?.value ?? "", unit: `${compact?.unit ?? ""}/s`, unitAttached: true }];
   }
-  return [{ value, unit: "/s", tight: true }];
+  return [{ value, unit: "/s", unitAttached: true }];
 }
 
-const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
-
-function byteParts(bytes: number): ValuePart[] {
+function splitBytes(bytes: number): ValuePart[] {
   let value = bytes;
-  let i = 0;
-  while (Math.abs(value) >= 1024 && i < BYTE_UNITS.length - 1) {
+  let unitIndex = 0;
+  while (Math.abs(value) >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
     value /= 1024;
-    i++;
+    unitIndex++;
   }
   return [
-    { value: i === 0 ? String(Math.round(value)) : significant(value), unit: BYTE_UNITS[i] ?? "" },
+    {
+      value: unitIndex === 0 ? String(Math.round(value)) : formatSignificant(value),
+      unit: BYTE_UNITS[unitIndex] ?? "",
+    },
   ];
 }
 
-const PARTS: Record<Unit, (value: number) => ValuePart[]> = {
-  count: countParts,
-  duration: durationParts,
-  ratio: ratioParts,
-  rate: rateParts,
-  bytes: byteParts,
-  number: (value) => [{ value: significant(value), unit: "" }],
-};
+function formatSignificant(number: number, digits = 3): string {
+  return String(Number(number.toPrecision(digits)));
+}
 
-/** The parts of `value` in `unit`. */
-export const valueParts = (value: number, unit: Unit): ValuePart[] =>
-  Number.isFinite(value) ? PARTS[unit](value) : [{ value: "–", unit: "" }];
-
-/** `value` in `unit` as text, such as `4.56ms` or `2.67%`. A missing value
- * is a dash. */
-export const formatValue = (value: number | null | undefined, unit: Unit) =>
-  value === null || value === undefined
-    ? "–"
-    : valueParts(value, unit)
-        .map((part) => part.value + part.unit)
-        .join("");
-
-/** A duration in nanoseconds as text, such as `4.56ms` or `3m05s`. */
-export const formatDuration = (nanos: number) => formatValue(nanos, "duration");
+function padToTwoDigits(number: number): string {
+  return String(number).padStart(2, "0");
+}

@@ -1,22 +1,10 @@
-// The components of the otelo UI, styled with Tailwind. An app imports
-// `@otelo/ui/theme.css` into its Tailwind CSS, adds `@source` for this
-// package's `src`, and imports `@otelo/ui/fonts.css` once.
-
 export { default as Badge, type Tone } from "./Badge";
 export { default as Button } from "./Button";
-export { default as Calendar } from "./Calendar";
 export { default as Callout } from "./Callout";
 export { default as Checkbox } from "./Checkbox";
-export { type Size } from "./classes";
-export { applySuggestion, type Suggestion, toChars, toUtf16 } from "./completion";
-export { default as DateInput } from "./DateInput";
-export { default as DateTimeInput } from "./DateTimeInput";
 export { type QueryToken, type TokenKind } from "./highlight";
 export { default as Level } from "./Level";
 export { default as QueryInput } from "./QueryInput";
-export { listStep, move } from "./keys";
 export { default as RangePicker } from "./RangePicker";
-export { default as Select, type SelectOption } from "./Select";
 export { default as Tabs } from "./Tabs";
-export { default as TimeInput } from "./TimeInput";
 export { default as Tooltip } from "./Tooltip";

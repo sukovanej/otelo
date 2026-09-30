@@ -1,74 +1,70 @@
-// The spans of one trace as a tree, laid out on the time of the trace.
-
 import type { TraceSpan } from "@otelo/api";
 
-import { nanosBetween } from "../time";
+import { measureNanosBetween } from "../time";
 
 export interface TreeRow {
-  span: TraceSpan;
-  /** How many ancestors the span has in the trace. */
-  depth: number;
-  /** How many children it has. */
-  children: number;
-  /** The nanoseconds from the start of the trace to the start of the span. */
-  offset: number;
+  readonly span: TraceSpan;
+  readonly depth: number;
+  readonly childCount: number;
+  readonly startOffsetNanos: number;
 }
 
-/**
- * The spans depth first, each under its parent, and siblings in the order
- * of `spans`, which the API sorts by start. A span whose parent is not in
- * the list is a root.
- */
-export function spanTree(spans: TraceSpan[]): TreeRow[] {
-  const start = spans.reduce<string | undefined>(
-    (first, span) =>
-      first === undefined || nanosBetween(first, span.started_at) < 0 ? span.started_at : first,
+// Siblings keep the order of `spans`, which the API sorts by start.
+export function buildSpanTree(spans: ReadonlyArray<TraceSpan>): TreeRow[] {
+  const traceStart = spans.reduce<string | undefined>(
+    (earliest, span) =>
+      earliest === undefined || measureNanosBetween(earliest, span.started_at) < 0
+        ? span.started_at
+        : earliest,
     undefined,
   );
-  const ids = new Set(spans.map((span) => span.span_id));
-  const children = new Map<string | undefined, TraceSpan[]>();
+  const spanIds = new Set(spans.map((span) => span.span_id));
+  const childrenByParentId = new Map<string | undefined, TraceSpan[]>();
   for (const span of spans) {
-    const parent =
-      span.parent_span_id !== null && ids.has(span.parent_span_id)
+    const parentId =
+      span.parent_span_id !== null && spanIds.has(span.parent_span_id)
         ? span.parent_span_id
         : undefined;
-    const siblings = children.get(parent);
+    const siblings = childrenByParentId.get(parentId);
     if (siblings) siblings.push(span);
-    else children.set(parent, [span]);
+    else childrenByParentId.set(parentId, [span]);
   }
 
   const rows: TreeRow[] = [];
-  const seen = new Set<TraceSpan>();
-  const visit = (span: TraceSpan, depth: number) => {
-    if (seen.has(span)) return;
-    seen.add(span);
-    const kids = children.get(span.span_id) ?? [];
+  const visitedSpans = new Set<TraceSpan>();
+  const visitSpan = (span: TraceSpan, depth: number) => {
+    if (visitedSpans.has(span)) return;
+    visitedSpans.add(span);
+    const childSpans = childrenByParentId.get(span.span_id) ?? [];
     rows.push({
       span,
       depth,
-      children: kids.length,
-      offset: start === undefined ? 0 : nanosBetween(start, span.started_at),
+      childCount: childSpans.length,
+      startOffsetNanos:
+        traceStart === undefined ? 0 : measureNanosBetween(traceStart, span.started_at),
     });
-    for (const kid of kids) visit(kid, depth + 1);
+    for (const child of childSpans) visitSpan(child, depth + 1);
   };
-  for (const root of children.get(undefined) ?? []) visit(root, 0);
+  for (const root of childrenByParentId.get(undefined) ?? []) visitSpan(root, 0);
   // Spans that are each other's ancestors have no root; they go last.
-  for (const span of spans) visit(span, 0);
+  for (const span of spans) visitSpan(span, 0);
   return rows;
 }
 
-/** The rows without the descendants of the spans in `collapsed`. */
-export function visibleRows(rows: TreeRow[], collapsed: ReadonlySet<string>): TreeRow[] {
-  const shown: TreeRow[] = [];
-  let hiddenBelow: number | undefined;
+export function dropCollapsedRows(
+  rows: ReadonlyArray<TreeRow>,
+  collapsedSpanIds: ReadonlySet<string>,
+): TreeRow[] {
+  const shownRows: TreeRow[] = [];
+  let collapsedDepth: number | undefined;
   for (const row of rows) {
-    if (hiddenBelow !== undefined && row.depth > hiddenBelow) continue;
-    hiddenBelow = collapsed.has(row.span.span_id) ? row.depth : undefined;
-    shown.push(row);
+    if (collapsedDepth !== undefined && row.depth > collapsedDepth) continue;
+    collapsedDepth = collapsedSpanIds.has(row.span.span_id) ? row.depth : undefined;
+    shownRows.push(row);
   }
-  return shown;
+  return shownRows;
 }
 
-/** The nanoseconds from the start of the first span to the end of the last. */
-export const traceLength = (rows: TreeRow[]) =>
-  Math.max(0, ...rows.map((row) => row.offset + row.span.duration_ns));
+export function measureTraceNanos(rows: ReadonlyArray<TreeRow>): number {
+  return Math.max(0, ...rows.map((row) => row.startOffsetNanos + row.span.duration_ns));
+}

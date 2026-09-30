@@ -2,17 +2,11 @@ import type { LogLine } from "@otelo/api";
 import { Level } from "@otelo/ui";
 import { type Column, Table } from "@otelo/viz";
 
-import Service from "../Service";
+import ServiceName from "../ServiceName";
 import { formatTime, parseTime } from "../time";
-import { levelName } from "./level";
+import { toLevelName } from "./level";
 
-/** What tells a line apart, so it stays selected when a reload brings it
- * again. */
-export const lineKey = (line: LogLine) =>
-  `${line.logged_at} ${line.service} ${line.span_id ?? ""} ${line.body}`;
-
-/** The lowest severity number of ERROR. */
-const ERROR = 17;
+const MIN_ERROR_SEVERITY = 17;
 
 const COLUMNS: Column<LogLine>[] = [
   {
@@ -31,8 +25,8 @@ const COLUMNS: Column<LogLine>[] = [
     id: "level",
     label: "Level",
     width: "max-content",
-    value: (line) => levelName(line.severity),
-    cell: (line) => <Level level={levelName(line.severity)} />,
+    value: (line) => toLevelName(line.severity),
+    cell: (line) => <Level level={toLevelName(line.severity)} />,
   },
   {
     id: "service",
@@ -40,27 +34,32 @@ const COLUMNS: Column<LogLine>[] = [
     width: "minmax(6ch,16ch)",
     value: (line) => line.service,
     tone: () => "muted",
-    cell: (line) => <Service name={line.service} resource={line.resource} />,
+    cell: (line) => <ServiceName name={line.service} resource={line.resource} />,
   },
   { id: "body", label: "Message", width: "minmax(0,1fr)", value: (line) => line.body },
 ];
 
-/** Log lines, newest first. A click on a line selects it, and a click on the
- * selected one lets it go. */
-export default function LogLines(props: {
-  lines: LogLine[];
-  /** The key of the selected line. */
-  selected: string | undefined;
-  onSelect: (line: LogLine | undefined) => void;
-}) {
+interface LogLinesProps {
+  readonly lines: ReadonlyArray<LogLine>;
+  readonly selectedKey: string | undefined;
+  readonly onSelect: (line: LogLine | undefined) => void;
+}
+
+export default function LogLines(props: LogLinesProps) {
   return (
     <Table
       label="Log lines"
       rows={props.lines}
       columns={COLUMNS}
-      selected={(line) => props.selected === lineKey(line)}
-      tone={(line) => (line.severity >= ERROR ? "error" : undefined)}
-      onRowClick={(line) => props.onSelect(props.selected === lineKey(line) ? undefined : line)}
+      selected={(line) => props.selectedKey === toLineKey(line)}
+      tone={(line) => (line.severity >= MIN_ERROR_SEVERITY ? "error" : undefined)}
+      onRowClick={(line) =>
+        props.onSelect(props.selectedKey === toLineKey(line) ? undefined : line)
+      }
     />
   );
+}
+
+export function toLineKey(line: LogLine): string {
+  return `${line.logged_at} ${line.service} ${line.span_id ?? ""} ${line.body}`;
 }

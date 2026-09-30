@@ -1,58 +1,55 @@
-// Writes src/schema.ts, the TypeScript types of openapi.json, which
-// `otelo openapi` prints from the Rust types of the daemon. `mise run
-// api:generate` runs both, and a test of each side fails when its file is
-// behind.
-
 import { readFileSync, writeFileSync } from "node:fs";
 
 import openapiTS, { astToString, type SchemaObject } from "openapi-typescript";
 import ts from "typescript";
 
-const HEADER = `// Generated from openapi.json by generate.ts; \`mise run api:generate\`
+const SCHEMA_HEADER = `// Generated from openapi.json by generate.ts; \`mise run api:generate\`
 // writes it again. Do not edit it by hand.
 
 `;
 
-const SPEC = new URL("openapi.json", import.meta.url);
-const SCHEMA = new URL("src/schema.ts", import.meta.url);
+const SPEC_URL = new URL("openapi.json", import.meta.url);
+const SCHEMA_URL = new URL("src/schema.ts", import.meta.url);
 
-/** The text of src/schema.ts for the spec in openapi.json. */
-export async function generate(): Promise<string> {
-  const spec: unknown = JSON.parse(readFileSync(SPEC, "utf8"));
-  const recursive = new Set<string>();
+export async function generateSchema(): Promise<string> {
+  const spec: unknown = JSON.parse(readFileSync(SPEC_URL, "utf8"));
+  const selfArraySchemas = new Set<string>();
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-typescript checks the spec
   const ast = await openapiTS(spec as Parameters<typeof openapiTS>[0], {
+    // A schema that holds an array of itself, such as AttributeValue, names
+    // the array with a type alias. TypeScript resolves an array type inside
+    // an interface at once, so `components["schemas"]["AttributeValue"][]`
+    // inside AttributeValue refers to itself; inside an alias it waits until
+    // it is used.
     transform: (schema, { path }) => {
-      const name = selfArray(schema, path);
-      if (name === undefined) return undefined;
-      recursive.add(name);
-      return ts.factory.createTypeReferenceNode(arrayOf(name));
+      const schemaName = findSelfArraySchema(schema, path);
+      if (schemaName === undefined) return undefined;
+      selfArraySchemas.add(schemaName);
+      return ts.factory.createTypeReferenceNode(toArrayAliasName(schemaName));
     },
   });
-  const aliases = [...recursive].map(
-    (name) => `type ${arrayOf(name)} = components["schemas"]["${name}"][];\n`,
+  const aliases = [...selfArraySchemas].map(
+    (schemaName) =>
+      `type ${toArrayAliasName(schemaName)} = components["schemas"]["${schemaName}"][];\n`,
   );
-  return HEADER + astToString(ast) + aliases.join("");
+  return SCHEMA_HEADER + astToString(ast) + aliases.join("");
 }
 
-// A schema that holds an array of itself, such as AttributeValue, names the
-// array with a type alias. TypeScript resolves an array type inside an
-// interface at once, so `components["schemas"]["AttributeValue"][]` inside
-// AttributeValue refers to itself; inside an alias it waits until it is used.
+export function readWrittenSchema(): string {
+  return readFileSync(SCHEMA_URL, "utf8");
+}
 
-/** The name of the schema at `path` when `schema` is an array of it. */
-function selfArray(schema: SchemaObject, path: string | undefined): string | undefined {
+function findSelfArraySchema(schema: SchemaObject, path: string | undefined): string | undefined {
   if (schema.type !== "array" || !schema.items || !("$ref" in schema.items)) return undefined;
-  const ref = schema.items.$ref;
-  if (path !== ref && !path?.startsWith(`${ref}/`)) return undefined;
-  return ref.slice(ref.lastIndexOf("/") + 1);
+  const itemsRef = schema.items.$ref;
+  if (path !== itemsRef && !path?.startsWith(`${itemsRef}/`)) return undefined;
+  return itemsRef.slice(itemsRef.lastIndexOf("/") + 1);
 }
 
-const arrayOf = (name: string) => `ArrayOf${name}`;
-
-/** src/schema.ts as it is on the disk. */
-export const written = () => readFileSync(SCHEMA, "utf8");
+function toArrayAliasName(schemaName: string): string {
+  return `ArrayOf${schemaName}`;
+}
 
 if (import.meta.main) {
-  writeFileSync(SCHEMA, await generate());
+  writeFileSync(SCHEMA_URL, await generateSchema());
 }

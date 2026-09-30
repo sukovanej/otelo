@@ -2,15 +2,20 @@ import type { TimeFrame } from "@otelo/viz";
 
 import { parseTime } from "../time";
 
-/** The frame of the charts of an answer of the services API. */
-export function timeFrame(answer: {
-  start_at: string;
-  end_at: string;
-  step_ns: number;
-  buckets: { start_at: string }[];
-}): TimeFrame {
+interface BucketStart {
+  readonly start_at: string;
+}
+
+interface BucketedAnswer {
+  readonly start_at: string;
+  readonly end_at: string;
+  readonly step_ns: number;
+  readonly buckets: ReadonlyArray<BucketStart>;
+}
+
+export function toTimeFrame(answer: BucketedAnswer): TimeFrame {
   return {
-    times: answer.buckets.map((b) => parseTime(b.start_at).getTime()),
+    times: answer.buckets.map((bucket) => parseTime(bucket.start_at).getTime()),
     step: answer.step_ns / 1e6,
     start: parseTime(answer.start_at).getTime(),
     end: parseTime(answer.end_at).getTime(),

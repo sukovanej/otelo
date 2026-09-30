@@ -2,13 +2,19 @@ import { For } from "solid-js";
 
 import { plain } from "./classes";
 
-/** A row of tabs, one of them selected. */
-export default function Tabs<T extends string>(props: {
-  options: readonly { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-  label?: string;
-}) {
+interface TabOption<T extends string> {
+  readonly value: T;
+  readonly label: string;
+}
+
+interface TabsProps<T extends string> {
+  readonly options: ReadonlyArray<TabOption<T>>;
+  readonly value: T;
+  readonly onChange: (value: T) => void;
+  readonly label: string;
+}
+
+export default function Tabs<T extends string>(props: TabsProps<T>) {
   return (
     <div class="flex" role="tablist" aria-label={props.label}>
       <For each={props.options}>

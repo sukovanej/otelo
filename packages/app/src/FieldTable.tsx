@@ -1,68 +1,18 @@
 import { For, Show } from "solid-js";
 
-import type { Attributes, AttributeValue } from "@otelo/api";
+import type { AttributeValue } from "@otelo/api";
 import { Button } from "@otelo/ui";
 
-import { heading } from "./classes";
-import { attributeField, literal, quote, resourceField } from "./query";
-import { isSqlQuery } from "./semantics";
+import type { Field } from "./field";
 import SqlCode from "./SqlCode";
 
-export interface Field {
-  /** The name a query uses for the field, or `undefined` when it has none. */
-  name: string | undefined;
-  label: string;
-  value: AttributeValue;
-  /** The literal a comparison uses, or `undefined` when none matches. */
-  literal: string | undefined;
-  /** Whether the value is a SQL query, which shows laid out in its colors. */
-  sql?: boolean;
+interface FieldTableProps {
+  readonly fields: ReadonlyArray<Field>;
+  readonly pluralNoun: string;
+  readonly onFilter: (term: string) => void;
 }
 
-export interface Section {
-  title: string;
-  fields: Field[];
-}
-
-/** A built-in field, compared as a string unless `lit` says how. */
-export const builtin = (
-  name: string,
-  value: string | null,
-  lit = value && quote(value),
-): Field => ({
-  name,
-  label: name,
-  value,
-  literal: lit ?? undefined,
-});
-
-const sorted = (record: Attributes) =>
-  Object.entries(record).toSorted(([a], [b]) => a.localeCompare(b));
-
-/** The attributes of a record, by key. */
-export const attributes = (record: Attributes): Field[] =>
-  sorted(record).map(([key, value]) => ({
-    name: attributeField(key),
-    label: key,
-    value,
-    literal: literal(value),
-    sql: isSqlQuery(record, key),
-  }));
-
-/** The attributes of a resource, by key. */
-export const resource = (record: Attributes): Field[] =>
-  sorted(record).map(([key, value]) => ({
-    name: resourceField(key),
-    label: key,
-    value,
-    literal: literal(value),
-  }));
-
-const show = (value: AttributeValue) => (typeof value === "string" ? value : JSON.stringify(value));
-
-/** Fields in a table, with buttons that add a field that has a name and a
- * literal to the query. `noun` names the records, such as `lines`. */
-export function Fields(props: { fields: Field[]; noun: string; onFilter: (term: string) => void }) {
+export default function FieldTable(props: FieldTableProps) {
   return (
     <table class="w-full border-collapse">
       <tbody>
@@ -71,34 +21,38 @@ export function Fields(props: { fields: Field[]; noun: string; onFilter: (term: 
             <tr class="group">
               <th
                 scope="row"
-                title={field.name}
+                title={field.query.kind === "unnamed" ? undefined : field.query.name}
                 class="w-[1%] py-px pr-4 text-left align-top font-normal whitespace-nowrap text-muted"
               >
                 {field.label}
               </th>
               <td class="py-px pr-2 align-top whitespace-pre-wrap wrap-anywhere">
-                <Show when={field.sql} fallback={show(field.value)}>
-                  <SqlCode text={show(field.value)} />
+                <Show when={field.isSqlQuery} fallback={formatAttributeValue(field.value)}>
+                  <SqlCode text={formatAttributeValue(field.value)} />
                 </Show>
               </td>
               <td class="w-[1%] py-px align-top whitespace-nowrap">
-                <Show when={field.name && field.literal}>
-                  <Button
-                    size="sm"
-                    class="ml-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                    title={`Keep ${props.noun} where ${field.name} = ${field.literal}`}
-                    onClick={() => props.onFilter(`${field.name} = ${field.literal}`)}
-                  >
-                    =
-                  </Button>
-                  <Button
-                    size="sm"
-                    class="ml-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                    title={`Drop ${props.noun} where ${field.name} = ${field.literal}`}
-                    onClick={() => props.onFilter(`${field.name} != ${field.literal}`)}
-                  >
-                    ≠
-                  </Button>
+                <Show when={field.query.kind === "comparable" && field.query}>
+                  {(query) => (
+                    <>
+                      <Button
+                        size="sm"
+                        class="ml-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        title={`Keep ${props.pluralNoun} where ${query().name} = ${query().literal}`}
+                        onClick={() => props.onFilter(`${query().name} = ${query().literal}`)}
+                      >
+                        =
+                      </Button>
+                      <Button
+                        size="sm"
+                        class="ml-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        title={`Drop ${props.pluralNoun} where ${query().name} = ${query().literal}`}
+                        onClick={() => props.onFilter(`${query().name} != ${query().literal}`)}
+                      >
+                        ≠
+                      </Button>
+                    </>
+                  )}
                 </Show>
               </td>
             </tr>
@@ -109,20 +63,6 @@ export function Fields(props: { fields: Field[]; noun: string; onFilter: (term: 
   );
 }
 
-/** Sections of fields under their titles, leaving out the empty ones. */
-export default function FieldTable(props: {
-  sections: Section[];
-  noun: string;
-  onFilter: (term: string) => void;
-}) {
-  return (
-    <For each={props.sections.filter((section) => section.fields.length > 0)}>
-      {(section) => (
-        <section>
-          <h3 class={heading}>{section.title}</h3>
-          <Fields fields={section.fields} noun={props.noun} onFilter={props.onFilter} />
-        </section>
-      )}
-    </For>
-  );
+function formatAttributeValue(value: AttributeValue): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
 }

@@ -1,7 +1,7 @@
 import type { TraceSummary } from "@otelo/api";
 import { type Column, Table } from "@otelo/viz";
 
-import Service from "../Service";
+import ServiceName from "../ServiceName";
 import { formatTime, parseTime } from "../time";
 import SpanTitle from "./SpanTitle";
 
@@ -24,7 +24,7 @@ const COLUMNS: Column<TraceSummary>[] = [
     width: "minmax(6ch,16ch)",
     value: (trace) => trace.service,
     tone: () => "muted",
-    cell: (trace) => <Service name={trace.service} resource={trace.resource} />,
+    cell: (trace) => <ServiceName name={trace.service} resource={trace.resource} />,
   },
   {
     id: "name",
@@ -32,7 +32,12 @@ const COLUMNS: Column<TraceSummary>[] = [
     width: "minmax(0,1fr)",
     value: (trace) => trace.name,
     cell: (trace) => (
-      <SpanTitle name={trace.name} attributes={trace.attributes} error={trace.error} />
+      <SpanTitle
+        variant="span"
+        name={trace.name}
+        attributes={trace.attributes}
+        error={trace.error}
+      />
     ),
   },
   { id: "spans", label: "Spans", unit: "count", value: (trace) => trace.spans },
@@ -46,9 +51,12 @@ const COLUMNS: Column<TraceSummary>[] = [
   },
 ];
 
-/** Traces by their root span, newest first. A click opens a trace with
- * `onOpen`; each row still links to the page of its trace, for a new tab. */
-export default function TraceList(props: { traces: TraceSummary[]; onOpen: (id: string) => void }) {
+interface TraceListProps {
+  readonly traces: ReadonlyArray<TraceSummary>;
+  readonly onOpen: (id: string) => void;
+}
+
+export default function TraceList(props: TraceListProps) {
   return (
     <Table
       label="Traces"

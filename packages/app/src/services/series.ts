@@ -1,38 +1,35 @@
-// The series of the charts of requests, from the buckets of the services
-// API: of a service and of one of its operations alike.
-
-import type { Requests } from "@otelo/api";
+import type { RequestBucket } from "@otelo/api";
 import type { TimeSeries } from "@otelo/viz";
 
-import { share } from "./stats";
+import { toShare } from "./stats";
 
 export const PERCENTILES = ["p50", "p95", "p99"] as const;
 
-type Buckets = { requests: Requests }[];
+export function toRequestSeries(buckets: ReadonlyArray<RequestBucket>): TimeSeries[] {
+  return [
+    {
+      label: "OK",
+      color: "series-1",
+      values: buckets.map((bucket) => bucket.requests.count - bucket.requests.errors),
+    },
+    { label: "Failed", color: "error", values: buckets.map((bucket) => bucket.requests.errors) },
+  ];
+}
 
-/** The requests of each step, the failed ones on top. */
-export const requestSeries = (buckets: Buckets): TimeSeries[] => [
-  {
-    label: "OK",
-    color: "series-1",
-    values: buckets.map((b) => b.requests.count - b.requests.errors),
-  },
-  { label: "Failed", color: "error", values: buckets.map((b) => b.requests.errors) },
-];
-
-/** The percentiles of the durations of the requests of each step. */
-export const latencySeries = (buckets: Buckets): TimeSeries[] =>
-  PERCENTILES.map((p) => ({
-    label: p.toUpperCase(),
-    color: p,
-    values: buckets.map((b) => b.requests.latency?.[p] ?? null),
+export function toLatencySeries(buckets: ReadonlyArray<RequestBucket>): TimeSeries[] {
+  return PERCENTILES.map((percentile) => ({
+    label: percentile.toUpperCase(),
+    color: percentile,
+    values: buckets.map((bucket) => bucket.requests.latency?.[percentile] ?? null),
   }));
+}
 
-/** The share of the requests of each step that failed. */
-export const errorRateSeries = (buckets: Buckets): TimeSeries[] => [
-  {
-    label: "Error rate",
-    color: "error",
-    values: buckets.map((b) => share(b.requests.errors, b.requests.count)),
-  },
-];
+export function toErrorRateSeries(buckets: ReadonlyArray<RequestBucket>): TimeSeries[] {
+  return [
+    {
+      label: "Error rate",
+      color: "error",
+      values: buckets.map((bucket) => toShare(bucket.requests.errors, bucket.requests.count)),
+    },
+  ];
+}

@@ -1,8 +1,14 @@
-// How the logs pages name the severity of a line.
+const LEVEL_NAMES = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"];
 
-const LEVELS = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"];
+const SEVERITIES_PER_LEVEL = 4;
 
-/** The name of an OpenTelemetry severity number: TRACE for 1 to 4, DEBUG for
- * 5 to 8, and so on up to FATAL for 21 to 24, or UNSPECIFIED outside them. */
-export const levelName = (severity: number) =>
-  (severity >= 1 && severity <= 24 && LEVELS[Math.floor((severity - 1) / 4)]) || "UNSPECIFIED";
+const MAX_SEVERITY = LEVEL_NAMES.length * SEVERITIES_PER_LEVEL;
+
+export function toLevelName(severity: number): string {
+  return (
+    (severity >= 1 &&
+      severity <= MAX_SEVERITY &&
+      LEVEL_NAMES[Math.floor((severity - 1) / SEVERITIES_PER_LEVEL)]) ||
+    "UNSPECIFIED"
+  );
+}

@@ -9,8 +9,6 @@ const SECTIONS = [
   { href: "/traces", label: "Traces", icon: TracesIcon },
 ] as const;
 
-/** The frame of every page: the name and the sections above, and the page
- * filling the rest of the window. A page scrolls its own parts. */
 export default function App(props: RouteSectionProps) {
   return (
     <div class="flex h-dvh flex-col">

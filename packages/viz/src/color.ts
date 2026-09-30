@@ -1,30 +1,4 @@
-// The colors a series can take, by name, so a dashboard can name them in
-// JSON. Each is a color of the theme of `@otelo/ui`.
-
-/** `series-1` to `series-8` tell series apart, in this order. `error`,
- * `warn`, and `success` mean a state and never tell series apart. `muted` is
- * the series that matters least, such as "other". `p50`, `p95`, and `p99` are
- * the percentiles of one measure. */
-export type SeriesColor =
-  | "series-1"
-  | "series-2"
-  | "series-3"
-  | "series-4"
-  | "series-5"
-  | "series-6"
-  | "series-7"
-  | "series-8"
-  | "accent"
-  | "error"
-  | "warn"
-  | "success"
-  | "muted"
-  | "p50"
-  | "p95"
-  | "p99";
-
-/** The colors that tell series apart, in the order they are given out. */
-export const CATEGORICAL: readonly SeriesColor[] = [
+const CATEGORICAL_COLORS: ReadonlyArray<CategoricalColor> = [
   "series-1",
   "series-2",
   "series-3",
@@ -35,11 +9,28 @@ export const CATEGORICAL: readonly SeriesColor[] = [
   "series-8",
 ];
 
-/** The CSS color of `color`. */
-export const cssColor = (color: SeriesColor) =>
-  color === "muted" ? "var(--color-trace)" : `var(--color-${color})`;
+export type SeriesColor = CategoricalColor | StateColor | PercentileColor | "accent" | "muted";
 
-/** The color of the series at `index` when it names none: the categorical
- * colors in order, and `muted` past them, since a ninth hue would look like
- * one of the eight. */
-export const defaultColor = (index: number): SeriesColor => CATEGORICAL[index] ?? "muted";
+type CategoricalColor =
+  | "series-1"
+  | "series-2"
+  | "series-3"
+  | "series-4"
+  | "series-5"
+  | "series-6"
+  | "series-7"
+  | "series-8";
+
+type StateColor = "error" | "warn" | "success";
+
+type PercentileColor = "p50" | "p95" | "p99";
+
+// Each is a color of the theme of `@otelo/ui`.
+export function toCssColor(color: SeriesColor): string {
+  return color === "muted" ? "var(--color-trace)" : `var(--color-${color})`;
+}
+
+// A ninth hue would look like one of the eight.
+export function pickDefaultColor(index: number): SeriesColor {
+  return CATEGORICAL_COLORS[index] ?? "muted";
+}

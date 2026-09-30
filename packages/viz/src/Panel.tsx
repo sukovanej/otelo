@@ -1,23 +1,17 @@
 import { type JSX, Show } from "solid-js";
 
-/**
- * The frame of one part of a page or a dashboard: a title, an optional line
- * under it, actions on the right, and the chart, table, or numbers inside.
- * `flush` lets a table run to the edges of the frame, which clips it to its
- * rounded corners and hides the border under its last row behind its own.
- * The panel is a step off the color of the page, so it stands apart from it.
- */
-export default function Panel(props: {
-  title?: string | undefined;
-  description?: JSX.Element | undefined;
-  actions?: JSX.Element | undefined;
-  flush?: boolean | undefined;
-  class?: string | undefined;
-  children: JSX.Element;
-}) {
+interface PanelProps {
+  readonly title?: string | undefined;
+  readonly description?: JSX.Element | undefined;
+  readonly actions?: JSX.Element | undefined;
+  readonly flush?: boolean | undefined;
+  readonly children: JSX.Element;
+}
+
+export default function Panel(props: PanelProps) {
   return (
     <section
-      class={`flex min-w-0 flex-col overflow-clip rounded-lg border border-line bg-panel ${props.class ?? ""}`}
+      class="flex min-w-0 flex-col overflow-clip rounded-lg border border-line bg-panel"
       // What sits on the panel and has to cover what scrolls under it, such
       // as the header of a table, takes the color of the panel.
       style={{ "--viz-surface": "var(--color-panel)" }}
@@ -37,7 +31,12 @@ export default function Panel(props: {
           </Show>
         </header>
       </Show>
-      <div class={props.flush ? "-mb-px min-w-0" : "min-w-0 px-4 pb-3"}>{props.children}</div>
+      <div
+        // Hides the border under the last row of a table behind the panel's own.
+        class={props.flush ? "-mb-px min-w-0" : "min-w-0 px-4 pb-3"}
+      >
+        {props.children}
+      </div>
     </section>
   );
 }

@@ -1,59 +1,74 @@
 import { createMemo, For } from "solid-js";
 
-import { cssColor, defaultColor } from "./color";
-import type { TimeSeries } from "./TimeSeriesChart";
+import { type SeriesColor, toCssColor } from "./color";
 
-/**
- * The shape of values over time, small enough for a table cell or a stat:
- * stacked bars, or a line of the first series. It has no axes and no tip,
- * so the numbers it sums up have to be beside it.
- */
-export default function Sparkline(props: {
-  series: Pick<TimeSeries, "values" | "color">[];
-  kind: "bar" | "line";
-  width?: number;
-  height?: number;
-}) {
+type SparklineKind = "bar" | "line";
+
+interface SparklineSeries {
+  readonly values: ReadonlyArray<number | null>;
+  readonly color: SeriesColor;
+}
+
+interface SparklineProps {
+  readonly series: ReadonlyArray<SparklineSeries>;
+  readonly kind: SparklineKind;
+  readonly width?: number;
+  readonly height?: number;
+}
+
+export default function Sparkline(props: SparklineProps) {
   const width = () => props.width ?? 120;
   const height = () => props.height ?? 24;
-  const colored = createMemo(() =>
-    props.series.map((s, i) => ({ values: s.values, css: cssColor(s.color ?? defaultColor(i)) })),
+  const coloredSeries = createMemo(() =>
+    props.series.map((series) => ({
+      values: series.values,
+      cssColor: toCssColor(series.color),
+    })),
   );
-  const count = () => Math.max(1, ...colored().map((s) => s.values.length));
-  const slot = () => width() / count();
-  const totals = createMemo(() =>
-    Array.from({ length: count() }, (_, i) =>
-      colored().reduce((sum, s) => sum + (s.values[i] ?? 0), 0),
+  const bucketCount = () => Math.max(1, ...coloredSeries().map((series) => series.values.length));
+  const bucketWidth = () => width() / bucketCount();
+  const bucketTotals = createMemo(() =>
+    Array.from({ length: bucketCount() }, (_, bucketIndex) =>
+      coloredSeries().reduce((sum, series) => sum + (series.values[bucketIndex] ?? 0), 0),
     ),
   );
-  const most = createMemo(() =>
+  const largestValue = createMemo(() =>
     props.kind === "bar"
-      ? Math.max(0, ...totals())
-      : Math.max(0, ...(colored()[0]?.values.map((v) => v ?? 0) ?? [])),
+      ? Math.max(0, ...bucketTotals())
+      : Math.max(0, ...(coloredSeries()[0]?.values.map((value) => value ?? 0) ?? [])),
   );
-  const scale = (value: number) => (most() > 0 ? (value / most()) * (height() - 1) : 0);
+  const scaleToHeight = (value: number) =>
+    largestValue() > 0 ? (value / largestValue()) * (height() - 1) : 0;
 
-  const bars = createMemo(() => {
-    const w = Math.max(1, slot() - Math.min(1, slot() / 3));
-    return Array.from({ length: count() }, (_, i) => {
-      let base = 0;
-      return colored().flatMap((s) => {
-        const value = s.values[i] ?? 0;
+  const barRects = createMemo(() => {
+    const barWidth = Math.max(1, bucketWidth() - Math.min(1, bucketWidth() / 3));
+    return Array.from({ length: bucketCount() }, (_, bucketIndex) => {
+      let stackHeight = 0;
+      return coloredSeries().flatMap((series) => {
+        const value = series.values[bucketIndex] ?? 0;
         if (value <= 0) return [];
-        const h = Math.max(1, scale(value));
-        const rect = { x: i * slot(), y: height() - base - h, w, h, css: s.css };
-        base += h;
+        const barHeight = Math.max(1, scaleToHeight(value));
+        const rect = {
+          x: bucketIndex * bucketWidth(),
+          y: height() - stackHeight - barHeight,
+          width: barWidth,
+          height: barHeight,
+          cssColor: series.cssColor,
+        };
+        stackHeight += barHeight;
         return [rect];
       });
     }).flat();
   });
-  const line = createMemo(() => {
-    const first = colored()[0];
-    if (!first) return { d: "", css: "" };
-    const points = first.values.flatMap((v, i) =>
-      v === null ? [] : [`${(i + 0.5) * slot()},${height() - 1 - scale(v)}`],
+  const linePath = createMemo(() => {
+    const first = coloredSeries()[0];
+    if (!first) return { path: "", cssColor: "" };
+    const points = first.values.flatMap((value, bucketIndex) =>
+      value === null
+        ? []
+        : [`${(bucketIndex + 0.5) * bucketWidth()},${height() - 1 - scaleToHeight(value)}`],
     );
-    return { d: points.length > 0 ? `M${points.join("L")}` : "", css: first.css };
+    return { path: points.length > 0 ? `M${points.join("L")}` : "", cssColor: first.cssColor };
   });
 
   return (
@@ -71,13 +86,15 @@ export default function Sparkline(props: {
         stroke="var(--color-line)"
         stroke-width="1"
       />
-      <For each={props.kind === "bar" ? bars() : []}>
-        {(bar) => <rect x={bar.x} y={bar.y} width={bar.w} height={bar.h} fill={bar.css} />}
+      <For each={props.kind === "bar" ? barRects() : []}>
+        {(bar) => (
+          <rect x={bar.x} y={bar.y} width={bar.width} height={bar.height} fill={bar.cssColor} />
+        )}
       </For>
       <path
-        d={props.kind === "line" ? line().d : ""}
+        d={props.kind === "line" ? linePath().path : ""}
         fill="none"
-        stroke={line().css}
+        stroke={linePath().cssColor}
         stroke-width="1.5"
         stroke-linejoin="round"
         stroke-linecap="round"

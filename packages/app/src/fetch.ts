@@ -2,55 +2,48 @@ import { type Accessor, createEffect, createSignal, on, onCleanup } from "solid-
 
 import { aborted } from "@otelo/api";
 
-export interface Fetched<T> {
-  /** The last result that arrived. It stays while a new request runs, so the
-   * page does not blank on every change. */
-  data: Accessor<T | undefined>;
-  /** The message of the last request's error, cleared by the next result. */
-  error: Accessor<string | undefined>;
-  loading: Accessor<boolean>;
-  /** When the last result arrived. */
-  updated: Accessor<Date | undefined>;
-  /** Runs the request again with the same key. */
-  reload: () => void;
+export interface FetchState<T> {
+  readonly data: Accessor<T | undefined>;
+  readonly errorMessage: Accessor<string | undefined>;
+  readonly loading: Accessor<boolean>;
+  readonly updatedAt: Accessor<Date | undefined>;
+  readonly reload: () => void;
 }
 
-/**
- * Runs `fetcher` whenever `key` changes, and aborts the request before it
- * when that one has not answered yet.
- */
 export function createFetch<K, T>(
   key: Accessor<K>,
   fetcher: (key: K, signal: AbortSignal) => Promise<T>,
-): Fetched<T> {
+): FetchState<T> {
   const [data, setData] = createSignal<T>();
-  const [error, setError] = createSignal<string>();
+  const [errorMessage, setErrorMessage] = createSignal<string>();
   const [loading, setLoading] = createSignal(false);
-  const [updated, setUpdated] = createSignal<Date>();
+  const [updatedAt, setUpdatedAt] = createSignal<Date>();
   let controller: AbortController | undefined;
 
-  const run = (k: K) => {
+  const runRequest = (requestKey: K) => {
     controller?.abort();
     const current = new AbortController();
     controller = current;
+    // The last result stays while the next request runs, so the page does
+    // not blank on every change.
     setLoading(true);
-    fetcher(k, current.signal).then(
+    fetcher(requestKey, current.signal).then(
       (result) => {
         if (controller !== current) return;
         setData(() => result);
-        setError(undefined);
-        setUpdated(new Date());
+        setErrorMessage(undefined);
+        setUpdatedAt(new Date());
         setLoading(false);
       },
-      (e: unknown) => {
-        if (controller !== current || aborted(e)) return;
-        setError(e instanceof Error ? e.message : String(e));
+      (error: unknown) => {
+        if (controller !== current || aborted(error)) return;
+        setErrorMessage(error instanceof Error ? error.message : String(error));
         setLoading(false);
       },
     );
   };
 
-  createEffect(on(key, run));
+  createEffect(on(key, runRequest));
   onCleanup(() => controller?.abort());
-  return { data, error, loading, updated, reload: () => run(key()) };
+  return { data, errorMessage, loading, updatedAt, reload: () => runRequest(key()) };
 }
