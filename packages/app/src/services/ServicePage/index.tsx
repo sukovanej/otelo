@@ -14,6 +14,7 @@ import { Panel } from "@otelo/viz";
 
 import { link, pageContent } from "../../classes";
 import LogGroupList from "../../logs/LogGroupList";
+import { decodePathSegment } from "../../path";
 import { addTerm, quoteString } from "../../query";
 import ServiceName from "../../ServiceName";
 import TraceList from "../../traces/TraceList";
@@ -77,7 +78,7 @@ export default function ServicePage() {
     undefined,
     { equals: isSameOpenModal },
   );
-  const name = () => params.name;
+  const name = () => decodePathSegment(params.name);
   const serviceTerm = () => `service = ${quoteString(name())}`;
 
   const fetchedService = createRangeFetch(
