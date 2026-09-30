@@ -88,3 +88,7 @@ About 100 series on the droplet: 25 for the machine and otelo, and 3 for each of
 ### 2026-09-30T13:14:33Z by Milan Suk via claude-code
 
 > The Linux readers ran only against directories and sample files a test builds, on a Mac. No Linux machine was at hand, so /proc, cgroup v2, and sysinfo on Linux still need one run on Ubuntu 24.04 before the droplet.
+
+### 2026-09-30T21:34:33Z by Milan Suk via claude-code
+
+> On macOS the first two readings after start report `/System/Volumes/Data` next to `/` for the same disk, then only `/`, so `system.filesystem.usage` grouped by state doubles for those 15 seconds. Not fixed.
