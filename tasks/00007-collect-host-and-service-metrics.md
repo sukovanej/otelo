@@ -15,9 +15,9 @@ A new crate, `otelo-host`, reads the machine every 15 seconds and sends metric p
 ```mermaid
 flowchart LR
   os[proc files, cgroup v2, launchctl, sysinfo] --> reader[Reader]
-  data[Data directory] --> reader
   reader --> snapshot[Snapshot]
   snapshot --> mapping[Mapping]
+  storage[Storage] -->|StorageSize| mapping
   mapping -->|Batch| writer[Writer channel]
 ```
 
@@ -25,7 +25,7 @@ flowchart LR
 
 - The machine: CPU utilization by mode, load averages, memory and swap by state, each real filesystem, and each network interface.
 - Every service the service manager runs: CPU time and memory. The collector finds them itself, from the cgroups of systemd on Linux and from `launchctl list` on macOS.
-- otelo itself, always: the CPU time and memory of its own PID, and the size of its data directory by kind of file.
+- otelo itself, always: the CPU time and memory of its own PID, and the size of its data by kind of file.
 
 ## How it runs
 
@@ -35,6 +35,15 @@ flowchart LR
 - The reader fills a `Snapshot`, a plain struct of the numbers it read. The mapping turns the snapshot and the one before it into a `Batch`. The CPU shares are a change between two snapshots, so the first tick sends none.
 - The batch goes to the writer through a clone of the `Sender` the OTLP receivers use. Nothing goes through OTLP. A full channel drops the batch, and the collector logs a warning.
 - A tick that is still running when the next one is due makes the task skip that one.
+
+## Storage size
+
+`otelo-host` does not look at the data directory. Which files hold the data is knowledge of the storage backend, and a backend may keep no files.
+
+- The `Storage` trait gets a `size()` method that returns a `StorageSize`: the bytes of the telemetry and the bytes of the state. [[./00008-roll-up-metrics-to-1-minute-and-1.md]] adds the bytes of the rollups.
+- The SQLite backend adds up its own files: the day files for the telemetry and `state.sqlite` for the state. A `-wal` and a `-shm` file count with their database.
+- The task in `serve.rs` calls `size()` in the same `spawn_blocking` as the read and hands the result to the collector with the time of the tick. The mapping turns it into `otelo.storage.size`.
+- A `size()` that fails is logged, and the tick sends the rest.
 
 ## Resources
 
@@ -60,6 +69,7 @@ About 100 series on the droplet: 25 for the machine and otelo, and 3 for each of
 
 ## Tests
 
-- The mapping, on built snapshots: the CPU shares from two readings, the memory states, one point per device and per APFS container, the interfaces left out, otelo's own unit left out, and the running total of a macOS service when a child exits between two ticks.
+- The mapping, on built snapshots: the CPU shares from two readings, the memory states, one point per device and per APFS container, the interfaces left out, otelo's own unit left out, the storage size by kind, and the running total of a macOS service when a child exits between two ticks.
 - The parsers, on recorded text: the first line of `/proc/stat`, `/proc/meminfo`, `cpu.stat`, `memory.stat`, `cgroup.events`, `launchctl list`, and the `ioreg` output.
-- The readers of cgroups and of the data directory, on a directory a test builds.
+- The reader of cgroups, on a directory a test builds.
+- `size()` of the SQLite backend, on a data directory a test builds, with WAL files in it.
