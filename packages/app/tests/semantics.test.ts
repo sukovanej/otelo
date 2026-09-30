@@ -2,8 +2,8 @@ import { expect, test } from "vitest";
 
 import {
   databaseId,
-  type DbSpan,
-  dbTitle,
+  isSql,
+  isSqlQuery,
   language,
   nameRest,
   routeParts,
@@ -49,19 +49,30 @@ test("a database span has its system and its query as it is", () => {
   });
 });
 
-const dbSpan = (query?: string): DbSpan => ({ type: "db", system: "sqlite", query });
+test("isSql tells the systems that speak SQL, by their new names and their old ones", () => {
+  for (const system of ["postgresql", "sqlite", "microsoft.sql_server", "mssql", "other_sql"]) {
+    expect(isSql(system)).toBe(true);
+  }
+  for (const system of ["redis", "mongodb", "elasticsearch", "cassandra", "aws.dynamodb"]) {
+    expect(isSql(system)).toBe(false);
+  }
+});
 
-test("dbTitle puts the first word of the query or the name on a badge", () => {
-  expect(dbTitle(dbSpan("SELECT *\n  FROM users"), "SELECT")).toEqual({
-    keyword: "SELECT",
-    rest: "*\n  FROM users",
-    text: "SELECT *\n  FROM users",
-  });
-  expect(dbTitle(dbSpan(), "SELECT users")).toMatchObject({ keyword: "SELECT", rest: "users" });
-  expect(dbTitle(dbSpan(), "SELECT")).toMatchObject({ keyword: "SELECT", rest: "" });
-  // A first word that is not letters alone stays in the text.
-  expect(dbTitle(dbSpan("(SELECT 1) UNION SELECT 2"), "x")).toMatchObject({ keyword: undefined });
-  expect(dbTitle(dbSpan(), "users.find")).toMatchObject({ keyword: undefined, rest: "users.find" });
+test("isSqlQuery is the query of a call to a system that speaks SQL", () => {
+  const sql = {
+    "db.system.name": "postgresql",
+    "db.query.text": "SELECT 1",
+    "db.namespace": "app",
+  };
+  expect(isSqlQuery(sql, "db.query.text")).toBe(true);
+  expect(isSqlQuery(sql, "db.namespace")).toBe(false);
+  expect(isSqlQuery({ "db.system": "mysql", "db.statement": "SELECT 1" }, "db.statement")).toBe(
+    true,
+  );
+  expect(isSqlQuery({ "db.system.name": "redis", "db.query.text": "GET k" }, "db.query.text")).toBe(
+    false,
+  );
+  expect(isSqlQuery({ "db.query.text": "SELECT 1" }, "db.query.text")).toBe(false);
 });
 
 test("a span without either is other", () => {

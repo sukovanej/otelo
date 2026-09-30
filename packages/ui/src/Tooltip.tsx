@@ -16,6 +16,11 @@ interface Anchor {
   above: number;
 }
 
+const plain = "bg-ink px-2 py-1 font-sans whitespace-nowrap text-surface";
+
+const rich =
+  "max-h-[80vh] max-w-[min(44rem,90vw)] overflow-hidden border border-line bg-surface px-2.5 py-2 text-ink";
+
 /**
  * A short text that shows over `children` at once while the pointer is on
  * them, under the pointer and following it, or above it when there is no
@@ -25,6 +30,10 @@ interface Anchor {
  */
 export default function Tooltip(props: {
   content: JSX.Element;
+  /** Whether `content` is more than a short text, such as code in its
+   * colors: the tip is then a popup on the surface, which wraps what is
+   * wider than it and cuts what is taller than the window. */
+  rich?: boolean;
   /** Classes for the element around `children`, which is an inline flex box. */
   class?: string;
   children: JSX.Element;
@@ -75,7 +84,7 @@ export default function Tooltip(props: {
             ref={setTip}
             id={id}
             role="tooltip"
-            class="pointer-events-none fixed top-0 left-0 z-50 rounded-md bg-ink px-2 py-1 font-sans text-xs whitespace-nowrap text-surface shadow-popup"
+            class={`pointer-events-none fixed top-0 left-0 z-50 rounded-md text-xs shadow-popup ${props.rich ? rich : plain}`}
           >
             {props.content}
           </div>
