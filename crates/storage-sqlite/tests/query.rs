@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use otelo_query::{FieldOrigin, MAX_HELP_VALUES, Signal, ValueType, complete_query, parse_query};
-use otelo_storage::query::{Bucket, BucketChange, MetricFilter, Resolution, SqlValue};
+use otelo_storage::query::{Bucket, BucketChange, MetricFilter, Resolution};
 use otelo_storage::{
     AttributeValue, Attributes, Batch, Buckets, Distribution, Error, ExplicitBuckets,
     ExponentialBuckets, Histogram, HistogramPoint, IndexedAttribute, IndexedCounts, IndexedSignal,
@@ -713,52 +713,23 @@ fn an_indexed_attribute_has_an_index_in_every_day_file() {
 }
 
 #[test]
-fn sql_reads_and_cannot_do_more() {
-    let fixture = Fixture::new();
-    let reader = fixture.reader_around_midnight();
-    let result = reader
-        .run_sql(
-            "SELECT service, count(*) AS n FROM resources GROUP BY service ORDER BY service",
-            1,
-        )
-        .unwrap();
-    assert_eq!(result.columns(), ["service", "n"]);
-    assert_eq!(
-        result.rows(),
-        [vec![SqlValue::Text("api".into()), SqlValue::Integer(2)]]
-    );
-    assert!(result.truncated());
-    assert!(reader.run_sql("PRAGMA table_info(logs)", 100).is_ok());
-    assert!(reader.run_sql("SELECT * FROM attribute_keys", 100).is_ok());
-
-    let today = Day::today();
-    for sql in [
-        format!("DELETE FROM \"{today}\".logs"),
-        "ATTACH DATABASE '/tmp/other.sqlite' AS other".into(),
-        "PRAGMA query_only = false".into(),
-        "SELECT 1; SELECT 2".into(),
-    ] {
-        assert!(reader.run_sql(&sql, 10).is_err(), "{sql} ran");
-    }
-    assert!(
-        reader
-            .list_logs(&parse_query("", Signal::Logs).unwrap(), 1)
-            .is_ok()
-    );
-}
-
-#[test]
 fn a_query_stops_at_the_time_limit() {
     let fixture = Fixture::new();
     let reader = fixture.reader_around_midnight();
     reader.set_time_limit(Duration::from_millis(50)).unwrap();
     let error = reader
-        .run_sql(
+        .connection()
+        .query_row(
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT max(i) FROM n",
-            1,
+            [],
+            |row| row.get::<_, i64>(0),
         )
         .unwrap_err();
-    assert!(matches!(error, Error::TimedOut), "{error:#}");
+    assert_eq!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::OperationInterrupted),
+        "{error:#}"
+    );
 }
 
 #[test]
@@ -890,18 +861,23 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
         (user.key.as_str(), user.value_type.name(), user.count),
         ("user.id", "mixed", 203)
     );
-    let sql_rows = |sql: &str| reader.run_sql(sql, 10).unwrap().rows().to_vec();
+    let query_integer = |sql: &str| -> i64 {
+        reader
+            .connection()
+            .query_row(sql, [], |row| row.get(0))
+            .unwrap()
+    };
     assert_eq!(
-        sql_rows("SELECT has_more_values FROM attribute_keys WHERE key = 'user.id'"),
-        [vec![SqlValue::Integer(1)]]
+        query_integer("SELECT has_more_values FROM attribute_keys WHERE key = 'user.id'"),
+        1
     );
     assert_eq!(
-        sql_rows("SELECT count(*) FROM attribute_values WHERE key = 'user.id'"),
-        [vec![SqlValue::Integer(200)]]
+        query_integer("SELECT count(*) FROM attribute_values WHERE key = 'user.id'"),
+        200
     );
     assert_eq!(
-        sql_rows("SELECT count FROM attribute_values WHERE key = 'user.id' AND value = '3'"),
-        [vec![SqlValue::Integer(2)]]
+        query_integer("SELECT count FROM attribute_values WHERE key = 'user.id' AND value = '3'"),
+        2
     );
     let user = complete_query("user.id", 7, Signal::Logs, &reader)
         .help_for_field_at_cursor

@@ -4,7 +4,6 @@ mod compile;
 mod logs;
 mod metrics;
 mod services;
-mod sql;
 mod traces;
 
 use std::fmt;
@@ -15,7 +14,7 @@ use jiff::Timestamp;
 use otelo_query::{Query, Signal};
 use otelo_storage::query::{
     AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
-    OperationDetail, Resolution, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
+    OperationDetail, Resolution, Service, Services, Spans, TargetKey, Trace, Traces,
 };
 use otelo_storage::{Error, RangeQueries, Result, SpanId, SpanKind, TraceId};
 use rusqlite::types::Value;
@@ -26,14 +25,6 @@ pub use metrics::{BASELINE_LOOKBACK_NS, metric_kind_from_stored_names, read_seri
 
 use crate::reader::timed_out;
 use crate::{Day, Reader};
-
-pub fn hex_digits(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    bytes.iter().fold(String::new(), |mut hex, byte| {
-        let _ = write!(hex, "{byte:02x}");
-        hex
-    })
-}
 
 pub fn timestamp_from_nanos(unix_nanos: i64) -> Timestamp {
     Timestamp::from_nanosecond(i128::from(unix_nanos))
@@ -282,14 +273,6 @@ fn classify_query_error(error: anyhow::Error) -> Error {
     }
 }
 
-fn classify_user_sql_error(error: &anyhow::Error) -> Error {
-    if timed_out(error) {
-        Error::TimedOut
-    } else {
-        Error::InvalidQuery(format!("{error:#}"))
-    }
-}
-
 impl RangeQueries for Reader {
     fn list_logs(&self, query: &Query, limit: usize) -> Result<Logs> {
         logs::read_logs(self, query, limit).map_err(classify_query_error)
@@ -361,10 +344,6 @@ impl RangeQueries for Reader {
 
     fn list_attribute_keys(&self, signal: Signal) -> Result<AttributeKeys> {
         catalog::list_attribute_keys(self, signal).map_err(classify_query_error)
-    }
-
-    fn run_sql(&self, sql: &str, limit: usize) -> Result<SqlResult> {
-        sql::run_user_sql(self, sql, limit).map_err(|error| classify_user_sql_error(&error))
     }
 
     fn explain_query(&self, query: &Query) -> Result<Vec<String>> {

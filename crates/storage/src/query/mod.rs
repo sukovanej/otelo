@@ -3,7 +3,6 @@ mod catalog;
 mod logs;
 mod metrics;
 mod services;
-mod sql;
 mod template;
 mod traces;
 
@@ -21,6 +20,5 @@ pub use services::{
     Latency, Operation, OperationDetail, RequestBucket, Requests, Service, ServiceBucket,
     ServiceStats, ServiceSummary, Services,
 };
-pub use sql::{SqlResult, SqlValue};
 pub use template::replace_values_in_message;
 pub use traces::{Spans, Trace, TraceSpan, TraceSummary, Traces};

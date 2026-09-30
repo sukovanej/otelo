@@ -10,7 +10,8 @@ are strings in the Rust sources of that crate.
 
 ## Names
 
-- A user types these names into `otelo sql`. Choose one as you choose a CLI flag.
+- The names are private to `otelo-storage-sqlite`. No command runs SQL that a user wrote,
+  and no other crate reads the tables. Keep it so.
 - A table is a plural noun: `resources`, `attribute_keys`. A column is singular. Both are
   snake_case and spelled in full: `attribute`, not `attr`.
 - A column has the name of the Rust field that holds it: `logs.logged_at` is
@@ -31,10 +32,15 @@ are strings in the Rust sources of that crate.
 - A column is `NOT NULL` unless a missing value means something: the `parent_span_id` of a
   root span.
 - A table with a primary key other than `INTEGER PRIMARY KEY` is `WITHOUT ROWID`.
-- No comments. What a column holds goes in the `telemetry` doc, next to the diagram of the
-  schema.
-- The only comment that earns its place is a reason the SQL cannot show. Write it as a short
-  `--` at the statement it explains.
+- A column gets a comment when its definition leaves out a fact a reader needs. Write it
+  as `--` lines above the column:
+  - the values of an enum, which SQLite cannot declare:
+    `-- gauge, updown, counter, or histogram.`
+  - the unit or the encoding of a value: `-- Unix nanoseconds.`, `-- A JSON object.`
+  - what `NULL` means: `-- NULL for a root span.`
+  - what a hash or a count covers.
+- No comment repeats the name or the type of the column.
+- A table or a statement gets a comment only for a reason the SQL cannot show.
 
 ## SQL in Rust
 
@@ -61,10 +67,9 @@ are strings in the Rust sources of that crate.
 
 - A day file and the rollup file keep their `SCHEMA_VERSION` in `PRAGMA user_version`.
 - A new table or index needs no new version. `IF NOT EXISTS` adds it to an old file.
-- A renamed, removed, or retyped column raises the version. There is no migration: the
+- A renamed, removed, or retyped column raises the version. There is no migration. The
   writer sets a file of another version aside, and its rows leave every query.
-- So a rename costs the users their history and changes what they type into `otelo sql`.
-  Rename a name that is wrong, not one that could be nicer, and say so in the commit
-  message.
+- So a rename costs the users their history. Rename a name that is wrong, not one that
+  could be nicer, and say so in the commit message.
 - The same commit changes the `telemetry` doc, the tests, and the SQL in
   `packages/app/tests`.

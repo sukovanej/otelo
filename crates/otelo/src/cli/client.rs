@@ -61,18 +61,6 @@ impl Client {
         read_json_response(response)
     }
 
-    pub fn post<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &impl Serialize,
-    ) -> anyhow::Result<T> {
-        let response = Self::build_agent()
-            .post(self.build_url(path))
-            .send_json(body)
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
-        read_json_response(response)
-    }
-
     pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let response = Self::build_agent()
             .put(self.build_url(path))

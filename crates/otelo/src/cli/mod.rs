@@ -3,7 +3,6 @@ pub mod client;
 mod logs;
 mod metrics;
 mod services;
-mod sql;
 pub mod table;
 mod traces;
 
@@ -18,7 +17,6 @@ pub use metrics::{MetricArgs, MetricsArgs, print_metric_series, print_metrics};
 pub use services::{
     CallsArgs, ServiceArgs, ServicesArgs, print_calls, print_service, print_services,
 };
-pub use sql::{SqlArgs, run_sql};
 pub use traces::{SpansArgs, TraceArgs, TracesArgs, print_spans, print_trace, print_traces};
 
 const QUERY_HELP: &str = "The records to keep, such as 'http.route = \"/matches\" OR user.id = 7'. \

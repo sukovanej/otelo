@@ -5,7 +5,7 @@ use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
     AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
-    OperationDetail, Resolution, Service, Services, Spans, SqlResult, TargetKey, Trace, Traces,
+    OperationDetail, Resolution, Service, Services, Spans, TargetKey, Trace, Traces,
 };
 use crate::{IndexedAttribute, Result, SpanKind, TimeRange, TraceId};
 
@@ -83,8 +83,6 @@ pub trait RangeQueries: Catalog {
     ) -> Result<CallDetail>;
 
     fn list_attribute_keys(&self, signal: Signal) -> Result<AttributeKeys>;
-
-    fn run_sql(&self, sql: &str, limit: usize) -> Result<SqlResult>;
 
     fn explain_query(&self, query: &Query) -> Result<Vec<String>>;
 }

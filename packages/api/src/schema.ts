@@ -291,23 +291,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/sql": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Runs a read-only SQL query over the day files of the range. */
-        post: operations["run_sql"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/traces": {
         parameters: {
             query?: never;
@@ -935,35 +918,6 @@ export interface components {
             /** @description The attributes the query compares that have no index. */
             unindexed: string[];
         };
-        /** @description A read-only SQL query. */
-        SqlRequest: {
-            /** @description The most rows to return. */
-            limit?: number | null;
-            /**
-             * @description The start of the range, which chooses the day files: a duration before
-             *     now, such as `1h`, or an RFC 3339 timestamp. One hour before `until`
-             *     when missing.
-             */
-            since?: string | null;
-            /**
-             * @description One `SELECT`. It reads the views `resources`, `logs`, `spans`,
-             *     `series`, `points`, `attribute_keys`, and `attribute_values`, which
-             *     join the day files with a `day` column in front, or the tables of one
-             *     day as `"2026-09-28".logs`.
-             */
-            sql: string;
-            /** @description The end of the range, in the form of `since`. Now when missing. */
-            until?: string | null;
-        };
-        SqlResult: {
-            columns: string[];
-            /** @description Each row has one value per column. */
-            rows: components["schemas"]["SqlValue"][][];
-            /** @description The query returned more rows than the limit let through. */
-            truncated: boolean;
-        };
-        /** @description A value of a SQLite column. A blob is its hex digits, as text. */
-        SqlValue: null | number | string;
         SuggestionBody: {
             /**
              * @description The type of a field and how many records have it, or how many records
@@ -1713,37 +1667,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Spans"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-        };
-    };
-    run_sql: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SqlRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SqlResult"];
                 };
             };
             400: {
