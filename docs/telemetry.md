@@ -26,7 +26,7 @@ flowchart LR
 
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
 - SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
-- A day file carries the version of its schema in `PRAGMA user_version`. When the writer starts, it sets a file of another version aside as `<day>.sqlite.schema-<version>` and starts a new one. Retention deletes the file it set aside with its day.
+- A day file and the rollup file carry the version of their schema in `PRAGMA user_version`. When the writer starts, it sets a file of another version aside as `<file>.schema-<version>` and starts a new one. No file is migrated, so a renamed column takes the older rows out of every query. Retention deletes a day file it set aside with its day, and a rollup file it set aside once the file has not changed for the 90 days of the 1-hour rollups.
 - A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached. A range of metrics can go back the 90 days of the 1-hour rollups.
 - `service` is the OTel `service.name` resource attribute. The host collector sends no OTLP, so it names its services itself.
 
@@ -38,6 +38,7 @@ erDiagram
   resources ||--o{ spans : has
   resources ||--o{ series : has
   series ||--o{ points : has
+  attribute_keys ||--o{ attribute_values : has
   resources {
     int id PK
     int hash "xxh3 of service and attributes, unique"
@@ -45,7 +46,7 @@ erDiagram
     text attributes "JSON"
   }
   logs {
-    int ts "unix nanos"
+    int logged_at "unix nanos"
     int resource_id FK
     int severity "OTel severity number"
     text body "FTS5 index"
@@ -60,10 +61,10 @@ erDiagram
     blob parent_span_id
     int resource_id FK
     text name
-    int kind
-    int start_ts
+    int kind "OTel span kind number"
+    int started_at "unix nanos"
     int duration_ns
-    int status
+    int status "OTel status code"
     text attributes "JSON"
     text events "JSON"
   }
@@ -73,15 +74,28 @@ erDiagram
     int resource_id FK
     text name
     text kind "gauge, updown, counter, histogram"
-    text temporality "cumulative or delta, for a counter and a histogram"
+    text temporality "cumulative or delta for a counter and a histogram, null for the rest"
     text unit
     text labels "JSON"
   }
   points {
-    int series_id FK
-    int ts
-    real value
+    int series_id PK, FK
+    int recorded_at PK "unix nanos"
+    real value "the sum of a histogram point"
     text histogram "JSON buckets, null for the other kinds"
+  }
+  attribute_keys {
+    text key_group PK "logs, spans, metrics, resource, or span_names"
+    text key PK
+    text value_type "JSON type of the values, or mixed"
+    int count "records that have the key"
+    int has_more_values "1 once the key has more values than attribute_values keeps"
+  }
+  attribute_values {
+    text key_group PK
+    text key PK
+    text value PK "JSON"
+    int count "records that have the value"
   }
 ```
 
@@ -140,13 +154,13 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 The day files keep the raw points for 7 days. The writer also sums them up by the minute and by the hour in `telemetry/metrics-rollup.sqlite`, which keeps the minutes for 14 days and the hours for 90. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] has the reasons.
 
 - The file has the `resources` and `series` tables of a day file, and the tables `minutes` and `hours` in place of `points`, so a query reads the summaries as it reads the raw points.
-- A row is one series and one minute or hour that has points: the count, minimum, maximum, sum, and last of the values, and for a `counter` how much it grew and over how many seconds, and for a `histogram` its merged buckets. A rolled up `counter` or `histogram` holds what each step added, so its temporality is `delta`.
+- A row is one series and one minute or hour that has points, with the instant it starts in `start_at`: the count, minimum, maximum, sum, and last of the values, and for a `counter` how much it grew and over how many seconds, and for a `histogram` its merged buckets. A rolled up `counter` or `histogram` holds what each step added, so its temporality is `delta`.
 - Once a minute the writer rolls up the minutes that ended 2 minutes ago or earlier, so a late batch is in them. An hour is rolled up from its 60 minutes once all of them are.
 - The table `cursors` says up to where the minutes and the hours are rolled up. A daemon that was down starts there, or at the oldest day file when the table is empty, and rolls up an hour at a time with batches taken in between.
 - A row is written with its key, the series and the start, so rolling a step up again gives the same row.
 - The logic that sums points up by step is one type in `otelo-storage`. The query of the raw points and the rollups both use it, so a minute of summaries equals a minute of raw points.
 - The rollup job reads the day files without a span. No request is its parent, so each read would show as a request of `otelo`.
-- A rollup file of another schema version does not open. The daemon logs the error and keeps no rollups until the file is moved away.
+- The writer sets a rollup file of another schema version aside, as it does a day file, and starts a new one from the day files it has.
 
 ## The daemon's own telemetry
 
@@ -194,12 +208,12 @@ root = true AND duration > 500ms AND NOT resource.host.name = "droplet"
 
 ## Catalog and completion
 
-The writer keeps the attribute keys of each signal and of the resources in `attribute_keys` in every day file, with their JSON type and count. `attribute_values` keeps up to 200 values of each key, and marks a key with more as having many values. The writer only touches these tables for a new key or value and for the counts, once per transaction.
+The writer keeps the attribute keys of each signal and of the resources in `attribute_keys` in every day file, with their JSON type in `value_type` and their count. The `key_group` of a row says whose keys they are: `logs`, `spans`, `metrics` for the labels of the series, or `resource`. `attribute_values` keeps up to 200 values of each key, and `has_more_values` marks a key that has more. The group `span_names` holds the names of the spans under the key `name`. The writer only touches these tables for a new key or value and for the counts, once per transaction.
 
 `otelo complete <signal> <query>` and `/api/complete` suggest the fields, operators, values, and keywords that fit at the cursor, from the catalog of the retention. `otelo attributes <signal>` lists the keys.
 
 ## Indexed attributes
 
-`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the writer. Within a second the writer creates an expression index on `json_extract(attributes, '$."user.id"')` in every day file, and in each new one. `otelo index remove` drops it. The query compiler writes the same expression, so SQLite uses the index, also for an `OR` of indexed keys. A query on a key without an index still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
+`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the writer. Within a second the writer creates an expression index on `json_extract(attributes, '$."user.id"')` in every day file, and in each new one. The index is named `logs_attribute_<hash>`, after its table and a hash of the key. `otelo index remove` drops it. The query compiler writes the same expression, so SQLite uses the index, also for an `OR` of indexed keys. A query on a key without an index still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
 
 Until UI auth exists, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel.
