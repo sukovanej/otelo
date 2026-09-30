@@ -15,7 +15,7 @@ flowchart LR
   host --> writer
   writer --> day[(telemetry/YYYY-MM-DD.sqlite)]
   day --> rollup[Rollups]
-  rollup --> agg[(metrics-rollup.sqlite)]
+  rollup --> agg[(telemetry/metrics-rollup.sqlite)]
   day --> api[Query API]
   agg --> api
   api -->|HTTP| cli[otelo CLI]
@@ -27,7 +27,7 @@ flowchart LR
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
 - SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
 - A day file carries the version of its schema in `PRAGMA user_version`. When the writer starts, it sets a file of another version aside as `<day>.sqlite.schema-<version>` and starts a new one. Retention deletes the file it set aside with its day.
-- A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached.
+- A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached. A range of metrics can go back the 90 days of the 1-hour rollups.
 - `service` is the OTel `service.name` resource attribute. The host collector sends no OTLP, so it names its services itself.
 
 ## Schema of a day file
@@ -105,7 +105,7 @@ The `otelo-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 
 ## Host collector
 
-The `otelo-host` crate reads the machine every 15 seconds, on the wall-clock multiples of 15 seconds, and sends the points straight to the writer. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
+The `otelo-host` crate reads the machine once when the daemon starts, and then every 15 seconds, on the wall-clock multiples of 15 seconds. It sends the points straight to the writer. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
 
 OpenTelemetry treats a host as a resource of its own and gives host metrics no service name. The `service` column needs one, so otelo names itself, as an app that reports the metrics of its host does:
 
@@ -132,7 +132,21 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 - `iowait` is the time the CPUs sat idle waiting for the disk, and `steal` the time the hypervisor gave to another tenant. Without the two, a slow droplet at 30% CPU looks healthy.
 - The `process.*` metrics cover a whole service, every process of its unit, and otelo's own process. `process.memory.usage` is the memory the processes hold themselves. `process.cgroup.memory.usage`, on Linux only, adds the page cache the unit filled, which is what `MemoryMax` and the OOM killer count.
 - `otelo.storage.size` is the size of otelo's data. The storage backend reports it through `Storage::size()`, so the collector knows no file names. The SQLite backend adds up its files, and a WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
-- A filesystem counts once per device, and an APFS container once for all its volumes. Filesystems without a disk, such as `tmpfs`, `overlay`, and `squashfs`, are left out. So are the loopback interface and every interface that has moved no bytes.
+- A filesystem counts once per device, under its shortest mount point. Filesystems without a disk, such as `tmpfs`, `overlay`, and `squashfs`, are left out. So are the loopback interface and every interface that has moved no bytes.
+- A reading that fails, or a list of services that cannot be read, is a warning in the log. The collector sends what it has and tries again at the next tick.
+
+## Rollups
+
+The day files keep the raw points for 7 days. The writer also sums them up by the minute and by the hour in `telemetry/metrics-rollup.sqlite`, which keeps the minutes for 14 days and the hours for 90. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] has the reasons.
+
+- The file has the `resources` and `series` tables of a day file, and the tables `minutes` and `hours` in place of `points`, so a query reads the summaries as it reads the raw points.
+- A row is one series and one minute or hour that has points: the count, minimum, maximum, sum, and last of the values, and for a `counter` how much it grew and over how many seconds, and for a `histogram` its merged buckets. A rolled up `counter` or `histogram` holds what each step added, so its temporality is `delta`.
+- Once a minute the writer rolls up the minutes that ended 2 minutes ago or earlier, so a late batch is in them. An hour is rolled up from its 60 minutes once all of them are.
+- The table `cursors` says up to where the minutes and the hours are rolled up. A daemon that was down starts there, or at the oldest day file when the table is empty, and rolls up an hour at a time with batches taken in between.
+- A row is written with its key, the series and the start, so rolling a step up again gives the same row.
+- The logic that sums points up by step is one type in `otelo-storage`. The query of the raw points and the rollups both use it, so a minute of summaries equals a minute of raw points.
+- The rollup job reads the day files without a span. No request is its parent, so each read would show as a request of `otelo`.
+- A rollup file of another schema version does not open. The daemon logs the error and keeps no rollups until the file is moved away.
 
 ## The daemon's own telemetry
 
@@ -149,6 +163,7 @@ The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serv
 - `otelo logs` groups lines by message template first, with counts, and prints samples. `--raw` prints lines.
 - `otelo spans` lists spans. `otelo traces` lists the traces that have a matching span, by root span, duration, and error flag. `otelo trace <id>` prints the span tree.
 - `otelo metrics` lists the series. `otelo metric <name>` prints one metric at a step that fits the range: the count, minimum, average, maximum, and last value of each step for a `gauge` and an `updown`, the rate for a `counter`, and the percentiles for a `histogram`.
+- A range of 6 hours at most reads the raw points. A range of 14 days at most reads the summaries by the minute, and a longer one those by the hour. A range that starts before the finer points are kept reads the next coarser ones. `--resolution raw`, `1m`, or `1h` picks one. A step of summaries is rounded up to whole minutes or hours, and the answer says which step and which points it read.
 - The rate of a counter is its increase between two neighbouring points, divided by the time between them and not by the step, so a 30-second step over points a minute apart stays right. A cumulative value that goes down is a restart, and the increase counts from zero. The query also reads the 5 minutes before the range, so the first step has a point to count from.
 - A histogram point keeps its buckets in `points.histogram` as JSON: `count`, `sum`, `min`, `max`, and either `bounds` and `counts` (one more than the bounds), or `scale`, `zero_count`, `positive`, and `negative` for an exponential histogram. The writer skips a point whose counts do not fit its bounds. `otelo metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
 - Two exponential points always merge. Both go down to the lower scale, where each step joins neighbouring buckets in pairs. The API returns every distribution with explicit bounds, and joins the buckets of an exponential one until 64 are left. The percentiles are estimated before that. An explicit and an exponential point in one step do not merge, and the step keeps the newer one.
