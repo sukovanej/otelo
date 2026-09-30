@@ -1,5 +1,6 @@
 import { CloseIcon } from "@otelo/icons";
-import { Button } from "@otelo/ui";
+
+import Button from "./Button";
 
 interface CloseButtonProps {
   readonly onClose: () => void;

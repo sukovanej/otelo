@@ -1,7 +1,7 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
 import { type Accessor, createEffect, createMemo, onCleanup } from "solid-js";
 
-import { search } from "@otelo/api";
+import { toQueryString } from "@otelo/api";
 
 import { createFetch, type FetchState } from "../fetch";
 import { DEFAULT_SINCE, LIVE_RELOAD_MS } from "../list";
@@ -36,7 +36,7 @@ export function useRange(): RangeState {
       }),
     setLive: (enabled) => setParams({ live: enabled ? "1" : undefined }),
     toSearch: (extraParams = {}) =>
-      search({
+      toQueryString({
         ...extraParams,
         since: since() === DEFAULT_SINCE ? undefined : since(),
         until: until() || undefined,

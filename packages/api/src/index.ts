@@ -13,7 +13,6 @@ export type Logs = Schemas["Logs"];
 export type Operation = Schemas["Operation"];
 export type OperationDetail = Schemas["OperationDetail"];
 export type RequestBucket = Schemas["RequestBucket"];
-export type Requests = Schemas["Requests"];
 export type Service = Schemas["Service"];
 export type ServiceSummary = Schemas["ServiceSummary"];
 export type Signal = Schemas["Signal"];
@@ -45,8 +44,7 @@ type GetQuery<P extends keyof paths> = paths[P]["get"] extends {
   ? NonNullable<Q>
   : never;
 
-/** A query string of the parameters that are set, or an empty string. */
-export function search(params: Record<string, string | number | null | undefined>): string {
+export function toQueryString(params: Record<string, string | number | null | undefined>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
@@ -56,16 +54,20 @@ export function search(params: Record<string, string | number | null | undefined
 }
 
 export const getLogs = (query: ListQuery, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/logs", "get">>("GET", `/api/logs${search(query)}`, signal);
+  requestJson<OkBody<"/api/logs", "get">>("GET", `/api/logs${toQueryString(query)}`, signal);
 
 export const getLogGroups = (query: GetQuery<"/api/logs/groups">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/logs/groups", "get">>("GET", `/api/logs/groups${search(query)}`, signal);
+  requestJson<OkBody<"/api/logs/groups", "get">>(
+    "GET",
+    `/api/logs/groups${toQueryString(query)}`,
+    signal,
+  );
 
 export const getSpans = (query: GetQuery<"/api/spans">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/spans", "get">>("GET", `/api/spans${search(query)}`, signal);
+  requestJson<OkBody<"/api/spans", "get">>("GET", `/api/spans${toQueryString(query)}`, signal);
 
 export const getTraces = (query: GetQuery<"/api/traces">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/traces", "get">>("GET", `/api/traces${search(query)}`, signal);
+  requestJson<OkBody<"/api/traces", "get">>("GET", `/api/traces${toQueryString(query)}`, signal);
 
 export const getTrace = (
   id: string,
@@ -74,12 +76,16 @@ export const getTrace = (
 ) =>
   requestJson<OkBody<"/api/traces/{trace_id}", "get">>(
     "GET",
-    `/api/traces/${encodeURIComponent(id)}${search(query)}`,
+    `/api/traces/${encodeURIComponent(id)}${toQueryString(query)}`,
     signal,
   );
 
 export const getServices = (query: GetQuery<"/api/services">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/services", "get">>("GET", `/api/services${search(query)}`, signal);
+  requestJson<OkBody<"/api/services", "get">>(
+    "GET",
+    `/api/services${toQueryString(query)}`,
+    signal,
+  );
 
 export const getService = (
   name: string,
@@ -88,7 +94,7 @@ export const getService = (
 ) =>
   requestJson<OkBody<"/api/services/{name}", "get">>(
     "GET",
-    `/api/services/${encodeURIComponent(name)}${search(query)}`,
+    `/api/services/${encodeURIComponent(name)}${toQueryString(query)}`,
     signal,
   );
 
@@ -99,7 +105,7 @@ export const getOperation = (
 ) =>
   requestJson<OkBody<"/api/services/{name}/operation", "get">>(
     "GET",
-    `/api/services/${encodeURIComponent(service)}/operation${search(query)}`,
+    `/api/services/${encodeURIComponent(service)}/operation${toQueryString(query)}`,
     signal,
   );
 
@@ -110,7 +116,7 @@ export const getCalls = (
 ) =>
   requestJson<OkBody<"/api/services/{name}/calls", "get">>(
     "GET",
-    `/api/services/${encodeURIComponent(service)}/calls${search(query)}`,
+    `/api/services/${encodeURIComponent(service)}/calls${toQueryString(query)}`,
     signal,
   );
 
@@ -121,13 +127,11 @@ export const getCall = (
 ) =>
   requestJson<OkBody<"/api/services/{name}/call", "get">>(
     "GET",
-    `/api/services/${encodeURIComponent(service)}/call${search(query)}`,
+    `/api/services/${encodeURIComponent(service)}/call${toQueryString(query)}`,
     signal,
   );
 
-/** What can go at `cursorInChars` of `query`, and the field of the term the
- * cursor is in. */
-export const complete = (
+export const completeQuery = (
   signal: Signal,
   query: string,
   cursorInChars: number,
@@ -135,7 +139,7 @@ export const complete = (
 ) =>
   requestJson<OkBody<"/api/complete", "get">>(
     "GET",
-    `/api/complete${search({ signal, q: query, cursor: cursorInChars })}`,
+    `/api/complete${toQueryString({ signal, q: query, cursor: cursorInChars })}`,
     abortSignal,
   );
 
@@ -145,8 +149,7 @@ export const addIndex = (signal: Signal, key: string) =>
     `/api/indexes/${signal}/${encodeURIComponent(key)}`,
   );
 
-/** Whether `error` is the rejection of a fetch that was aborted. */
-export const aborted = (error: unknown) =>
+export const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
 
 class ApiError extends Error {

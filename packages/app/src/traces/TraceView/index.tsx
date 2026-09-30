@@ -1,11 +1,10 @@
 import { type Accessor, createMemo, createSignal, type JSX, Match, Show, Switch } from "solid-js";
 
-import { getTrace, type LogLine, search } from "@otelo/api";
-import { Button, Callout, Tabs } from "@otelo/ui";
+import { getTrace, type LogLine, toQueryString } from "@otelo/api";
+import { Button, Callout, EmptyMessage, Tabs } from "@otelo/ui";
 import { Panel, Value } from "@otelo/viz";
 
 import { pageContent } from "../../classes";
-import EmptyMessage from "../../EmptyMessage";
 import { createFetch } from "../../fetch";
 import { formatCount } from "../../list";
 import LinePanel from "../../logs/LinePanel";
@@ -231,7 +230,7 @@ export function closePanel(state: TraceState): boolean {
 }
 
 export function toTracePath(id: string, state: TraceState): string {
-  return `/traces/${id}${search({
+  return `/traces/${id}${toQueryString({
     view: state.tab() === "logs" ? "logs" : undefined,
     span: state.spanId(),
   })}`;

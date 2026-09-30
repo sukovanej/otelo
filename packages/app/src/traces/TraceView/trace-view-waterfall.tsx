@@ -40,10 +40,10 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
 
   const columns: Column<TreeRow>[] = [
     {
+      kind: "cell",
       id: "span",
       label: "Span",
       width: "minmax(28ch,2fr)",
-      value: (row) => row.span.name,
       cell: (row) => {
         const isCollapsed = () => collapsedSpanIds().has(row.span.span_id);
         return (
@@ -79,24 +79,25 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
       },
     },
     {
+      kind: "cell",
       id: "service",
       label: "Service",
       width: "minmax(6ch,13ch)",
-      value: (row) => row.span.service,
       tone: () => "muted",
       cell: (row) => <ServiceName name={row.span.service} resource={row.span.resource} />,
     },
     {
+      kind: "number",
       id: "duration",
       label: "Duration",
       unit: "duration",
       value: (row) => row.span.duration_ns,
     },
     {
+      kind: "cell",
       id: "timeline",
       label: "Timeline",
       width: "3fr",
-      value: (row) => row.startOffsetNanos,
       header: () => (
         <span class="@container relative h-[1lh] w-full">
           <For each={AXIS_TICKS}>
@@ -132,10 +133,15 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
       label="Spans of the trace"
       rows={dropCollapsedRows(props.rows, collapsedSpanIds())}
       columns={columns}
-      level={(row) => ({
-        depth: row.depth,
-        expanded: row.childCount > 0 ? !collapsedSpanIds().has(row.span.span_id) : undefined,
-      })}
+      level={(row) =>
+        row.childCount > 0
+          ? {
+              kind: "branch",
+              depth: row.depth,
+              expanded: !collapsedSpanIds().has(row.span.span_id),
+            }
+          : { kind: "leaf", depth: row.depth }
+      }
       selected={(row) => props.selectedSpanId === row.span.span_id}
       tone={(row) => (isFailedSpan(row.span) ? "error" : undefined)}
       onRowClick={(row) =>

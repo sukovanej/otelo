@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js";
 
-import { complete, type Signal } from "@otelo/api";
+import { completeQuery, type Signal } from "@otelo/api";
 import { Button, QueryInput, RangePicker, Tabs } from "@otelo/ui";
 
 import { describeFieldOfToken } from "../fieldHelp";
@@ -43,7 +43,7 @@ export default function QueryBar<V extends string, R extends ListResult<V>>(
             value={list().draftQuery()}
             highlight={highlightQuery}
             complete={(query, cursorInChars, abort) =>
-              complete(props.signal, query, cursorInChars, abort).then(
+              completeQuery(props.signal, query, cursorInChars, abort).then(
                 (completions) => completions.suggestions,
               )
             }

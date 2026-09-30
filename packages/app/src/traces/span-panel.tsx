@@ -2,18 +2,16 @@ import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 
 import type { TraceSpan } from "@otelo/api";
+import { isPlainLeftClick, SidePanel, SpanKindBadge } from "@otelo/ui";
 import { Value } from "@otelo/viz";
 
 import { link, sectionHeading, timesLine } from "../classes";
 import { toUnnamedField } from "../field";
 import FieldSections from "../FieldSections";
 import FieldTable from "../FieldTable";
-import { isPlainLeftClick } from "../row";
 import ServiceName from "../ServiceName";
-import SidePanel from "../SidePanel";
 import { formatDateTime, formatTime, measureNanosSince, parseTime } from "../time";
 import { isFailedSpan, listSpanSections, toKindName } from "./span";
-import SpanKindBadge from "./SpanKindBadge";
 import SpanTitle from "./SpanTitle";
 
 interface SpanPanelProps {

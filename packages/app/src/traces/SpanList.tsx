@@ -1,18 +1,18 @@
 import type { TraceSpan } from "@otelo/api";
+import { SpanKindBadge } from "@otelo/ui";
 import { type Column, Table } from "@otelo/viz";
 
 import ServiceName from "../ServiceName";
 import { formatTime, parseTime } from "../time";
 import { isFailedSpan, toKindName } from "./span";
-import SpanKindBadge from "./SpanKindBadge";
 import SpanTitle from "./SpanTitle";
 
 const COLUMNS: Column<TraceSpan>[] = [
   {
+    kind: "cell",
     id: "time",
     label: "Time",
     width: "max-content",
-    value: (span) => span.started_at,
     tone: () => "muted",
     cell: (span) => (
       <time class="whitespace-nowrap" datetime={span.started_at}>
@@ -21,18 +21,18 @@ const COLUMNS: Column<TraceSpan>[] = [
     ),
   },
   {
+    kind: "cell",
     id: "service",
     label: "Service",
     width: "minmax(6ch,16ch)",
-    value: (span) => span.service,
     tone: () => "muted",
     cell: (span) => <ServiceName name={span.service} resource={span.resource} />,
   },
   {
+    kind: "cell",
     id: "name",
     label: "Name",
     width: "minmax(0,1fr)",
-    value: (span) => span.name,
     cell: (span) => (
       <SpanTitle
         variant="span"
@@ -43,17 +43,17 @@ const COLUMNS: Column<TraceSpan>[] = [
     ),
   },
   {
+    kind: "cell",
     id: "kind",
     label: "Kind",
     width: "max-content",
-    value: (span) => span.kind,
     cell: (span) => <SpanKindBadge kind={toKindName(span.kind)} />,
   },
   {
+    kind: "meter",
     id: "duration",
     label: "Duration",
     unit: "duration",
-    meter: true,
     width: "20ch",
     value: (span) => span.duration_ns,
   },

@@ -1,4 +1,4 @@
-import { complete, type FieldBody, type FieldSource, type Signal } from "@otelo/api";
+import { completeQuery, type FieldBody, type FieldSource, type Signal } from "@otelo/api";
 import type { QueryToken } from "@otelo/ui";
 
 export const SOURCE_LABELS: Record<FieldSource, string> = {
@@ -32,7 +32,7 @@ export async function describeFieldOfToken(
   // The field alone, so the rest of the query cannot hide it.
   const name = query.slice(token.start, token.end);
   const endInChars = Array.from(name).length;
-  const { field } = await complete(signal, name, endInChars, abort);
+  const { field } = await completeQuery(signal, name, endInChars, abort);
   return field ?? undefined;
 }
 

@@ -7,10 +7,10 @@ import SpanTitle from "./SpanTitle";
 
 const COLUMNS: Column<TraceSummary>[] = [
   {
+    kind: "cell",
     id: "time",
     label: "Time",
     width: "max-content",
-    value: (trace) => trace.started_at,
     tone: () => "muted",
     cell: (trace) => (
       <time class="whitespace-nowrap" datetime={trace.started_at}>
@@ -19,18 +19,18 @@ const COLUMNS: Column<TraceSummary>[] = [
     ),
   },
   {
+    kind: "cell",
     id: "service",
     label: "Service",
     width: "minmax(6ch,16ch)",
-    value: (trace) => trace.service,
     tone: () => "muted",
     cell: (trace) => <ServiceName name={trace.service} resource={trace.resource} />,
   },
   {
+    kind: "cell",
     id: "name",
     label: "Root span",
     width: "minmax(0,1fr)",
-    value: (trace) => trace.name,
     cell: (trace) => (
       <SpanTitle
         variant="span"
@@ -40,12 +40,12 @@ const COLUMNS: Column<TraceSummary>[] = [
       />
     ),
   },
-  { id: "spans", label: "Spans", unit: "count", value: (trace) => trace.spans },
+  { kind: "number", id: "spans", label: "Spans", unit: "count", value: (trace) => trace.spans },
   {
+    kind: "meter",
     id: "duration",
     label: "Duration",
     unit: "duration",
-    meter: true,
     width: "20ch",
     value: (trace) => trace.duration_ns,
   },

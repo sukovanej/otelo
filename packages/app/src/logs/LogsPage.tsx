@@ -1,8 +1,8 @@
 import { createSignal, Match, Show, Switch } from "solid-js";
 
 import { getLogGroups, getLogs, type LogGroups, type LogLine, type Logs } from "@otelo/api";
+import { EmptyMessage } from "@otelo/ui";
 
-import EmptyMessage from "../EmptyMessage";
 import { createListState, formatCount, usePageKeys } from "../list";
 import ListContent from "../ListContent";
 import QueryBar from "../QueryBar";

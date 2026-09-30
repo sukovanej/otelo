@@ -15,9 +15,9 @@ interface BucketedAnswer {
 
 export function toTimeFrame(answer: BucketedAnswer): TimeFrame {
   return {
-    times: answer.buckets.map((bucket) => parseTime(bucket.start_at).getTime()),
-    step: answer.step_ns / 1e6,
-    start: parseTime(answer.start_at).getTime(),
-    end: parseTime(answer.end_at).getTime(),
+    bucketStartsMs: answer.buckets.map((bucket) => parseTime(bucket.start_at).getTime()),
+    stepMs: answer.step_ns / 1e6,
+    startMs: parseTime(answer.start_at).getTime(),
+    endMs: parseTime(answer.end_at).getTime(),
   };
 }

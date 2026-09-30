@@ -1,11 +1,9 @@
 import { Show } from "solid-js";
 
-import { databaseName, DatabaseSystemIcon } from "@otelo/icons";
-import { Tooltip } from "@otelo/ui";
+import { DatabaseSystemIcon, toDatabaseName } from "@otelo/icons";
+import { SqlCode, SqlStart, Tooltip } from "@otelo/ui";
 
 import { type DatabaseSpan, isSqlSystem, toDatabaseIconId } from "../../semantics";
-import SqlCode from "../../SqlCode";
-import SqlStart from "../../SqlStart";
 
 const TOOLTIP_MAX_LINES = 24;
 
@@ -16,7 +14,7 @@ interface SpanTitleDatabaseProps {
 
 export default function SpanTitleDatabase(props: SpanTitleDatabaseProps) {
   const iconId = () => toDatabaseIconId(props.meaning.system);
-  const system = () => databaseName(iconId());
+  const system = () => toDatabaseName(iconId());
   const queryOrName = () => props.meaning.query ?? props.name;
   return (
     <>

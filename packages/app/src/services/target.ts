@@ -1,5 +1,5 @@
 import type { Attributes, TargetKey, TargetType } from "@otelo/api";
-import { databaseName } from "@otelo/icons";
+import { toDatabaseName } from "@otelo/icons";
 
 import { toDatabaseIconId } from "../semantics";
 
@@ -13,7 +13,9 @@ const TARGET_TYPE_NAMES: Record<TargetType, string> = {
 
 export function nameTargetSystem(target: TargetKey): string {
   if (target.system === null) return TARGET_TYPE_NAMES[target.type];
-  return target.type === "database" ? databaseName(toDatabaseIconId(target.system)) : target.system;
+  return target.type === "database"
+    ? toDatabaseName(toDatabaseIconId(target.system))
+    : target.system;
 }
 
 export function toTargetLabel(target: TargetKey): string {

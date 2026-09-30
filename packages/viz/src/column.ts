@@ -8,39 +8,64 @@ const ALIGN_CLASSES: Record<ColumnAlign, string> = {
   end: "justify-end text-right",
 };
 
+const DEFAULT_ALIGNS: Record<ColumnKind, ColumnAlign> = {
+  number: "end",
+  meter: "end",
+  text: "start",
+  cell: "start",
+};
+
 const DEFAULT_TRACKS: Record<ColumnKind, string> = {
   number: "max-content",
   meter: "minmax(16ch,1.2fr)",
   text: "minmax(12ch,2fr)",
+  cell: "minmax(12ch,2fr)",
 };
-
-export interface Column<R> {
-  readonly id: string;
-  readonly label: string;
-  /** What the column sorts by, and shows when it has no `cell`. */
-  readonly value: (row: R) => SortValue;
-  readonly unit?: Unit;
-  readonly cell?: (row: R) => JSX.Element;
-  readonly header?: () => JSX.Element;
-  /** A bar before each number of its share of the largest in the column. */
-  readonly meter?: boolean;
-  readonly align?: ColumnAlign;
-  readonly tone?: (row: R) => CellTone | undefined;
-  readonly width?: string;
-  readonly description?: string;
-  /** A column sorts on a click on its header when the table sorts, unless
-   * this is false. */
-  readonly sortable?: boolean;
-}
 
 export type CellTone = "error" | "warn" | "muted";
 
+export type Column<R> = NumberColumn<R> | MeterColumn<R> | TextColumn<R> | CellColumn<R>;
+
+interface ColumnBase<R> {
+  readonly id: string;
+  readonly label: string;
+  readonly width?: string;
+  readonly description?: string;
+  readonly tone?: (row: R) => CellTone | undefined;
+}
+
+interface NumberColumn<R> extends ColumnBase<R> {
+  readonly kind: "number";
+  readonly unit: Unit;
+  readonly value: (row: R) => number | null;
+}
+
+interface MeterColumn<R> extends ColumnBase<R> {
+  readonly kind: "meter";
+  readonly unit: Unit;
+  readonly value: (row: R) => number | null;
+}
+
+interface TextColumn<R> extends ColumnBase<R> {
+  readonly kind: "text";
+  readonly value: (row: R) => string | null;
+}
+
+interface CellColumn<R> extends ColumnBase<R> {
+  readonly kind: "cell";
+  readonly cell: (row: R) => JSX.Element;
+  readonly sortBy?: (row: R) => SortValue;
+  readonly header?: () => JSX.Element;
+  readonly align?: ColumnAlign;
+}
+
 type ColumnAlign = "start" | "end";
 
-type ColumnKind = "number" | "meter" | "text";
+type ColumnKind = Column<unknown>["kind"];
 
 export function resolveColumnAlign<R>(column: Column<R>): ColumnAlign {
-  return column.align ?? (column.unit ? "end" : "start");
+  if (column.kind === "cell" && column.align) return column.align;
+  return DEFAULT_ALIGNS[column.kind];
 }
 
 export function pickAlignClass<R>(column: Column<R>): string {
@@ -48,10 +73,9 @@ export function pickAlignClass<R>(column: Column<R>): string {
 }
 
 export function pickGridTrack<R>(column: Column<R>): string {
-  return column.width ?? DEFAULT_TRACKS[pickColumnKind(column)];
+  return column.width ?? DEFAULT_TRACKS[column.kind];
 }
 
-function pickColumnKind<R>(column: Column<R>): ColumnKind {
-  if (column.meter) return "meter";
-  return column.unit ? "number" : "text";
+export function pickSortValueReader<R>(column: Column<R>): ((row: R) => SortValue) | undefined {
+  return column.kind === "cell" ? column.sortBy : column.value;
 }

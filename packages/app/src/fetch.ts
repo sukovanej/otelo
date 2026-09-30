@@ -1,6 +1,6 @@
 import { type Accessor, createEffect, createSignal, on, onCleanup } from "solid-js";
 
-import { aborted } from "@otelo/api";
+import { isAbortError } from "@otelo/api";
 
 export interface FetchState<T> {
   readonly data: Accessor<T | undefined>;
@@ -36,7 +36,7 @@ export function createFetch<K, T>(
         setLoading(false);
       },
       (error: unknown) => {
-        if (controller !== current || aborted(error)) return;
+        if (controller !== current || isAbortError(error)) return;
         setErrorMessage(error instanceof Error ? error.message : String(error));
         setLoading(false);
       },

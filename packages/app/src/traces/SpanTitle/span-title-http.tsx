@@ -1,12 +1,12 @@
 import { Show } from "solid-js";
 
 import { GlobeIcon } from "@otelo/icons";
-import { Badge, type Tone, Tooltip } from "@otelo/ui";
+import { Badge, type BadgeTone, Tooltip } from "@otelo/ui";
 
 import type { HttpSpan } from "../../semantics";
 import SpanTitleRoute from "./span-title-route";
 
-const METHOD_TONES: Record<string, Tone> = {
+const METHOD_TONES: Record<string, BadgeTone> = {
   GET: "info",
   POST: "success",
   PUT: "warn",
@@ -39,7 +39,7 @@ export default function SpanTitleHttp(props: SpanTitleHttpProps) {
   );
 }
 
-function toStatusTone(status: number): Tone {
+function toStatusTone(status: number): BadgeTone {
   if (status >= 500) return "error";
   if (status >= 400) return "warn";
   if (status >= 300) return "info";

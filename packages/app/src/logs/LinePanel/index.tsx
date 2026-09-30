@@ -2,11 +2,10 @@ import { A } from "@solidjs/router";
 import { Show } from "solid-js";
 
 import type { LogLine } from "@otelo/api";
-import { Level } from "@otelo/ui";
+import { LevelBadge, SidePanel } from "@otelo/ui";
 
 import { link } from "../../classes";
 import ServiceName from "../../ServiceName";
-import SidePanel from "../../SidePanel";
 import { formatTime, parseTime } from "../../time";
 import { toLevelName } from "../level";
 import LinePanelContent from "./line-panel-content";
@@ -25,7 +24,7 @@ export default function LinePanel(props: LinePanelProps) {
       onClose={props.onClose}
       header={
         <>
-          <Level level={toLevelName(props.line.severity)} />
+          <LevelBadge level={toLevelName(props.line.severity)} />
           <span class="font-mono text-sm">{formatTime(parseTime(props.line.logged_at))}</span>
           <span class="min-w-0 font-mono text-sm text-muted">
             <ServiceName name={props.line.service} resource={props.line.resource} />

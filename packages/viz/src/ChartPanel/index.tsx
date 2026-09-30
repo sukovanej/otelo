@@ -14,7 +14,7 @@ interface ChartPanelProps {
   readonly kind: ChartKind;
   readonly unit: Unit;
   readonly loading: boolean;
-  readonly empty?: string | undefined;
+  readonly emptyMessage?: string | undefined;
   readonly onZoom: (startMs: number, endMs: number) => void;
 }
 
@@ -44,7 +44,7 @@ export default function ChartPanel(props: ChartPanelProps) {
           unit={props.unit}
           isolatedIndex={isolatedIndex()}
           loading={props.loading}
-          emptyMessage={props.empty}
+          emptyMessage={props.emptyMessage}
           onZoom={props.onZoom}
         />
       </div>

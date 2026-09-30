@@ -1,10 +1,10 @@
 import { createMemo } from "solid-js";
 
 import type { CallOperation, Calls, Target } from "@otelo/api";
+import { SpanKindBadge } from "@otelo/ui";
 import { ChartPanel, type Column, Panel, Table, type TimeSeries } from "@otelo/viz";
 
 import { toKindName } from "../../traces/span";
-import SpanKindBadge from "../../traces/SpanKindBadge";
 import SpanTitle from "../../traces/SpanTitle";
 import { toTimeFrame } from "../frame";
 import { PERCENTILES, toRequestSeries } from "../series";
@@ -62,10 +62,11 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
 
   const columns: Column<CallRow>[] = [
     {
+      kind: "cell",
       id: "summary",
       label: "Call",
       width: "minmax(24ch,5fr)",
-      value: (row) => row.operation.summary,
+      sortBy: (row) => row.operation.summary,
       cell: (row) => (
         <SpanTitle
           variant="operation"
@@ -79,33 +80,37 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
       ),
     },
     {
+      kind: "cell",
       id: "target",
       label: "Target",
       width: "minmax(10ch,max-content)",
-      value: (row) => toTargetLabel(row.target),
+      sortBy: (row) => toTargetLabel(row.target),
       cell: (row) => <ServicePageTargetName target={row.target} />,
     },
     {
+      kind: "cell",
       id: "kind",
       label: "Kind",
       width: "max-content",
-      value: (row) => row.operation.kind,
+      sortBy: (row) => row.operation.kind,
       cell: (row) => <SpanKindBadge kind={toKindName(row.operation.kind)} />,
     },
     {
+      kind: "meter",
       id: "calls",
       label: "Calls",
       unit: "count",
-      meter: true,
       value: (row) => row.operation.calls.count,
     },
     {
+      kind: "number",
       id: "rate",
       label: "Rate",
       unit: "rate",
       value: (row) => toRate(row.operation.calls.count, rangeSeconds()),
     },
     {
+      kind: "number",
       id: "errors",
       label: "Error rate",
       unit: "ratio",
@@ -113,17 +118,18 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
       tone: (row) => (row.operation.calls.errors > 0 ? "error" : undefined),
     },
     ...PERCENTILES.map((percentile): Column<CallRow> => ({
+      kind: "number",
       id: percentile,
       label: percentile.toUpperCase(),
       unit: "duration",
       value: (row) => row.operation.calls.latency?.[percentile] ?? null,
     })),
     {
+      kind: "meter",
       id: "total",
       label: "Total time",
       description: "The durations of the calls added up",
       unit: "duration",
-      meter: true,
       value: (row) => row.operation.calls.total_ns,
     },
   ];
@@ -166,7 +172,7 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
           label="Calls"
           rows={rows()}
           columns={columns}
-          sort={{ column: "total", descending: true }}
+          initialSort={{ columnId: "total", descending: true }}
           href={props.callHref}
           onRowClick={props.onOpenCall}
           loading={props.loading}
