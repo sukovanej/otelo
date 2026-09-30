@@ -1,6 +1,6 @@
 ---
 name: sql
-description: How otelo writes SQL. A column has the name of the Rust field that holds it, a value is a bound parameter, and a renamed column raises the schema version. Invoke before creating or editing any .sql file under crates/, before writing SQL in a .rs file, and before reviewing either.
+description: How otelo writes SQL. A column has the name of the Rust field that holds it, a value is a bound parameter, and the schema changes freely while otelo is in development. Invoke before creating or editing any .sql file under crates/, before writing SQL in a .rs file, and before reviewing either.
 ---
 
 # Writing the SQL
@@ -67,10 +67,9 @@ are strings in the Rust sources of that crate.
 
 - otelo is in development and the tables are still being designed. Change a table, a
   column, or an index as soon as a better design shows up.
-- Write no migration, no code that reads or fills in a file of an older schema, and no
-  name kept for an older file.
-- A change raises the `SCHEMA_VERSION` of its file, which the file keeps in
-  `PRAGMA user_version`. The writer sets a file of another version aside and starts a new
-  one.
+- The files carry no schema version, and no code handles a file of an older schema: no
+  migration, no check, nothing that sets the file aside or fills in what it lacks.
+- After a change, delete the telemetry files written before it, such as
+  `target/dev/telemetry/`.
 - The same commit changes the `telemetry` doc, the tests, and the SQL in
   `packages/ui/tests/sql.test.ts`.

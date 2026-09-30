@@ -17,20 +17,13 @@ use rusqlite::{Connection, Transaction, params};
 use crate::catalog::{CatalogCache, CatalogDelta, KeyGroup};
 use crate::day::Day;
 use crate::indexes::{Indexes, VersionedAttributes, apply_indexes_to_day_file};
-use crate::rollup::{
-    RollupProgress, Rollups, delete_rollup_files_set_aside_before,
-    set_aside_rollup_file_of_another_schema,
-};
+use crate::rollup::{RollupProgress, Rollups};
 use crate::series::{
     MAX_SERIES_PER_METRIC, ResourceId, SeriesCache, SeriesIdentity, StoredResource, StoredSeries,
     find_or_insert_resource_id, find_or_insert_series_id,
 };
-use crate::stored_schema::set_aside_file_of_another_schema;
 
 const DAY_FILE_SCHEMA: &str = include_str!("schema.sql");
-
-// A day file of another version keeps tables this code cannot read or write.
-const DAY_FILE_SCHEMA_VERSION: i32 = 2;
 
 const NO_INDEXED_ATTRIBUTES: &BTreeSet<IndexedAttribute> = &BTreeSet::new();
 
@@ -96,9 +89,6 @@ impl Writer {
                 config.directory.display()
             )
         })?;
-        // No reader has a file open yet, so a file can move.
-        set_aside_day_files_of_another_schema(&config.directory)?;
-        set_aside_rollup_file_of_another_schema(&config.directory)?;
         let thread = thread::Builder::new()
             .name("telemetry-writer".into())
             .spawn(move || WriterState::new(config).write_batches_until_disconnected(&inbox))
@@ -298,10 +288,8 @@ impl WriterState {
                     apply_indexes_to_day_file(&day_file.connection, &wanted_indexes.attributes)
                         .map_err(anyhow::Error::from)
                 }
-                // A file from an older otelo may lack the newer tables.
                 None => Connection::open(self.config.directory.join(day.file_name()))
                     .and_then(|connection| {
-                        create_day_file_schema(&connection)?;
                         apply_indexes_to_day_file(&connection, &wanted_indexes.attributes)
                     })
                     .map_err(anyhow::Error::from),
@@ -392,22 +380,13 @@ impl WriterState {
 
     fn apply_retention(&mut self) {
         let today = Day::today();
-        let retention = self.config.metric_retention(today);
         if let Some(rollups) = &mut self.rollups {
+            let retention = self.config.metric_retention(today);
             let deleted = rollups
                 .delete_summaries_before(retention.oldest_minute_at, retention.oldest_hour_at);
             if let Err(error) = deleted {
                 tracing::error!("delete old metric rollups: {error:#}");
             }
-        }
-        match delete_rollup_files_set_aside_before(&self.config.directory, retention.oldest_hour_at)
-        {
-            Ok(deleted_file_names) => {
-                for name in deleted_file_names {
-                    tracing::info!(file = %name, "deleted metric rollups past the retention");
-                }
-            }
-            Err(error) => tracing::error!("delete old metric rollups set aside: {error:#}"),
         }
         let oldest_retained_day = self.config.oldest_retained_day(today);
         // Closing the files of past days frees their memory.
@@ -666,21 +645,5 @@ fn write_points_and_count_rejected(
 }
 
 pub fn create_day_file_schema(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(DAY_FILE_SCHEMA)?;
-    connection.pragma_update(None, "user_version", DAY_FILE_SCHEMA_VERSION)
-}
-
-fn set_aside_day_files_of_another_schema(directory: &Path) -> anyhow::Result<()> {
-    for entry in fs::read_dir(directory)? {
-        let path = entry?.path();
-        let is_day_file = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(".sqlite") && Day::from_file_name(name).is_some());
-        if is_day_file {
-            set_aside_file_of_another_schema(&path, DAY_FILE_SCHEMA_VERSION)
-                .with_context(|| format!("set {} aside", path.display()))?;
-        }
-    }
-    Ok(())
+    connection.execute_batch(DAY_FILE_SCHEMA)
 }
