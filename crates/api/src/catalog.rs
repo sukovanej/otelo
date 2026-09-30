@@ -112,7 +112,7 @@ pub struct FieldBody {
     pub distinct_values: usize,
     /// Whether the field has more distinct values than the daemon keeps, so
     /// `distinct_values` counts only some of them.
-    pub has_more_values: bool,
+    pub has_more_values_than_listed: bool,
 }
 
 /// Where a field comes from: the query language, the attributes of the
@@ -176,7 +176,7 @@ impl From<FieldHelp> for FieldBody {
                 })
                 .collect(),
             distinct_values: help.distinct_value_count,
-            has_more_values: help.has_more_values,
+            has_more_values_than_listed: help.has_more_values_than_listed,
         }
     }
 }

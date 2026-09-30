@@ -252,7 +252,7 @@ fn the_cli_completes_queries_and_lists_attributes() {
             "type": "string",
             "values": [{"text": "\"/login\"", "count": 2}],
             "distinct_values": 1,
-            "has_more_values": false,
+            "has_more_values_than_listed": false,
         })
     );
     let (at_builtin_field, _) = run_otelo_and_parse_json(&addr, &["complete", "spans", "root"]);
@@ -265,7 +265,7 @@ fn the_cli_completes_queries_and_lists_attributes() {
             "type": "bool",
             "values": [{"text": "true", "count": null}, {"text": "false", "count": null}],
             "distinct_values": 2,
-            "has_more_values": false,
+            "has_more_values_than_listed": false,
         })
     );
 

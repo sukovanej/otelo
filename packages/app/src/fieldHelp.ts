@@ -43,10 +43,11 @@ export function formatTypeLine(field: FieldBody, signal: Signal): string {
 }
 
 export function formatValuesTitle(field: FieldBody): string {
-  const allListed = field.values.length === field.distinct_values && !field.has_more_values;
+  const allListed =
+    field.values.length === field.distinct_values && !field.has_more_values_than_listed;
   if (allListed) return formatCount(field.distinct_values, VALUE_NOUN);
   const known = field.distinct_values.toLocaleString();
-  return `Most common of ${known}${field.has_more_values ? "+" : ""} values`;
+  return `Most common of ${known}${field.has_more_values_than_listed ? "+" : ""} values`;
 }
 
 function formatCount(count: number, noun: Noun): string {

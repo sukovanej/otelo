@@ -19,7 +19,7 @@ are strings in the Rust sources of that crate.
 - A column that holds an instant ends in `_at`: `logged_at`, `started_at`, `start_at`.
   Never `ts` or `time`.
 - A quantity says its unit: `duration_ns`.
-- A flag says what is true when it is 1: `has_more_values`, not `many_values`.
+- A flag says what is true when it is 1: `has_more_values_than_listed`, not `many_values`.
 - A foreign key is the singular of its table and `_id`: `resource_id`, `series_id`.
 - An index is its table and its columns: `logs_logged_at`, `spans_trace_id`. The index of
   an attribute is `<table>_attribute_<hash>`.
