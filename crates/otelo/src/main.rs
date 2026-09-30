@@ -30,8 +30,6 @@ enum Command {
     Service(cli::ServiceArgs),
     /// Print the calls one service makes, by database, host, or other target, and by operation
     Calls(cli::CallsArgs),
-    /// Run a read-only SQL query over the telemetry
-    Sql(cli::SqlArgs),
     /// List the attributes a query can read, with their types
     Attributes(cli::AttributesArgs),
     /// Suggest what can go at the cursor of a query
@@ -54,7 +52,6 @@ fn main() -> anyhow::Result<()> {
         Command::Services(args) => cli::print_services(&args),
         Command::Service(args) => cli::print_service(&args),
         Command::Calls(args) => cli::print_calls(&args),
-        Command::Sql(args) => cli::run_sql(&args),
         Command::Attributes(args) => cli::print_attributes(&args),
         Command::Complete(args) => cli::print_completions(&args),
         Command::Index(args) => cli::change_and_print_indexes(&args),

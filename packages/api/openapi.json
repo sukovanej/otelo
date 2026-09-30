@@ -1012,44 +1012,6 @@
         }
       }
     },
-    "/api/sql": {
-      "post": {
-        "summary": "Runs a read-only SQL query over the day files of the range.",
-        "operationId": "run_sql",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SqlRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SqlResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/traces": {
       "get": {
         "summary": "Traces with a span that the query keeps, by their root span, newest first.",
@@ -2604,91 +2566,6 @@
             "description": "The attributes the query compares that have no index."
           }
         }
-      },
-      "SqlRequest": {
-        "type": "object",
-        "description": "A read-only SQL query.",
-        "required": [
-          "sql"
-        ],
-        "properties": {
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "The most rows to return.",
-            "minimum": 0
-          },
-          "since": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The start of the range, which chooses the day files: a duration before\nnow, such as `1h`, or an RFC 3339 timestamp. One hour before `until`\nwhen missing."
-          },
-          "sql": {
-            "type": "string",
-            "description": "One `SELECT`. It reads the views `resources`, `logs`, `spans`,\n`series`, `points`, `attribute_keys`, and `attribute_values`, which\njoin the day files with a `day` column in front, or the tables of one\nday as `\"2026-09-28\".logs`."
-          },
-          "until": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The end of the range, in the form of `since`. Now when missing."
-          }
-        }
-      },
-      "SqlResult": {
-        "type": "object",
-        "required": [
-          "columns",
-          "rows",
-          "truncated"
-        ],
-        "properties": {
-          "columns": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/SqlValue"
-              }
-            },
-            "description": "Each row has one value per column."
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "The query returned more rows than the limit let through."
-          }
-        }
-      },
-      "SqlValue": {
-        "oneOf": [
-          {
-            "type": "null",
-            "default": null
-          },
-          {
-            "type": "integer",
-            "format": "int64"
-          },
-          {
-            "type": "number",
-            "format": "double"
-          },
-          {
-            "type": "string"
-          }
-        ],
-        "description": "A value of a SQLite column. A blob is its hex digits, as text."
       },
       "SuggestionBody": {
         "type": "object",

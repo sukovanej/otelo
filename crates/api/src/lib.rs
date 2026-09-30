@@ -5,7 +5,6 @@ mod logs;
 mod metrics;
 mod params;
 mod services;
-mod sql;
 mod time;
 mod traces;
 
@@ -35,7 +34,6 @@ pub use catalog::{
 };
 pub use error::ErrorBody;
 pub use indexes::{IndexBody, IndexList, IndexedSignalName};
-pub use sql::SqlRequest;
 pub use time::{convert_to_unix_nanos, parse_duration, parse_time};
 
 pub(crate) const MAX_ROW_LIMIT: usize = 10_000;
@@ -75,7 +73,6 @@ fn build_query_routes() -> OpenApiRouter<Api> {
         .routes(routes!(services::get_operation))
         .routes(routes!(services::list_calls))
         .routes(routes!(services::get_call))
-        .routes(routes!(sql::run_sql))
         .routes(routes!(catalog::list_attribute_keys))
         .routes(routes!(catalog::complete_query))
         .routes(routes!(indexes::list_indexes))

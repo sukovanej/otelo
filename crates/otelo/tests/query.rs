@@ -113,7 +113,6 @@ fn check_the_spec_lists_every_path(addr: &str) {
         "/api/services/{name}/operation",
         "/api/services/{name}/calls",
         "/api/services/{name}/call",
-        "/api/sql",
         "/api/attributes",
         "/api/complete",
         "/api/indexes",
@@ -182,9 +181,6 @@ fn the_cli_reads_what_the_api_serves() {
         .unwrap();
     assert!(child.starts_with("└─ "), "{tree}");
     assert!(child.contains("ERROR"), "{tree}");
-
-    let (sql, _) = run_otelo_and_parse_json(&addr, &["sql", "SELECT count(*) AS n FROM spans"]);
-    assert_eq!(sql["rows"], json!([[2]]));
 
     let (metrics, _) = run_otelo_and_parse_json(&addr, &["metrics", "--since", "2d"]);
     assert!(metrics["series"].is_array());
@@ -308,12 +304,19 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     assert_eq!(is_user_id_indexed(), true);
 
     // The writer builds the index within a second or so.
-    let today = otelo_storage_sqlite::Day::today();
-    let sql =
-        format!("SELECT name FROM \"{today}\".sqlite_master WHERE name GLOB 'logs_attribute_*'");
-    let count_attribute_indexes = || {
-        let (rows, _) = run_otelo_and_parse_json(&addr, &["sql", &sql]);
-        rows["rows"].as_array().unwrap().len()
+    let day_file_path = dir
+        .path()
+        .join("telemetry")
+        .join(otelo_storage_sqlite::Day::today().file_name());
+    let count_attribute_indexes = || -> i64 {
+        rusqlite::Connection::open(&day_file_path)
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name GLOB 'logs_attribute_*'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while count_attribute_indexes() == 0 && std::time::Instant::now() < deadline {
@@ -366,9 +369,6 @@ fn a_bad_request_prints_the_reason() {
     let output = run_otelo(&addr, &["logs", "level = loud"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("not a severity"), "{stderr}");
-
-    let output = run_otelo(&addr, &["sql", "DELETE FROM logs"]);
-    assert!(!output.status.success());
 
     let output = run_otelo(&addr, &["trace", TRACE_ID_HEX]);
     let stderr = String::from_utf8(output.stderr).unwrap();
