@@ -512,7 +512,7 @@ export interface components {
              * @description Whether the field has more distinct values than the daemon keeps, so
              *     `distinct_values` counts only some of them.
              */
-            has_more_values: boolean;
+            has_more_values_than_listed: boolean;
             /** @description The field as a query writes it. */
             name: string;
             /**

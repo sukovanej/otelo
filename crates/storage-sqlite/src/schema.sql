@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS attribute_keys (
   -- How many records have the key.
   count INTEGER NOT NULL,
   -- 1 once the key has more distinct values than attribute_values keeps.
-  has_more_values INTEGER NOT NULL DEFAULT 0,
+  has_more_values_than_listed INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (key_group, key)
 ) WITHOUT ROWID;
 
