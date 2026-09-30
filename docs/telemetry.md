@@ -81,7 +81,7 @@ erDiagram
   points {
     int series_id PK, FK
     int recorded_at PK "unix nanos"
-    real value "the sum of a histogram point"
+    real value "of a histogram point, its sum"
     text histogram "JSON buckets, null for the other kinds"
   }
   attribute_keys {
