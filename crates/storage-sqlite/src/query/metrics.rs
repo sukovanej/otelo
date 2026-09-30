@@ -10,11 +10,11 @@ use otelo_storage::query::{
 };
 use otelo_storage::{
     HistogramPoint, MetricKind, NumberPoint, SeriesPoint, SeriesSteps, StepSummary,
-    SummarizedSeries, group_series,
+    SummarizedSeries, TimeRange, group_series,
 };
 
 use super::compile::{TableAliases, compile_query};
-use super::{ROLLUP_SCHEMA_NAME, WhereClause, truncate_to_limit};
+use super::{ROLLUP_SCHEMA_NAME, WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
 use crate::rollup::{RollupTable, read_summary, summary_columns_of};
 
@@ -57,6 +57,7 @@ impl SeriesKey {
 }
 
 fn group_summarized_series(
+    range: TimeRange,
     filter: &MetricFilter,
     step_ns: i64,
     resolution: Resolution,
@@ -68,6 +69,8 @@ fn group_summarized_series(
     let has_more_groups_than_limit = truncate_to_limit(&mut groups, limit);
     MetricSeries {
         name: filter.name.clone(),
+        start_at: timestamp_from_nanos(range.start_at()),
+        end_at: timestamp_from_nanos(range.end_at()),
         step_ns,
         resolution,
         groups,
@@ -305,6 +308,7 @@ fn read_buckets_of_raw_points(
         })
         .collect::<anyhow::Result<_>>()?;
     Ok(group_summarized_series(
+        reader.range(),
         filter,
         step_ns,
         Resolution::Raw,
@@ -388,6 +392,7 @@ fn read_buckets_of_summaries(
         .map(|(series_key, summaries_by_step)| series_key.into_summarized_series(summaries_by_step))
         .collect::<anyhow::Result<_>>()?;
     Ok(group_summarized_series(
+        reader.range(),
         filter,
         step_ns,
         filter.resolution,

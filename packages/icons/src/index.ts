@@ -8,6 +8,7 @@ export { default as GlobeIcon } from "./GlobeIcon";
 export { default as LanguageIcon, toLanguageName } from "./LanguageIcon";
 export { default as LogoIcon } from "./LogoIcon";
 export { default as LogsIcon } from "./LogsIcon";
+export { default as MetricsIcon } from "./MetricsIcon";
 export { default as ServicesIcon } from "./ServicesIcon";
 export { default as SpanIcon } from "./SpanIcon";
 export { default as TracesIcon } from "./TracesIcon";

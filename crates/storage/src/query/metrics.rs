@@ -172,6 +172,11 @@ pub struct MetricFilter {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct MetricSeries {
     pub name: String,
+    /// The range, after the retention capped it.
+    #[schema(value_type = String, format = DateTime)]
+    pub start_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub end_at: Timestamp,
     /// The length of a bucket. A query of the summaries by the minute or by
     /// the hour rounds the step up to whole minutes or hours.
     pub step_ns: i64,

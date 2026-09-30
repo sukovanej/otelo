@@ -17,8 +17,8 @@ export default function Panel(props: PanelProps) {
       style={{ "--viz-surface": "var(--color-panel)" }}
     >
       <Show when={props.title || props.actions}>
-        <header class="flex min-h-10 items-center gap-3 px-4 pt-3 pb-1">
-          <div class="min-w-0 flex-1">
+        <header class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-1">
+          <div class="min-w-0 flex-1 basis-48">
             <Show when={props.title}>
               <h2 class="m-0 truncate text-sm font-semibold">{props.title}</h2>
             </Show>
@@ -27,7 +27,7 @@ export default function Panel(props: PanelProps) {
             </Show>
           </div>
           <Show when={props.actions}>
-            <div class="flex shrink-0 items-center gap-3 text-xs">{props.actions}</div>
+            <div class="flex max-w-full min-w-0 items-center gap-3 text-xs">{props.actions}</div>
           </Show>
         </header>
       </Show>

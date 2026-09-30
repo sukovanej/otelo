@@ -44,13 +44,15 @@ export function useRange(): RangeState {
   };
 }
 
+type LiveRange = Pick<RangeState, "since" | "until" | "live">;
+
 interface RangeBounds {
   readonly since: string;
   readonly until: string;
 }
 
 export function createRangeFetch<K, T>(
-  range: RangeState,
+  range: LiveRange,
   key: Accessor<K>,
   fetcher: (key: K & RangeBounds, signal: AbortSignal) => Promise<T>,
 ): FetchState<T> {

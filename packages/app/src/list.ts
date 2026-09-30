@@ -10,7 +10,7 @@ export const LIVE_RELOAD_MS = 5_000;
 
 export const DEFAULT_SINCE = "1h";
 
-const API_MAX_ROWS = 10_000;
+export const API_MAX_ROWS = 10_000;
 
 export interface ListResult<V extends string> {
   readonly view: V;
@@ -38,7 +38,6 @@ export interface ListState<V extends string, R extends ListResult<V>> {
 
 interface ListBody {
   readonly truncated: boolean;
-  readonly unindexed: ReadonlyArray<string>;
 }
 
 interface ListKey<V extends string> extends ListQuery {
@@ -132,7 +131,7 @@ export function createListState<V extends string, R extends ListResult<V>>(
 
 interface PageKeys {
   readonly queryInput?: () => HTMLInputElement | undefined;
-  readonly onEscape: () => void;
+  readonly onEscape?: () => void;
 }
 
 export function usePageKeys(keys: PageKeys): void {
@@ -143,14 +142,10 @@ export function usePageKeys(keys: PageKeys): void {
     if (e.key === "/" && keys.queryInput) {
       e.preventDefault();
       keys.queryInput()?.focus();
-    } else if (e.key === "Escape") {
+    } else if (e.key === "Escape" && keys.onEscape) {
       keys.onEscape();
     }
   };
   document.addEventListener("keydown", onKeyDown);
   onCleanup(() => document.removeEventListener("keydown", onKeyDown));
-}
-
-export function formatCount(count: number, noun: string): string {
-  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 }

@@ -11,9 +11,13 @@ export type LogGroup = Schemas["LogGroup"];
 export type LogGroups = Schemas["LogGroups"];
 export type LogLine = Schemas["LogLine"];
 export type Logs = Schemas["Logs"];
+export type MetricList = Schemas["MetricList"];
+export type MetricSeries = Schemas["MetricSeries"];
 export type Operation = Schemas["Operation"];
 export type OperationDetail = Schemas["OperationDetail"];
 export type RequestBucket = Schemas["RequestBucket"];
+export type SeriesGroup = Schemas["SeriesGroup"];
+export type SeriesInfo = Schemas["SeriesInfo"];
 export type Service = Schemas["Service"];
 export type ServiceSummary = Schemas["ServiceSummary"];
 export type Signal = Schemas["Signal"];
@@ -78,6 +82,20 @@ export const getTrace = (
   requestJson<OkBody<"/api/traces/{trace_id}", "get">>(
     "GET",
     `/api/traces/${encodeURIComponent(id)}${toQueryString(query)}`,
+    signal,
+  );
+
+export const getMetrics = (query: GetQuery<"/api/metrics">, signal?: AbortSignal) =>
+  requestJson<OkBody<"/api/metrics", "get">>("GET", `/api/metrics${toQueryString(query)}`, signal);
+
+export const getMetricSeries = (
+  name: string,
+  query: GetQuery<"/api/metrics/{name}">,
+  signal?: AbortSignal,
+) =>
+  requestJson<OkBody<"/api/metrics/{name}", "get">>(
+    "GET",
+    `/api/metrics/${encodeURIComponent(name)}${toQueryString(query)}`,
     signal,
   );
 

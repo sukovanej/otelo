@@ -5,8 +5,8 @@ import { Button, Callout, EmptyMessage, Tabs } from "@otelo/ui";
 import { Panel, Value } from "@otelo/viz";
 
 import { pageContent } from "../../classes";
+import { formatCount } from "../../count";
 import { createFetch } from "../../fetch";
-import { formatCount } from "../../list";
 import LinePanel from "../../logs/LinePanel";
 import LogLines, { toLineKey } from "../../logs/LogLines";
 import PageBar from "../../PageBar";
