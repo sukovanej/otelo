@@ -20,7 +20,6 @@ export type Distribution = Schemas["Distribution"];
 export type ErrorBody = Schemas["ErrorBody"];
 export type FieldBody = Schemas["FieldBody"];
 export type FieldSource = Schemas["FieldSource"];
-export type FieldValueBody = Schemas["FieldValueBody"];
 export type IndexBody = Schemas["IndexBody"];
 export type IndexList = Schemas["IndexList"];
 export type Latency = Schemas["Latency"];

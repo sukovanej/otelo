@@ -1,36 +1,54 @@
-// The words of the card that describes a field of a query, from what
-// `/api/complete` says of the field.
+import { complete, type FieldBody, type FieldSource, type Signal } from "@otelo/api";
+import type { QueryToken } from "@otelo/ui";
 
-import type { FieldBody, FieldSource, Signal } from "@otelo/api";
-
-export const SOURCES: Record<FieldSource, string> = {
+export const SOURCE_LABELS: Record<FieldSource, string> = {
   builtin: "built-in",
   attribute: "attribute",
   resource: "resource attribute",
 };
 
-/** One record of each signal, and several. */
-const RECORDS: Record<Signal, [string, string]> = {
-  logs: ["log line", "log lines"],
-  spans: ["span", "spans"],
-  metrics: ["series", "series"],
+const RECORD_NOUNS: Record<Signal, Noun> = {
+  logs: { one: "log line", several: "log lines" },
+  spans: { one: "span", several: "spans" },
+  metrics: { one: "series", several: "series" },
 };
 
-const counted = (n: number, [one, several]: [string, string]) =>
-  `${n.toLocaleString()} ${n === 1 ? one : several}`;
+const RESOURCE_NOUN: Noun = { one: "resource", several: "resources" };
 
-/** The type of the field, and how many records or resources have it. */
-export function typeLine(field: FieldBody, signal: Signal): string {
-  if (field.count === null) return field.type;
-  const nouns: [string, string] =
-    field.source === "resource" ? ["resource", "resources"] : RECORDS[signal];
-  return `${field.type} · ${counted(field.count, nouns)}`;
+const VALUE_NOUN: Noun = { one: "value", several: "values" };
+
+interface Noun {
+  readonly one: string;
+  readonly several: string;
 }
 
-/** What the listed values are: all of them, or the most common of more. */
-export function valuesTitle(field: FieldBody): string {
-  const all = field.values.length === field.distinct_values && !field.many_values;
-  if (all) return counted(field.distinct_values, ["value", "values"]);
+export async function describeFieldOfToken(
+  signal: Signal,
+  query: string,
+  token: QueryToken,
+  abort: AbortSignal,
+): Promise<FieldBody | undefined> {
+  if (token.kind !== "field" && token.kind !== "undecided") return undefined;
+  // The field alone, so the rest of the query cannot hide it.
+  const name = query.slice(token.start, token.end);
+  const endInChars = Array.from(name).length;
+  const { field } = await complete(signal, name, endInChars, abort);
+  return field ?? undefined;
+}
+
+export function formatTypeLine(field: FieldBody, signal: Signal): string {
+  if (field.count === null) return field.type;
+  const noun = field.source === "resource" ? RESOURCE_NOUN : RECORD_NOUNS[signal];
+  return `${field.type} · ${formatCount(field.count, noun)}`;
+}
+
+export function formatValuesTitle(field: FieldBody): string {
+  const allListed = field.values.length === field.distinct_values && !field.many_values;
+  if (allListed) return formatCount(field.distinct_values, VALUE_NOUN);
   const known = field.distinct_values.toLocaleString();
   return `Most common of ${known}${field.many_values ? "+" : ""} values`;
+}
+
+function formatCount(count: number, noun: Noun): string {
+  return `${count.toLocaleString()} ${count === 1 ? noun.one : noun.several}`;
 }
