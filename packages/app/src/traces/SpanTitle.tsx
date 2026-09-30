@@ -7,13 +7,17 @@ import { Badge, Level, type Tone, Tooltip } from "@otelo/ui";
 import {
   databaseId,
   type DbSpan,
-  dbTitle,
   type HttpSpan,
+  isSql,
   nameRest,
   routeParts,
   type SpanMeaning,
   spanMeaning,
 } from "../semantics";
+import SqlCode, { SqlStart } from "../SqlCode";
+
+/** How many lines of a query the tip of a row shows. */
+const TIP_LINES = 24;
 
 const methodTones: Record<string, Tone> = {
   GET: "info",
@@ -73,16 +77,26 @@ function Http(props: { meaning: HttpSpan; rest: string }) {
 function Db(props: { meaning: DbSpan; name: string }) {
   const id = () => databaseId(props.meaning.system);
   const system = () => databaseName(id());
-  const title = () => dbTitle(props.meaning, props.name);
+  const shown = () => props.meaning.query ?? props.name;
   return (
     <>
       <Tooltip content={`Database call to ${system()}`} class="self-center">
         <DatabaseSystemIcon system={id()} title={`Database call to ${system()}`} />
       </Tooltip>
-      <Show when={title().keyword}>{(keyword) => <Badge tone="database">{keyword()}</Badge>}</Show>
-      <span class="truncate" title={title().text}>
-        {title().rest}
-      </span>
+      <Show
+        when={isSql(props.meaning.system)}
+        fallback={
+          <span class="truncate" title={shown()}>
+            {shown()}
+          </span>
+        }
+      >
+        <Tooltip rich content={<SqlCode text={shown()} max={TIP_LINES} />} class="min-w-0">
+          <span class="truncate">
+            <SqlStart text={shown()} />
+          </span>
+        </Tooltip>
+      </Show>
     </>
   );
 }
@@ -91,9 +105,11 @@ function Db(props: { meaning: DbSpan; name: string }) {
  * The name of a span, told by what it is. An HTTP request shows its method,
  * route, and status, each on a badge, and the words of its name that the
  * badges say are left out. A database call shows the icon of its system and
- * its query as the span has it, or its name without a query, with the first
- * word on a badge, as `dbTitle` splits it. Any other span shows its name. Each starts with an icon of what it is, so the names of a
- * list line up. A failed span starts with ERROR.
+ * its query as the span has it, or its name without a query. A call to a
+ * system that speaks SQL shows it in the colors of SQL, and laid out in
+ * full in a tip while the pointer is on it. Any other span shows its name.
+ * Each starts with an icon of what it is, so the names of a list line up. A
+ * failed span starts with ERROR.
  */
 export default function SpanTitle(props: {
   name: string;
@@ -116,8 +132,13 @@ export default function SpanTitle(props: {
     const m = meaning();
     return m.type === "db" ? m : undefined;
   };
+  // The tip of a SQL query takes the place of the one of the browser.
+  const title = () => {
+    const call = db();
+    return call && isSql(call.system) ? undefined : props.name;
+  };
   return (
-    <span class="flex min-w-0 items-baseline gap-1.5 overflow-hidden" title={props.name}>
+    <span class="flex min-w-0 items-baseline gap-1.5 overflow-hidden" title={title()}>
       <Show when={props.error}>
         <Level level="ERROR" />
       </Show>

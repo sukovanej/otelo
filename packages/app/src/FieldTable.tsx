@@ -5,6 +5,8 @@ import { Button } from "@otelo/ui";
 
 import { heading } from "./classes";
 import { attributeField, literal, quote, resourceField } from "./query";
+import { isSqlQuery } from "./semantics";
+import SqlCode from "./SqlCode";
 
 export interface Field {
   /** The name a query uses for the field, or `undefined` when it has none. */
@@ -13,6 +15,8 @@ export interface Field {
   value: AttributeValue;
   /** The literal a comparison uses, or `undefined` when none matches. */
   literal: string | undefined;
+  /** Whether the value is a SQL query, which shows laid out in its colors. */
+  sql?: boolean;
 }
 
 export interface Section {
@@ -42,6 +46,7 @@ export const attributes = (record: Attributes): Field[] =>
     label: key,
     value,
     literal: literal(value),
+    sql: isSqlQuery(record, key),
   }));
 
 /** The attributes of a resource, by key. */
@@ -72,7 +77,9 @@ export function Fields(props: { fields: Field[]; noun: string; onFilter: (term: 
                 {field.label}
               </th>
               <td class="py-px pr-2 align-top whitespace-pre-wrap wrap-anywhere">
-                {show(field.value)}
+                <Show when={field.sql} fallback={show(field.value)}>
+                  <SqlCode text={show(field.value)} />
+                </Show>
               </td>
               <td class="w-[1%] py-px align-top whitespace-nowrap">
                 <Show when={field.name && field.literal}>

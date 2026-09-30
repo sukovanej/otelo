@@ -43,6 +43,9 @@ function path(url: string | undefined): string | undefined {
   }
 }
 
+/** The keys of the query of a database call, the older one last. */
+const QUERY_KEYS = ["db.query.text", "db.statement"];
+
 /** What a span with these attributes is. */
 export function spanMeaning(attributes: Attributes): SpanMeaning {
   const method = text(attributes, "http.request.method", "http.method");
@@ -60,7 +63,7 @@ export function spanMeaning(attributes: Attributes): SpanMeaning {
   }
   const system = text(attributes, "db.system.name", "db.system");
   if (system !== undefined) {
-    return { type: "db", system, query: text(attributes, "db.query.text", "db.statement") };
+    return { type: "db", system, query: text(attributes, ...QUERY_KEYS) };
   }
   return { type: "other" };
 }
@@ -89,26 +92,27 @@ export function routeParts(route: string): RoutePart[] {
   return parts;
 }
 
-/** What a database span shows, split for its badge. */
-export interface DbTitle {
-  /** The first word of the text, such as `SELECT`, when it is letters
-   * alone. */
-  keyword: string | undefined;
-  /** The text after the keyword, or all of it without one. */
-  rest: string;
-  /** The query as the span has it, or its name without a query. */
-  text: string;
-}
+/** The database systems of the semantic conventions that speak SQL, by
+ * their values of `db.system.name` and then by the ones of the older
+ * `db.system` that differ. */
+const SQL_SYSTEMS = new Set(
+  `actian.ingres aws.redshift clickhouse cockroachdb derby firebirdsql gcp.spanner h2database
+  hive hsqldb ibm.db2 ibm.informix ibm.netezza instantdb intersystems.cache mariadb
+  microsoft.sql_server mysql oracle.db other_sql postgresql sap.hana sap.maxdb sqlite teradata
+  trino
+  cache cloudscape db2 edb firebird firstsql h2 hanadb informix ingres interbase
+  intersystems_cache maxdb mssql mssqlcompact netezza oracle pervasive pointbase progress redshift
+  spanner sybase vertica`.split(/\s+/),
+);
 
-/** What a database span with the name `name` shows: its query as the span
- * has it, or its name without a query, with the first word on a badge when
- * it is letters alone, such as `SELECT` in `SELECT * FROM users`. */
-export function dbTitle(meaning: DbSpan, name: string): DbTitle {
-  const shown = meaning.query ?? name;
-  const first = /^\s*([A-Za-z]+)(?:\s+|$)/.exec(shown);
-  return first
-    ? { keyword: first[1], rest: shown.slice(first[0].length), text: shown }
-    : { keyword: undefined, rest: shown, text: shown };
+/** Whether the queries of a database system are SQL. */
+export const isSql = (system: string) => SQL_SYSTEMS.has(system);
+
+/** Whether the attribute `key` of a record with these attributes holds a
+ * SQL query: the query of a call to a system that speaks SQL. */
+export function isSqlQuery(attributes: Attributes, key: string): boolean {
+  const system = text(attributes, "db.system.name", "db.system");
+  return system !== undefined && isSql(system) && QUERY_KEYS.includes(key);
 }
 
 /** The part of the name of an HTTP span that its badges do not already
