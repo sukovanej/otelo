@@ -154,8 +154,10 @@ fn reads_back_each_kind_across_a_day_boundary() {
     let connection = reader.connection();
     let (yesterday_name, today_name) = (yesterday.to_string(), today.to_string());
 
-    let bodies: Vec<(String, String)> =
-        query_pairs(connection, "SELECT day, body FROM logs ORDER BY ts, body");
+    let bodies: Vec<(String, String)> = query_pairs(
+        connection,
+        "SELECT day, body FROM logs ORDER BY logged_at, body",
+    );
     assert_eq!(
         bodies,
         [
@@ -164,8 +166,10 @@ fn reads_back_each_kind_across_a_day_boundary() {
             (today_name.clone(), "user 8 signed in".into()),
         ]
     );
-    let names: Vec<(String, String)> =
-        query_pairs(connection, "SELECT day, name FROM spans ORDER BY start_ts");
+    let names: Vec<(String, String)> = query_pairs(
+        connection,
+        "SELECT day, name FROM spans ORDER BY started_at",
+    );
     assert_eq!(
         names,
         [
@@ -175,9 +179,11 @@ fn reads_back_each_kind_across_a_day_boundary() {
     );
     let values: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT p.day, p.value FROM points p
-         JOIN series s ON s.day = p.day AND s.id = p.series_id
-         WHERE s.name = 'process.memory.usage' ORDER BY p.ts",
+        "SELECT point.day, point.value
+         FROM points point
+         JOIN series ON series.day = point.day AND series.id = point.series_id
+         WHERE series.name = 'process.memory.usage'
+         ORDER BY point.recorded_at",
     );
     assert_eq!(
         values,
@@ -219,10 +225,13 @@ fn a_full_channel_drops_the_batch_and_the_writer_reports_it() {
     assert_eq!(bodies, [(Day::today().to_string(), "kept".into())]);
     let dropped: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT s.unit, p.value FROM points p
-         JOIN series s ON s.day = p.day AND s.id = p.series_id
-         JOIN resources r ON r.day = s.day AND r.id = s.resource_id
-         WHERE r.service = 'otelo' AND s.name = 'otelo.telemetry.dropped_batches'",
+        "SELECT series.unit, point.value
+         FROM points point
+         JOIN series ON series.day = point.day AND series.id = point.series_id
+         JOIN resources resource
+           ON resource.day = series.day AND resource.id = series.resource_id
+         WHERE resource.service = 'otelo'
+           AND series.name = 'otelo.telemetry.dropped_batches'",
     );
     assert_eq!(dropped, [("{batch}".into(), 1.0)]);
 }
@@ -366,9 +375,10 @@ fn stores_the_kind_and_the_temporality_of_each_series() {
     );
     let counts_and_sums: Vec<(String, f64)> = query_pairs(
         reader.connection(),
-        "SELECT p.histogram ->> '$.counts', p.value FROM points p
-         JOIN series s ON s.day = p.day AND s.id = p.series_id
-         WHERE s.name = 'request.duration'",
+        "SELECT point.histogram ->> '$.counts', point.value
+         FROM points point
+         JOIN series ON series.day = point.day AND series.id = point.series_id
+         WHERE series.name = 'request.duration'",
     );
     assert_eq!(counts_and_sums, [("[2,1]".into(), 2.5)]);
 }
@@ -390,9 +400,11 @@ fn a_batch_written_twice_leaves_each_point_once() {
     let reader = open_reader_of_today(directory.path());
     let names_and_values: Vec<(String, f64)> = query_pairs(
         reader.connection(),
-        "SELECT s.name, p.value FROM points p
-         JOIN series s ON s.day = p.day AND s.id = p.series_id
-         WHERE s.name = 'process.memory.usage' ORDER BY p.ts",
+        "SELECT series.name, point.value
+         FROM points point
+         JOIN series ON series.day = point.day AND series.id = point.series_id
+         WHERE series.name = 'process.memory.usage'
+         ORDER BY point.recorded_at",
     );
     let name = || String::from("process.memory.usage");
     assert_eq!(names_and_values, [(name(), 150.0), (name(), 200.0)]);
@@ -425,8 +437,9 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     );
     let reader = open_reader_of_today(directory.path());
     let connection = reader.connection();
-    let join_cart_adds_series = "JOIN series s ON s.day = p.day AND s.id = p.series_id
-                                 WHERE s.name = 'cart.adds'";
+    let join_cart_adds_series =
+        "JOIN series ON series.day = point.day AND series.id = point.series_id
+         WHERE series.name = 'cart.adds'";
     assert_eq!(
         query_integer(
             connection,
@@ -438,7 +451,7 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     assert_eq!(
         query_integer(
             connection,
-            &format!("SELECT count(*) FROM points p {join_cart_adds_series}")
+            &format!("SELECT count(*) FROM points point {join_cart_adds_series}")
         ),
         1001
     );
@@ -451,9 +464,10 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     );
     let rejected_points_counter: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT s.kind || ' ' || s.unit, p.value FROM points p
-         JOIN series s ON s.day = p.day AND s.id = p.series_id
-         WHERE s.name = 'otelo.telemetry.rejected_points'",
+        "SELECT series.kind || ' ' || series.unit, point.value
+         FROM points point
+         JOIN series ON series.day = point.day AND series.id = point.series_id
+         WHERE series.name = 'otelo.telemetry.rejected_points'",
     );
     assert_eq!(rejected_points_counter, [("counter {point}".into(), 2.0)]);
 }
@@ -493,15 +507,16 @@ fn sets_aside_a_day_file_of_another_schema() {
     let day_file_connection = Connection::open(&day_file_path).unwrap();
     assert_eq!(
         query_integer(&day_file_connection, "PRAGMA user_version"),
-        1
+        2
     );
     let reader = open_reader_of_today(directory.path());
     assert_eq!(
         query_integer(
             reader.connection(),
-            "SELECT count(*) FROM points p
-             JOIN series s ON s.day = p.day AND s.id = p.series_id
-             WHERE s.name = 'process.memory.usage' AND p.value = 100.0"
+            "SELECT count(*)
+             FROM points point
+             JOIN series ON series.day = point.day AND series.id = point.series_id
+             WHERE series.name = 'process.memory.usage' AND point.value = 100.0"
         ),
         1
     );

@@ -1,8 +1,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 
--- The resources and the series have the shape of a day file, so a query reads
--- the rollups as it reads the raw points.
+-- resources and series are the tables of a day file, so one query reads both files.
 CREATE TABLE IF NOT EXISTS resources (
   id INTEGER PRIMARY KEY,
   hash INTEGER NOT NULL UNIQUE,
@@ -10,8 +9,6 @@ CREATE TABLE IF NOT EXISTS resources (
   attributes TEXT NOT NULL
 );
 
--- A rolled up counter or histogram holds what each step added, so its
--- temporality is delta.
 CREATE TABLE IF NOT EXISTS series (
   id INTEGER PRIMARY KEY,
   hash INTEGER NOT NULL UNIQUE,
@@ -24,13 +21,9 @@ CREATE TABLE IF NOT EXISTS series (
 );
 CREATE INDEX IF NOT EXISTS series_name ON series (name);
 
--- One row per series and minute that has points. count, min, max, sum, and
--- last sum up the values of the points. increase and seconds are how much a
--- counter grew and over what time. histogram is the merged buckets of a
--- histogram as JSON, in the shape of points.histogram.
 CREATE TABLE IF NOT EXISTS minutes (
   series_id INTEGER NOT NULL REFERENCES series (id),
-  start INTEGER NOT NULL,
+  start_at INTEGER NOT NULL,
   count INTEGER NOT NULL,
   min REAL NOT NULL,
   max REAL NOT NULL,
@@ -39,12 +32,12 @@ CREATE TABLE IF NOT EXISTS minutes (
   increase REAL,
   seconds REAL,
   histogram TEXT,
-  PRIMARY KEY (series_id, start)
+  PRIMARY KEY (series_id, start_at)
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS hours (
   series_id INTEGER NOT NULL REFERENCES series (id),
-  start INTEGER NOT NULL,
+  start_at INTEGER NOT NULL,
   count INTEGER NOT NULL,
   min REAL NOT NULL,
   max REAL NOT NULL,
@@ -53,10 +46,9 @@ CREATE TABLE IF NOT EXISTS hours (
   increase REAL,
   seconds REAL,
   histogram TEXT,
-  PRIMARY KEY (series_id, start)
+  PRIMARY KEY (series_id, start_at)
 ) WITHOUT ROWID;
 
--- Every minute, or hour, before rolled_until is rolled up.
 CREATE TABLE IF NOT EXISTS cursors (
   rollup TEXT PRIMARY KEY,
   rolled_until INTEGER NOT NULL

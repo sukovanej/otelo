@@ -13,15 +13,23 @@ use rusqlite::types::Value;
 use super::services::{NewestRequest, OperationTally, RequestTally, SpanLocation};
 use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
+use crate::indexes::attribute_json_path;
+
+fn span_attribute(key: &str) -> String {
+    format!(
+        "json_extract(span.attributes, {})",
+        attribute_json_path(key)
+    )
+}
 
 // An in-process database such as SQLite may put its spans on the internal kind, so a database system marks a call too.
 fn call_span_condition() -> String {
     format!(
-        "(s.kind IN ({}, {})
-    OR json_extract(s.attributes, '$.\"db.system.name\"') IS NOT NULL
-    OR json_extract(s.attributes, '$.\"db.system\"') IS NOT NULL)",
+        "(span.kind IN ({}, {}) OR {} IS NOT NULL OR {} IS NOT NULL)",
         SpanKind::Client.number(),
-        SpanKind::Producer.number()
+        SpanKind::Producer.number(),
+        span_attribute("db.system.name"),
+        span_attribute("db.system")
     )
 }
 
@@ -263,28 +271,30 @@ impl Reader {
         only_kind: Option<SpanKind>,
         mut on_call: impl FnMut(CallSpan),
     ) -> anyhow::Result<()> {
-        let mut where_clause = WhereClause::within_reader_range(self, "s.start_ts");
+        let mut where_clause = WhereClause::within_reader_range(self, "span.started_at");
         where_clause.push_condition(call_span_condition());
         where_clause.push_condition_with_param(
-            "r.service = :service",
+            "resource.service = :service",
             ":service",
             service.to_owned(),
         );
         if let Some(kind) = only_kind {
-            where_clause.push_condition_with_param("s.kind = :kind", ":kind", kind.number());
+            where_clause.push_condition_with_param("span.kind = :kind", ":kind", kind.number());
         }
         let attribute_columns = CALL_ATTRIBUTE_KEYS
             .iter()
-            .map(|key| format!("json_extract(s.attributes, '$.\"{key}\"')"))
+            .copied()
+            .map(span_attribute)
             .collect::<Vec<_>>()
             .join(", ");
         self.scan_rows(
             ["", ""],
             |day_schema| {
                 format!(
-                    "SELECT s.name, s.kind, s.start_ts, s.duration_ns, s.status, '{}', s.rowid,
-                            {attribute_columns}
-                     FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
+                    "SELECT span.name, span.kind, span.started_at, span.duration_ns, span.status,
+                            '{}', span.rowid, {attribute_columns}
+                     FROM {day_schema}.spans span
+                     JOIN {day_schema}.resources resource ON resource.id = span.resource_id
                      WHERE {}",
                     day_schema.day,
                     where_clause.sql_for_day(day_schema)

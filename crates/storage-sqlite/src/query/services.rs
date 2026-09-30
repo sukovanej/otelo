@@ -13,7 +13,7 @@ use crate::{Day, Reader};
 
 fn entry_span_condition() -> String {
     format!(
-        "(s.parent_span_id IS NULL OR s.kind IN ({}, {}))",
+        "(span.parent_span_id IS NULL OR span.kind IN ({}, {}))",
         SpanKind::Server.number(),
         SpanKind::Consumer.number()
     )
@@ -291,26 +291,27 @@ impl Reader {
     ) -> anyhow::Result<HashMap<String, ServiceTally>> {
         let mut tallies: HashMap<String, ServiceTally> = HashMap::new();
 
-        let mut where_clause = WhereClause::within_reader_range(self, "s.start_ts");
+        let mut where_clause = WhereClause::within_reader_range(self, "span.started_at");
         where_clause.push_condition(entry_span_condition());
         if let Some(service) = scope.service() {
             where_clause.push_condition_with_param(
-                "r.service = :service",
+                "resource.service = :service",
                 ":service",
                 service.to_owned(),
             );
         }
         if let TallyScope::Operation { name, kind, .. } = scope {
-            where_clause.push_condition_with_param("s.name = :name", ":name", name.to_owned());
-            where_clause.push_condition_with_param("s.kind = :kind", ":kind", kind.number());
+            where_clause.push_condition_with_param("span.name = :name", ":name", name.to_owned());
+            where_clause.push_condition_with_param("span.kind = :kind", ":kind", kind.number());
         }
         self.scan_rows(
             ["", ""],
             |day_schema| {
                 format!(
-                    "SELECT r.service, s.name, s.kind, s.start_ts, s.duration_ns, s.status,
-                            '{}', s.rowid
-                     FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
+                    "SELECT resource.service, span.name, span.kind, span.started_at,
+                            span.duration_ns, span.status, '{}', span.rowid
+                     FROM {day_schema}.spans span
+                     JOIN {day_schema}.resources resource ON resource.id = span.resource_id
                      WHERE {}",
                     day_schema.day,
                     where_clause.sql_for_day(day_schema)
@@ -348,30 +349,41 @@ impl Reader {
         )?;
 
         // No operation has logs.
-        if matches!(scope, TallyScope::Operation { .. }) {
-            return Ok(tallies);
+        if !matches!(scope, TallyScope::Operation { .. }) {
+            self.tally_logs(scope.service(), step_ns, &mut tallies)?;
         }
-        let mut where_clause = WhereClause::within_reader_range(self, "l.ts");
+        Ok(tallies)
+    }
+
+    fn tally_logs(
+        &self,
+        only_service: Option<&str>,
+        step_ns: i64,
+        tallies: &mut HashMap<String, ServiceTally>,
+    ) -> anyhow::Result<()> {
+        let mut where_clause = WhereClause::within_reader_range(self, "log.logged_at");
         where_clause.push_param(":step", step_ns);
-        if let Some(service) = scope.service() {
+        if let Some(service) = only_service {
             where_clause.push_condition_with_param(
-                "r.service = :service",
+                "resource.service = :service",
                 ":service",
                 service.to_owned(),
             );
         }
         self.scan_rows(
             [
-                "SELECT service, start, sum(n), sum(errors) FROM (",
-                ") GROUP BY service, start",
+                "SELECT service, step_start_at, sum(log_count), sum(error_log_count) FROM (",
+                ") GROUP BY service, step_start_at",
             ],
             |day_schema| {
                 format!(
-                    "SELECT r.service, l.ts / :step * :step AS start, count(*) AS n,
-                            sum(l.severity >= {}) AS errors
-                     FROM {day_schema}.logs l JOIN {day_schema}.resources r ON r.id = l.resource_id
+                    "SELECT resource.service, log.logged_at / :step * :step AS step_start_at,
+                            count(*) AS log_count,
+                            sum(log.severity >= {}) AS error_log_count
+                     FROM {day_schema}.logs log
+                     JOIN {day_schema}.resources resource ON resource.id = log.resource_id
                      WHERE {}
-                     GROUP BY 1, 2",
+                     GROUP BY resource.service, step_start_at",
                     Severity::ERROR.number(),
                     where_clause.sql_for_day(day_schema)
                 )
@@ -389,7 +401,7 @@ impl Reader {
                 Ok(ControlFlow::Continue(()))
             },
         )?;
-        Ok(tallies)
+        Ok(())
     }
 
     fn read_resource_attributes(

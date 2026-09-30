@@ -659,7 +659,7 @@ fn an_indexed_attribute_has_an_index_in_every_day_file() {
     let index_names = |day: Day| -> Vec<String> {
         let connection = Connection::open(fixture.directory.path().join(day.file_name())).unwrap();
         connection
-            .prepare("SELECT name FROM sqlite_master WHERE name GLOB 'attr_*'")
+            .prepare("SELECT name FROM sqlite_master WHERE name GLOB 'logs_attribute_*'")
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
@@ -684,7 +684,10 @@ fn an_indexed_attribute_has_an_index_in_every_day_file() {
     let plan = reader
         .explain_query(&parse_query("http.route = x", Signal::Logs).unwrap())
         .unwrap();
-    assert!(!plan.iter().any(|step| step.contains("attr_")), "{plan:?}");
+    assert!(
+        !plan.iter().any(|step| step.contains("_attribute_")),
+        "{plan:?}"
+    );
     assert!(
         reader
             .explain_query(&parse_query("", Signal::Metrics).unwrap())
@@ -889,7 +892,7 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
     );
     let sql_rows = |sql: &str| reader.run_sql(sql, 10).unwrap().rows().to_vec();
     assert_eq!(
-        sql_rows("SELECT many_values FROM attribute_keys WHERE key = 'user.id'"),
+        sql_rows("SELECT has_more_values FROM attribute_keys WHERE key = 'user.id'"),
         [vec![SqlValue::Integer(1)]]
     );
     assert_eq!(

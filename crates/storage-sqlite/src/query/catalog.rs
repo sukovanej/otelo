@@ -35,10 +35,13 @@ impl Reader {
     fn read_catalog_keys(&self, group: KeyGroup) -> anyhow::Result<Vec<KeyInfo>> {
         let mut statement = self.connection().prepare(&format!(
             "SELECT key,
-                    CASE WHEN count(DISTINCT type) > 1 THEN 'mixed' ELSE min(type) END,
-                    sum(count)
-             FROM attribute_keys WHERE signal = ?1
-             GROUP BY key ORDER BY 3 DESC, key LIMIT {MAX_CATALOG_ROWS}"
+                    CASE WHEN count(DISTINCT value_type) > 1 THEN 'mixed' ELSE min(value_type) END,
+                    sum(count) AS record_count
+             FROM attribute_keys
+             WHERE key_group = ?1
+             GROUP BY key
+             ORDER BY record_count DESC, key
+             LIMIT {MAX_CATALOG_ROWS}"
         ))?;
         let rows = statement.query_map([group.name()], |row| {
             Ok(KeyInfo {
@@ -52,8 +55,12 @@ impl Reader {
 
     fn read_catalog_values(&self, group: KeyGroup, key: &str) -> anyhow::Result<FieldValues> {
         let mut statement = self.connection().prepare(&format!(
-            "SELECT value, sum(count) FROM attribute_values WHERE signal = ?1 AND key = ?2
-             GROUP BY value ORDER BY 2 DESC, value LIMIT {MAX_CATALOG_ROWS}"
+            "SELECT value, sum(count) AS record_count
+             FROM attribute_values
+             WHERE key_group = ?1 AND key = ?2
+             GROUP BY value
+             ORDER BY record_count DESC, value
+             LIMIT {MAX_CATALOG_ROWS}"
         ))?;
         let rows = statement.query_map([group.name(), key], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -74,8 +81,9 @@ impl Reader {
             });
         }
         let has_more_values_than_listed = self.connection().query_row(
-            "SELECT coalesce(max(many_values), 0) FROM attribute_keys
-             WHERE signal = ?1 AND key = ?2",
+            "SELECT coalesce(max(has_more_values), 0)
+             FROM attribute_keys
+             WHERE key_group = ?1 AND key = ?2",
             [group.name(), key],
             |row| row.get(0),
         )?;
@@ -88,8 +96,11 @@ impl Reader {
     fn read_column_values(&self, listed_column: ListedColumn) -> anyhow::Result<FieldValues> {
         let (table, column) = (listed_column.table_name(), listed_column.column_name());
         let mut statement = self.connection().prepare(&format!(
-            "SELECT {column}, count(*) FROM {table}
-             GROUP BY {column} ORDER BY 2 DESC, 1 LIMIT {}",
+            "SELECT {column}, count(*) AS row_count
+             FROM {table}
+             GROUP BY {column}
+             ORDER BY row_count DESC, {column}
+             LIMIT {}",
             MAX_CATALOG_ROWS + 1
         ))?;
         let rows = statement.query_map([], |row| {

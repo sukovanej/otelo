@@ -17,17 +17,20 @@ use rusqlite::{Connection, Transaction, params};
 use crate::catalog::{CatalogCache, CatalogDelta, KeyGroup};
 use crate::day::Day;
 use crate::indexes::{Indexes, VersionedAttributes, apply_indexes_to_day_file};
-use crate::rollup::{RollupProgress, Rollups};
+use crate::rollup::{
+    RollupProgress, Rollups, delete_rollup_files_set_aside_before,
+    set_aside_rollup_file_of_another_schema,
+};
 use crate::series::{
     MAX_SERIES_PER_METRIC, ResourceId, SeriesCache, SeriesIdentity, StoredResource, StoredSeries,
     find_or_insert_resource_id, find_or_insert_series_id,
 };
-use crate::stored_schema::{StoredSchema, read_stored_schema};
+use crate::stored_schema::set_aside_file_of_another_schema;
 
 const DAY_FILE_SCHEMA: &str = include_str!("schema.sql");
 
 // A day file of another version keeps tables this code cannot read or write.
-const DAY_FILE_SCHEMA_VERSION: i32 = 1;
+const DAY_FILE_SCHEMA_VERSION: i32 = 2;
 
 const NO_INDEXED_ATTRIBUTES: &BTreeSet<IndexedAttribute> = &BTreeSet::new();
 
@@ -93,8 +96,9 @@ impl Writer {
                 config.directory.display()
             )
         })?;
-        // No reader has a day file open yet, so a file can move.
+        // No reader has a file open yet, so a file can move.
         set_aside_day_files_of_another_schema(&config.directory)?;
+        set_aside_rollup_file_of_another_schema(&config.directory)?;
         let thread = thread::Builder::new()
             .name("telemetry-writer".into())
             .spawn(move || WriterState::new(config).write_batches_until_disconnected(&inbox))
@@ -388,13 +392,22 @@ impl WriterState {
 
     fn apply_retention(&mut self) {
         let today = Day::today();
+        let retention = self.config.metric_retention(today);
         if let Some(rollups) = &mut self.rollups {
-            let retention = self.config.metric_retention(today);
             let deleted = rollups
                 .delete_summaries_before(retention.oldest_minute_at, retention.oldest_hour_at);
             if let Err(error) = deleted {
                 tracing::error!("delete old metric rollups: {error:#}");
             }
+        }
+        match delete_rollup_files_set_aside_before(&self.config.directory, retention.oldest_hour_at)
+        {
+            Ok(deleted_file_names) => {
+                for name in deleted_file_names {
+                    tracing::info!(file = %name, "deleted metric rollups past the retention");
+                }
+            }
+            Err(error) => tracing::error!("delete old metric rollups set aside: {error:#}"),
         }
         let oldest_retained_day = self.config.oldest_retained_day(today);
         // Closing the files of past days frees their memory.
@@ -537,7 +550,8 @@ impl DayFile {
             }
             let resource_id = stored_resource.id();
             let mut insert_log = transaction.prepare_cached(
-                "INSERT INTO logs (ts, resource_id, severity, body, trace_id, span_id, attributes, source)
+                "INSERT INTO logs (logged_at, resource_id, severity, body, trace_id, span_id,
+                                   attributes, source)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for log in &records.logs {
@@ -555,7 +569,7 @@ impl DayFile {
             }
             let mut insert_span = transaction.prepare_cached(
                 "INSERT INTO spans (trace_id, span_id, parent_span_id, resource_id, name, kind,
-                                    start_ts, duration_ns, status, attributes, events)
+                                    started_at, duration_ns, status, attributes, events)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             for span in &records.spans {
@@ -605,8 +619,8 @@ fn write_points_and_count_rejected(
 ) -> anyhow::Result<u64> {
     let mut rejected_points = 0;
     let mut insert_point = transaction.prepare_cached(
-        "INSERT INTO points (series_id, ts, value, histogram) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT (series_id, ts) DO UPDATE
+        "INSERT INTO points (series_id, recorded_at, value, histogram) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (series_id, recorded_at) DO UPDATE
          SET value = excluded.value, histogram = excluded.histogram",
     )?;
     for (metric, point_rows) in point_rows_by_metric {
@@ -664,35 +678,9 @@ fn set_aside_day_files_of_another_schema(directory: &Path) -> anyhow::Result<()>
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.ends_with(".sqlite") && Day::from_file_name(name).is_some());
         if is_day_file {
-            set_aside_day_file_of_another_schema(&path)
+            set_aside_file_of_another_schema(&path, DAY_FILE_SCHEMA_VERSION)
                 .with_context(|| format!("set {} aside", path.display()))?;
         }
     }
-    Ok(())
-}
-
-fn set_aside_day_file_of_another_schema(path: &Path) -> anyhow::Result<()> {
-    let connection = Connection::open(path)?;
-    let version = match read_stored_schema(&connection)? {
-        StoredSchema::NotWritten | StoredSchema::Version(DAY_FILE_SCHEMA_VERSION) => return Ok(()),
-        StoredSchema::Version(version) => version,
-    };
-    // The file has to hold all its rows before it moves without its write-ahead log.
-    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
-    drop(connection);
-    let set_aside_path = path.with_extension(format!("sqlite.schema-{version}"));
-    fs::rename(path, &set_aside_path)?;
-    // A write-ahead log left behind would be read as the log of the next file of the day.
-    for suffix in ["sqlite-wal", "sqlite-shm"] {
-        match fs::remove_file(path.with_extension(suffix)) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.into()),
-            _ => {}
-        }
-    }
-    tracing::warn!(
-        file = %set_aside_path.display(),
-        "set aside a day file of schema version {version}; this otelo reads version \
-         {DAY_FILE_SCHEMA_VERSION}"
-    );
     Ok(())
 }

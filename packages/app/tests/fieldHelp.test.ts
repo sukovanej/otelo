@@ -11,7 +11,7 @@ const route: FieldBody = {
   type: "string",
   values: [makeValue('"/a"'), makeValue('"/b"')],
   distinct_values: 2,
-  many_values: false,
+  has_more_values: false,
 };
 
 const duration: FieldBody = {
@@ -21,7 +21,7 @@ const duration: FieldBody = {
   type: "duration",
   values: [],
   distinct_values: 0,
-  many_values: false,
+  has_more_values: false,
 };
 
 test("formatTypeLine counts the records of the signal, or the resources", () => {
@@ -40,10 +40,10 @@ test("formatValuesTitle says whether the values are all of them", () => {
     "1 value",
   );
   expect(formatValuesTitle({ ...route, distinct_values: 37 })).toBe("Most common of 37 values");
-  expect(formatValuesTitle({ ...route, distinct_values: 200, many_values: true })).toBe(
+  expect(formatValuesTitle({ ...route, distinct_values: 200, has_more_values: true })).toBe(
     "Most common of 200+ values",
   );
-  expect(formatValuesTitle({ ...route, many_values: true })).toBe("Most common of 2+ values");
+  expect(formatValuesTitle({ ...route, has_more_values: true })).toBe("Most common of 2+ values");
 });
 
 function makeValue(text: string) {

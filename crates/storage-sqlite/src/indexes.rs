@@ -15,7 +15,7 @@ const fn table_name_of(attribute: &IndexedAttribute) -> &'static str {
 
 fn index_name(attribute: &IndexedAttribute) -> String {
     format!(
-        "attr_{}_{:016x}",
+        "{}_attribute_{:016x}",
         table_name_of(attribute),
         hash_fields(&[table_name_of(attribute), attribute.key()]).cast_unsigned()
     )
@@ -72,7 +72,11 @@ pub fn apply_indexes_to_day_file(
         .map(|attribute| (index_name(attribute), attribute))
         .collect();
     let existing_index_names: Vec<String> = connection
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name GLOB 'attr_*'")?
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'index'
+               AND (name GLOB 'logs_attribute_*' OR name GLOB 'spans_attribute_*')",
+        )?
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     for name in &existing_index_names {

@@ -31,14 +31,16 @@ struct RootSpan {
     resource: Attributes,
 }
 
-const SPAN_COLUMNS: &str = "s.trace_id, s.span_id, s.parent_span_id, r.service, s.name, s.kind,
-    s.start_ts, s.duration_ns, s.status, s.attributes, s.events, r.attributes AS resource";
+const SPAN_COLUMNS: &str = "span.trace_id, span.span_id, span.parent_span_id, resource.service,
+    span.name, span.kind, span.started_at, span.duration_ns, span.status, span.attributes,
+    span.events, resource.attributes AS resource_attributes";
 
 fn select_spans(where_clause: &WhereClause) -> impl Fn(DaySchema) -> String {
     move |day_schema| {
         format!(
             "SELECT {SPAN_COLUMNS}
-             FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
+             FROM {day_schema}.spans span
+             JOIN {day_schema}.resources resource ON resource.id = span.resource_id
              WHERE {}",
             where_clause.sql_for_day(day_schema)
         )
@@ -62,8 +64,9 @@ impl Reader {
             let day_schema = DaySchema { day };
             let sql = format!(
                 "SELECT {SPAN_COLUMNS}
-                 FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
-                 WHERE s.rowid IN ({})",
+                 FROM {day_schema}.spans span
+                 JOIN {day_schema}.resources resource ON resource.id = span.resource_id
+                 WHERE span.rowid IN ({})",
                 rowids.join(", ")
             );
             let statement_span = new_statement_span(&sql);
@@ -108,10 +111,10 @@ fn compile_span_query(
     query: &Query,
 ) -> anyhow::Result<(WhereClause, Vec<String>)> {
     ensure_query_over_spans(query)?;
-    let mut where_clause = WhereClause::within_reader_range(reader, "s.start_ts");
+    let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
     let aliases = TableAliases {
-        record: "s",
-        resource: "r",
+        record: "span",
+        resource: "resource",
     };
     let unindexed = compile_query(
         query,
@@ -126,7 +129,7 @@ fn compile_span_query(
 pub(super) fn explain_spans(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
     let (where_clause, _) = compile_span_query(reader, query)?;
     reader.explain_scan(
-        ["", " ORDER BY start_ts DESC"],
+        ["", " ORDER BY started_at DESC"],
         select_spans(&where_clause),
         &where_clause,
     )
@@ -185,7 +188,7 @@ impl Reader {
 
 pub(super) fn read_spans(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Spans> {
     let (where_clause, unindexed) = compile_span_query(reader, query)?;
-    let tail = format!(" ORDER BY start_ts DESC LIMIT {}", limit + 1);
+    let tail = format!(" ORDER BY started_at DESC LIMIT {}", limit + 1);
     let mut spans = reader.collect_rows(
         ["", &tail],
         select_spans(&where_clause),
@@ -202,15 +205,15 @@ pub(super) fn read_spans(reader: &Reader, query: &Query, limit: usize) -> anyhow
 
 pub(super) fn read_traces(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Traces> {
     ensure_query_over_spans(query)?;
-    let mut where_clause = WhereClause::within_reader_range(reader, "s.start_ts");
-    where_clause.push_condition("s.parent_span_id IS NULL".into());
+    let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
+    where_clause.push_condition("span.parent_span_id IS NULL".into());
     let mut unindexed = Vec::new();
     if query.expression.is_some() {
         // A matching span may sit in another day file than its root.
-        let mut matching = WhereClause::within_reader_range(reader, "m.start_ts");
+        let mut matching = WhereClause::within_reader_range(reader, "matching_span.started_at");
         let aliases = TableAliases {
-            record: "m",
-            resource: "mr",
+            record: "matching_span",
+            resource: "matching_resource",
         };
         unindexed = compile_query(
             query,
@@ -221,23 +224,27 @@ pub(super) fn read_traces(reader: &Reader, query: &Query, limit: usize) -> anyho
         )?;
         let matching_trace_ids_sql = union_day_selects(reader.days(), |day_schema| {
             format!(
-                "SELECT m.trace_id FROM {day_schema}.spans m
-                 JOIN {day_schema}.resources mr ON mr.id = m.resource_id
+                "SELECT matching_span.trace_id
+                 FROM {day_schema}.spans matching_span
+                 JOIN {day_schema}.resources matching_resource
+                   ON matching_resource.id = matching_span.resource_id
                  WHERE {}",
                 matching.sql_for_day(day_schema)
             )
         });
-        where_clause.push_condition(format!("s.trace_id IN ({matching_trace_ids_sql})"));
+        where_clause.push_condition(format!("span.trace_id IN ({matching_trace_ids_sql})"));
         where_clause.absorb_params(matching);
     }
-    let tail = format!(" ORDER BY start_ts DESC LIMIT {}", limit + 1);
+    let tail = format!(" ORDER BY started_at DESC LIMIT {}", limit + 1);
     let mut roots = reader.collect_rows(
         ["", &tail],
         |day_schema| {
             format!(
-                "SELECT s.trace_id, s.start_ts, r.service, s.name, s.kind, s.duration_ns,
-                    s.attributes, r.attributes AS resource
-                 FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
+                "SELECT span.trace_id, span.started_at, resource.service, span.name, span.kind,
+                        span.duration_ns, span.attributes,
+                        resource.attributes AS resource_attributes
+                 FROM {day_schema}.spans span
+                 JOIN {day_schema}.resources resource ON resource.id = span.resource_id
                  WHERE {}",
                 where_clause.sql_for_day(day_schema)
             )
@@ -293,9 +300,9 @@ pub(super) fn read_trace(
     id: TraceId,
     limit: usize,
 ) -> anyhow::Result<Option<Trace>> {
-    let mut where_clause = WhereClause::within_reader_range(reader, "s.start_ts");
-    where_clause.push_condition_with_param("s.trace_id = :trace_id", ":trace_id", id.0.to_vec());
-    let tail = format!(" ORDER BY start_ts LIMIT {}", limit + 1);
+    let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
+    where_clause.push_condition_with_param("span.trace_id = :trace_id", ":trace_id", id.0.to_vec());
+    let tail = format!(" ORDER BY started_at LIMIT {}", limit + 1);
     let mut spans = reader.collect_rows(
         ["", &tail],
         select_spans(&where_clause),
