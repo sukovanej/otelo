@@ -6,6 +6,8 @@ dependencies:
 - ./00008-roll-up-metrics-to-1-minute-and-1.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/26
 ---
 # Group the series of a metric and keep the top ones
 
