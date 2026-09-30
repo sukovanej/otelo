@@ -11,14 +11,28 @@ The daemon runs on Linux and on macOS. The CLI runs anywhere, Windows included. 
 | Part | Linux | macOS |
 |---|---|---|
 | What runs `otelo serve` | a systemd unit | a launchd daemon |
-| Host metrics | `sysinfo` crate | `sysinfo` crate |
-| Per-service CPU and memory | `sysinfo`, for the process tree under the PID from `systemctl show --property MainPID` | `sysinfo`, for the process tree under the PID from `launchctl print` |
 | Root directory | `/var/lib/otelo` | `/usr/local/var/otelo` |
+| `host.id` | `/etc/machine-id`, or else `/var/lib/dbus/machine-id` | the `IOPlatformUUID` line of `ioreg -rd1 -c IOPlatformExpertDevice` |
+| CPU utilization | by mode, from the change of the first line of `/proc/stat` between two ticks | one total, from `sysinfo` |
+| Memory | `free`, `cached`, and `buffers` from `/proc/meminfo`, and `used` as the rest of the total | `used` and `free` from `sysinfo` |
+| Load, swap, filesystems, network | `sysinfo` | `sysinfo`, with an APFS container counted once |
+| Which services exist | every `*.service` directory under `/sys/fs/cgroup/system.slice` whose `cgroup.events` says `populated 1` | every row of `launchctl list` with a PID, except the `com.apple.*` labels |
+| CPU and memory of a service | `usage_usec` of `cpu.stat`, `anon` of `memory.stat`, and `memory.current` of its cgroup | `sysinfo`, for the process tree under the PID |
+| CPU and memory of otelo | `sysinfo`, for its own PID | `sysinfo`, for its own PID |
 
-## One code path where it can
+## Where the code differs
 
-- Metrics use `sysinfo` on both platforms, so there is no metrics code per platform. cgroup v2 numbers on Linux are more exact and can come later.
-- `#[cfg(target_os)]` appears only in the code that finds the PID of a service.
+`sysinfo` reads what it gives equally well on both platforms. Linux reads `/proc` and cgroup v2 where they give more:
+
+- `/proc/stat` splits the CPU time by mode. `sysinfo` gives one total, which hides `iowait` and `steal`.
+- `/proc/meminfo` has `cached` and `buffers`. `cached` is `Cached` plus `SReclaimable`, as the OpenTelemetry Collector counts it.
+- The kernel counts the CPU time of a cgroup itself, so the number of a service never drops when one of its processes exits, and nothing walks a process tree. A service needs no entry in a flag or a file, because its directory is there while it runs.
+
+macOS has no cgroups. There the collector adds up the CPU time each live process of a tree gained since the last tick and keeps a running total for the service. A plain sum over the tree would drop when a child exits, and a rollup reads a drop as a restart of the counter.
+
+`#[cfg(target_os)]` appears only in the readers of `otelo-host`. The readers fill one `Snapshot` type, and the mapping from a snapshot to metric points is the same code on both platforms.
+
+Service metrics on Linux need cgroup v2, which Ubuntu 24.04 mounts by default. On a machine without it the collector says so once in its log and sends the rest.
 
 ## Testing
 
