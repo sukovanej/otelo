@@ -7,6 +7,8 @@ dependencies:
 - ./00015-group-the-series-of-a-metric-and.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/27
 ---
 # Explore metrics in the UI
 
