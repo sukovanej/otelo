@@ -1,6 +1,33 @@
 use std::collections::BTreeMap;
 
-use crate::{Histogram, Increase, MetricKind, NumberPoint, StepHistograms, StepIncreases};
+use crate::{
+    Histogram, HistogramPoint, Increase, MetricKind, NumberPoint, StepHistograms, StepIncreases,
+};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SeriesPoint {
+    Number(NumberPoint),
+    Histogram(HistogramPoint),
+}
+
+impl SeriesPoint {
+    #[must_use]
+    pub const fn recorded_at(&self) -> i64 {
+        match self {
+            Self::Number(point) => point.recorded_at,
+            Self::Histogram(point) => point.recorded_at,
+        }
+    }
+
+    // The store keeps the sum of a histogram point as the value of its row.
+    #[must_use]
+    pub fn stored_value(&self) -> f64 {
+        match self {
+            Self::Number(point) => point.value,
+            Self::Histogram(point) => point.histogram.sum.unwrap_or(0.0),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Level {
@@ -13,7 +40,7 @@ pub struct Level {
 
 impl Level {
     #[must_use]
-    pub const fn of_point(value: f64) -> Self {
+    pub const fn from_value(value: f64) -> Self {
         Self {
             count: 1,
             min: value,
@@ -23,7 +50,7 @@ impl Level {
         }
     }
 
-    pub const fn add_point(&mut self, value: f64) {
+    pub const fn add_value(&mut self, value: f64) {
         self.count += 1;
         self.min = self.min.min(value);
         self.max = self.max.max(value);
@@ -64,9 +91,13 @@ impl StepSummary {
         self.level.add_later_level(later.level);
         match (&mut self.change, later.change) {
             (_, Change::Nothing) => {}
-            (Change::Increase(sum), Change::Increase(more)) => sum.add_later_increase(more),
-            (Change::Distribution(sum), Change::Distribution(more)) => sum.add_increase(*more),
-            (change, later) => *change = later,
+            (Change::Increase(increase), Change::Increase(later_increase)) => {
+                increase.add_later_increase(later_increase);
+            }
+            (Change::Distribution(histogram), Change::Distribution(later_histogram)) => {
+                histogram.add_increase(*later_histogram);
+            }
+            (change, later_change) => *change = later_change,
         }
     }
 }
@@ -79,16 +110,16 @@ enum ChangesByStep {
 
 // Takes the points of one series, oldest first.
 pub struct SeriesSteps {
-    levels: BTreeMap<i64, Level>,
-    changes: ChangesByStep,
+    levels_by_step: BTreeMap<i64, Level>,
+    changes_by_step: ChangesByStep,
 }
 
 impl SeriesSteps {
     #[must_use]
-    pub fn of_kind(kind: MetricKind) -> Self {
+    pub fn new(kind: MetricKind) -> Self {
         Self {
-            levels: BTreeMap::new(),
-            changes: match kind {
+            levels_by_step: BTreeMap::new(),
+            changes_by_step: match kind {
                 MetricKind::Gauge | MetricKind::UpDown => ChangesByStep::Nothing,
                 MetricKind::Counter(temporality) => {
                     ChangesByStep::Increases(StepIncreases::new(temporality))
@@ -100,65 +131,63 @@ impl SeriesSteps {
         }
     }
 
-    pub fn add_point(&mut self, step: i64, point: NumberPoint, histogram: Option<Histogram>) {
-        self.add_point_before_range(step, point, histogram);
-        self.levels
-            .entry(step)
-            .and_modify(|level| level.add_point(point.value))
-            .or_insert_with(|| Level::of_point(point.value));
+    pub fn add_point(&mut self, step_start_at: i64, point: SeriesPoint) {
+        let value = point.stored_value();
+        self.add_point_before_range(step_start_at, point);
+        self.levels_by_step
+            .entry(step_start_at)
+            .and_modify(|level| level.add_value(value))
+            .or_insert_with(|| Level::from_value(value));
     }
 
     // A counter and a cumulative histogram count from the point before, so a point before the
     // range only says where the counting starts.
-    pub fn add_point_before_range(
-        &mut self,
-        step: i64,
-        point: NumberPoint,
-        histogram: Option<Histogram>,
-    ) {
-        match &mut self.changes {
-            ChangesByStep::Nothing => {}
-            ChangesByStep::Increases(increases) => increases.add_point(step, point),
-            ChangesByStep::Distributions(histograms) => {
-                if let Some(histogram) = histogram {
-                    histograms.add_point(step, histogram);
-                }
+    pub fn add_point_before_range(&mut self, step_start_at: i64, point: SeriesPoint) {
+        match (&mut self.changes_by_step, point) {
+            (ChangesByStep::Increases(increases), SeriesPoint::Number(point)) => {
+                increases.add_point(step_start_at, point);
             }
+            (ChangesByStep::Distributions(histograms), SeriesPoint::Histogram(point)) => {
+                histograms.add_point(step_start_at, point.histogram);
+            }
+            (ChangesByStep::Nothing, _)
+            | (ChangesByStep::Increases(_), SeriesPoint::Histogram(_))
+            | (ChangesByStep::Distributions(_), SeriesPoint::Number(_)) => {}
         }
     }
 
     #[must_use]
     pub fn has_no_point_in_range(&self) -> bool {
-        self.levels.is_empty()
+        self.levels_by_step.is_empty()
     }
 
     #[must_use]
     pub fn into_summaries_by_step(self) -> BTreeMap<i64, StepSummary> {
-        let mut steps: BTreeMap<i64, StepSummary> = self
-            .levels
+        let mut summaries_by_step: BTreeMap<i64, StepSummary> = self
+            .levels_by_step
             .into_iter()
-            .map(|(step, level)| {
+            .map(|(step_start_at, level)| {
                 let change = Change::Nothing;
-                (step, StepSummary { level, change })
+                (step_start_at, StepSummary { level, change })
             })
             .collect();
-        match self.changes {
+        match self.changes_by_step {
             ChangesByStep::Nothing => {}
             ChangesByStep::Increases(increases) => {
-                for (step, increase) in increases.into_increases_by_step() {
-                    if let Some(summary) = steps.get_mut(&step) {
+                for (step_start_at, increase) in increases.into_increases_by_step() {
+                    if let Some(summary) = summaries_by_step.get_mut(&step_start_at) {
                         summary.change = Change::Increase(increase);
                     }
                 }
             }
             ChangesByStep::Distributions(histograms) => {
-                for (step, merged) in histograms.into_histograms_by_step() {
-                    if let Some(summary) = steps.get_mut(&step) {
-                        summary.change = Change::Distribution(Box::new(merged));
+                for (step_start_at, histogram) in histograms.into_histograms_by_step() {
+                    if let Some(summary) = summaries_by_step.get_mut(&step_start_at) {
+                        summary.change = Change::Distribution(Box::new(histogram));
                     }
                 }
             }
         }
-        steps
+        summaries_by_step
     }
 }

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use otelo_host::{
     CgroupMemory, Cpu, CpuTicks, Filesystem, HostIdentity, Interface, LaunchdJob, LoadAverage,
-    Mapping, Memory, Pid, Process, ProcessUsage, Services, Snapshot, Swap, Unit,
+    Memory, Pid, Process, ProcessUsage, Services, Snapshot, SnapshotMapper, Swap, Unit,
 };
 use otelo_storage::{Batch, Points, StorageSize, Temporality};
 use serde_json::{Value, json};
@@ -54,7 +54,7 @@ struct PointRow {
     value: f64,
 }
 
-fn point_rows(batch: &Batch) -> Vec<PointRow> {
+fn collect_point_rows(batch: &Batch) -> Vec<PointRow> {
     let mut rows = Vec::new();
     for records in batch {
         for metric in &records.metrics {
@@ -80,8 +80,8 @@ fn point_rows(batch: &Batch) -> Vec<PointRow> {
     rows
 }
 
-fn map_to_point_rows(mapping: &mut Mapping, snapshot: &Snapshot) -> Vec<PointRow> {
-    point_rows(&mapping.map_snapshot_to_batch(TICK_AT, snapshot, None))
+fn map_to_point_rows(snapshot_mapper: &mut SnapshotMapper, snapshot: &Snapshot) -> Vec<PointRow> {
+    collect_point_rows(&snapshot_mapper.map_snapshot_to_batch(TICK_AT, snapshot, None))
 }
 
 fn values_by_label(rows: &[PointRow], name: &str, label: &str) -> Vec<(String, f64)> {
@@ -107,8 +107,8 @@ fn labelled(pairs: &[(&str, f64)]) -> Vec<(String, f64)> {
 
 #[test]
 fn the_cpu_shares_are_the_change_between_two_readings() {
-    let mut mapping = Mapping::new(droplet());
-    let first = CpuTicks {
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
+    let first_ticks = CpuTicks {
         user: 1000,
         nice: 10,
         system: 500,
@@ -118,24 +118,24 @@ fn the_cpu_shares_are_the_change_between_two_readings() {
         softirq: 20,
         steal: 70,
     };
-    let second = CpuTicks {
-        user: first.user + 30,
-        nice: first.nice,
-        system: first.system + 10,
-        idle: first.idle + 50,
-        iowait: first.iowait + 5,
-        irq: first.irq + 1,
-        softirq: first.softirq + 1,
-        steal: first.steal + 3,
+    let second_ticks = CpuTicks {
+        user: first_ticks.user + 30,
+        nice: first_ticks.nice,
+        system: first_ticks.system + 10,
+        idle: first_ticks.idle + 50,
+        iowait: first_ticks.iowait + 5,
+        irq: first_ticks.irq + 1,
+        softirq: first_ticks.softirq + 1,
+        steal: first_ticks.steal + 3,
     };
-    let at = |ticks| Snapshot {
+    let snapshot_with_ticks = |ticks| Snapshot {
         cpu: Cpu::TicksByMode(ticks),
         ..idle_machine()
     };
-    let rows = map_to_point_rows(&mut mapping, &at(first));
+    let rows = map_to_point_rows(&mut snapshot_mapper, &snapshot_with_ticks(first_ticks));
     assert!(rows.iter().all(|row| row.name != "system.cpu.utilization"));
 
-    let rows = map_to_point_rows(&mut mapping, &at(second));
+    let rows = map_to_point_rows(&mut snapshot_mapper, &snapshot_with_ticks(second_ticks));
     assert_eq!(
         values_by_label(&rows, "system.cpu.utilization", "cpu.mode"),
         labelled(&[
@@ -148,22 +148,25 @@ fn the_cpu_shares_are_the_change_between_two_readings() {
             ("idle", 0.5),
         ])
     );
-    let share = rows
+    let utilization_row = rows
         .iter()
         .find(|row| row.name == "system.cpu.utilization")
         .unwrap();
-    assert_eq!((share.kind, share.unit.as_str()), ("gauge", "1"));
+    assert_eq!(
+        (utilization_row.kind, utilization_row.unit.as_str()),
+        ("gauge", "1")
+    );
 
     // No tick passed between two readings, so there is nothing to share out.
-    let rows = map_to_point_rows(&mut mapping, &at(second));
+    let rows = map_to_point_rows(&mut snapshot_mapper, &snapshot_with_ticks(second_ticks));
     assert!(rows.iter().all(|row| row.name != "system.cpu.utilization"));
 }
 
 #[test]
 fn a_machine_without_cpu_modes_sends_one_share() {
-    let mut mapping = Mapping::new(droplet());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let rows = map_to_point_rows(
-        &mut mapping,
+        &mut snapshot_mapper,
         &Snapshot {
             cpu: Cpu::Utilization(0.25),
             ..idle_machine()
@@ -180,9 +183,9 @@ fn a_machine_without_cpu_modes_sends_one_share() {
 
 #[test]
 fn the_memory_of_linux_has_four_states_that_add_up_to_the_limit() {
-    let mut mapping = Mapping::new(droplet());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let rows = map_to_point_rows(
-        &mut mapping,
+        &mut snapshot_mapper,
         &Snapshot {
             memory: Memory::Meminfo {
                 total_bytes: 1000,
@@ -215,8 +218,8 @@ fn the_memory_of_linux_has_four_states_that_add_up_to_the_limit() {
 
 #[test]
 fn the_memory_of_macos_has_the_states_it_reports() {
-    let mut mapping = Mapping::new(droplet());
-    let rows = map_to_point_rows(&mut mapping, &idle_machine());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
+    let rows = map_to_point_rows(&mut snapshot_mapper, &idle_machine());
     assert_eq!(
         values_by_label(&rows, "system.memory.usage", "system.memory.state"),
         labelled(&[("used", 600.0), ("free", 100.0)])
@@ -225,12 +228,12 @@ fn the_memory_of_macos_has_the_states_it_reports() {
 
 #[test]
 fn a_machine_without_swap_has_no_series_of_it() {
-    let mut mapping = Mapping::new(droplet());
-    let rows = map_to_point_rows(&mut mapping, &idle_machine());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
+    let rows = map_to_point_rows(&mut snapshot_mapper, &idle_machine());
     assert!(rows.iter().all(|row| row.name != "system.paging.usage"));
 
     let rows = map_to_point_rows(
-        &mut mapping,
+        &mut snapshot_mapper,
         &Snapshot {
             swap: Swap {
                 used_bytes: 0,
@@ -247,8 +250,8 @@ fn a_machine_without_swap_has_no_series_of_it() {
 
 #[test]
 fn the_load_averages_are_gauges_of_threads() {
-    let mut mapping = Mapping::new(droplet());
-    let rows = map_to_point_rows(&mut mapping, &idle_machine());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
+    let rows = map_to_point_rows(&mut snapshot_mapper, &idle_machine());
     let loads: Vec<(&str, &str, &str, u64)> = rows
         .iter()
         .filter(|row| row.name.starts_with("system.cpu.load_average"))
@@ -303,9 +306,9 @@ fn filesystem(
 
 #[test]
 fn a_disk_counts_once_under_its_shortest_mount_point() {
-    let mut mapping = Mapping::new(droplet());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let rows = map_to_point_rows(
-        &mut mapping,
+        &mut snapshot_mapper,
         &Snapshot {
             filesystems: vec![
                 filesystem("/dev/vda1", "/var/lib/docker/bind", "ext4", 8000),
@@ -344,9 +347,9 @@ fn a_disk_counts_once_under_its_shortest_mount_point() {
 
 #[test]
 fn the_volumes_of_an_apfs_container_count_once() {
-    let mut mapping = Mapping::new(droplet());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let rows = map_to_point_rows(
-        &mut mapping,
+        &mut snapshot_mapper,
         &Snapshot {
             filesystems: vec![
                 filesystem("Data", "/System/Volumes/Data", "apfs", 494_384_795_648),
@@ -372,14 +375,14 @@ fn the_volumes_of_an_apfs_container_count_once() {
 
 #[test]
 fn leaves_out_the_loopback_and_the_idle_interfaces() {
-    let mut mapping = Mapping::new(droplet());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let interface = |name: &str, received_bytes, transmitted_bytes| Interface {
         name: name.into(),
         received_bytes,
         transmitted_bytes,
     };
     let rows = map_to_point_rows(
-        &mut mapping,
+        &mut snapshot_mapper,
         &Snapshot {
             interfaces: vec![
                 interface("lo", 900, 900),
@@ -389,17 +392,18 @@ fn leaves_out_the_loopback_and_the_idle_interfaces() {
             ..idle_machine()
         },
     );
-    let io: Vec<&PointRow> = rows
+    let network_io_rows: Vec<&PointRow> = rows
         .iter()
         .filter(|row| row.name == "system.network.io")
         .collect();
-    assert_eq!(io.len(), 2);
+    assert_eq!(network_io_rows.len(), 2);
     assert!(
-        io.iter()
+        network_io_rows
+            .iter()
             .all(|row| row.kind == "counter" && row.unit == "By")
     );
     assert_eq!(
-        io[0].labels,
+        network_io_rows[0].labels,
         json!({"network.interface.name": "eth0", "network.io.direction": "receive"})
     );
     assert_eq!(
@@ -410,7 +414,7 @@ fn leaves_out_the_loopback_and_the_idle_interfaces() {
 
 #[test]
 fn a_unit_is_a_service_with_the_attributes_of_the_host() {
-    let mut mapping = Mapping::new(droplet());
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let unit = |name: &str, memory| Unit {
         name: name.into(),
         cpu_time: Duration::from_millis(93_250),
@@ -420,7 +424,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
         anonymous_bytes: 45_000_000,
         charged_bytes: 171_000_000,
     });
-    let batch = mapping.map_snapshot_to_batch(
+    let batch = snapshot_mapper.map_snapshot_to_batch(
         TICK_AT,
         &Snapshot {
             services: Services::Cgroups {
@@ -429,7 +433,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
                     unit("mudro", memory),
                     unit("otelo", memory),
                 ],
-                otelo_unit: Some("otelo".into()),
+                otelo_unit_name: Some("otelo".into()),
             },
             ..idle_machine()
         },
@@ -451,7 +455,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
         })
     );
 
-    let rows = point_rows(&batch);
+    let rows = collect_point_rows(&batch);
     assert_eq!(
         values_of_service(&rows, "caddy"),
         labelled(&[("process.cpu.time", 93.25)])
@@ -506,11 +510,16 @@ fn launchd_machine(processes: Vec<Process>) -> Snapshot {
 
 #[test]
 fn the_cpu_time_of_a_process_tree_never_falls_when_a_child_exits() {
-    let mut mapping = Mapping::new(droplet());
-    let otelo = [process(50, 1, 100, 10), process(51, 50, 100, 10)];
-    let mut tick = |mudro: &[Process]| {
-        let processes = [mudro, otelo.as_slice(), &[process(99, 1, 9000, 9000)]].concat();
-        let rows = map_to_point_rows(&mut mapping, &launchd_machine(processes));
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
+    let otelo_processes = [process(50, 1, 100, 10), process(51, 50, 100, 10)];
+    let mut map_tick_with_mudro = |mudro_processes: &[Process]| {
+        let processes = [
+            mudro_processes,
+            otelo_processes.as_slice(),
+            &[process(99, 1, 9000, 9000)],
+        ]
+        .concat();
+        let rows = map_to_point_rows(&mut snapshot_mapper, &launchd_machine(processes));
         let services: Vec<String> = rows
             .iter()
             .filter(|row| row.name == "process.cpu.time")
@@ -523,7 +532,7 @@ fn the_cpu_time_of_a_process_tree_never_falls_when_a_child_exits() {
 
     // The first reading only sets where the counting starts.
     assert_eq!(
-        tick(&[
+        map_tick_with_mudro(&[
             process(10, 1, 5000, 100),
             process(11, 10, 2000, 200),
             process(12, 11, 8000, 300),
@@ -532,12 +541,12 @@ fn the_cpu_time_of_a_process_tree_never_falls_when_a_child_exits() {
     );
     // The grandchild 12 exited with its 8 seconds. The others gained 1 and 2 seconds.
     assert_eq!(
-        tick(&[process(10, 1, 6000, 100), process(11, 10, 4000, 250)]),
+        map_tick_with_mudro(&[process(10, 1, 6000, 100), process(11, 10, 4000, 250)]),
         labelled(&[("process.cpu.time", 3.0), ("process.memory.usage", 350.0)])
     );
     // A child that started since the last reading counts with all its time.
     assert_eq!(
-        tick(&[
+        map_tick_with_mudro(&[
             process(10, 1, 6000, 100),
             process(11, 10, 4500, 250),
             process(13, 10, 250, 50),
@@ -548,13 +557,17 @@ fn the_cpu_time_of_a_process_tree_never_falls_when_a_child_exits() {
 
 #[test]
 fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
-    let mut mapping = Mapping::new(droplet());
-    let size = StorageSize {
+    let mut snapshot_mapper = SnapshotMapper::new(droplet());
+    let storage_size = StorageSize {
         telemetry_bytes: 52_000_000,
         rollup_bytes: 4_000_000,
         state_bytes: 8192,
     };
-    let rows = point_rows(&mapping.map_snapshot_to_batch(TICK_AT, &idle_machine(), Some(size)));
+    let rows = collect_point_rows(&snapshot_mapper.map_snapshot_to_batch(
+        TICK_AT,
+        &idle_machine(),
+        Some(storage_size),
+    ));
     assert_eq!(
         values_by_label(&rows, "otelo.storage.size", "otelo.storage.file"),
         labelled(&[
@@ -563,15 +576,19 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
             ("state", 8192.0),
         ])
     );
-    let size = rows
+    let size_row = rows
         .iter()
         .find(|row| row.name == "otelo.storage.size")
         .unwrap();
     assert_eq!(
-        (size.service.as_str(), size.kind, size.unit.as_str()),
+        (
+            size_row.service.as_str(),
+            size_row.kind,
+            size_row.unit.as_str()
+        ),
         ("otelo", "updown", "By")
     );
 
-    let rows = map_to_point_rows(&mut mapping, &idle_machine());
+    let rows = map_to_point_rows(&mut snapshot_mapper, &idle_machine());
     assert!(rows.iter().all(|row| row.name != "otelo.storage.size"));
 }

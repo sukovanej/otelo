@@ -13,6 +13,7 @@ const MAX_DISTRIBUTION_BUCKETS: usize = 64;
 // Two points far apart in their indexes would otherwise span buckets without end.
 const MAX_SPANNED_BUCKETS: i64 = 4096;
 
+// The JSON stored in points.histogram, so its field names are the format on disk.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Histogram {
     pub count: u64,
@@ -24,26 +25,60 @@ pub struct Histogram {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, try_from = "UncheckedBuckets")]
 pub enum Buckets {
     Explicit(ExplicitBuckets),
     Exponential(ExponentialBuckets),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum UncheckedBuckets {
+    Explicit {
+        bounds: Vec<f64>,
+        counts: Vec<u64>,
+    },
+    Exponential {
+        scale: i32,
+        zero_count: u64,
+        positive: IndexedCounts,
+        negative: IndexedCounts,
+    },
+}
+
+impl TryFrom<UncheckedBuckets> for Buckets {
+    type Error = anyhow::Error;
+
+    fn try_from(unchecked: UncheckedBuckets) -> anyhow::Result<Self> {
+        match unchecked {
+            UncheckedBuckets::Explicit { bounds, counts } => {
+                ExplicitBuckets::new(bounds, counts).map(Self::Explicit)
+            }
+            UncheckedBuckets::Exponential {
+                scale,
+                zero_count,
+                positive,
+                negative,
+            } => ExponentialBuckets::new(scale, zero_count, positive, negative)
+                .map(Self::Exponential),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ExplicitBuckets {
-    pub bounds: Vec<f64>,
-    pub counts: Vec<u64>,
+    bounds: Vec<f64>,
+    counts: Vec<u64>,
 }
 
 // Bucket `index` of a side holds the values from `base^index` to `base^(index + 1)`, with
 // `base = 2^(2^-scale)`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ExponentialBuckets {
-    pub scale: i32,
-    pub zero_count: u64,
-    pub positive: IndexedCounts,
-    pub negative: IndexedCounts,
+    scale: i32,
+    zero_count: u64,
+    positive: IndexedCounts,
+    negative: IndexedCounts,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,13 +88,6 @@ pub struct IndexedCounts {
 }
 
 impl Histogram {
-    pub fn check_buckets(&self) -> anyhow::Result<()> {
-        match &self.buckets {
-            Buckets::Explicit(explicit) => explicit.check_counts_against_bounds(),
-            Buckets::Exponential(exponential) => exponential.check_scale_and_size(),
-        }
-    }
-
     fn increase_since(&self, earlier: &Self) -> Option<Self> {
         if self.count < earlier.count {
             return None;
@@ -98,26 +126,32 @@ impl Histogram {
         };
         self.buckets = buckets;
         self.count += increase.count;
-        self.sum = self.sum.zip(increase.sum).map(|(a, b)| a + b);
-        self.min = self.min.zip(increase.min).map(|(a, b)| a.min(b));
-        self.max = self.max.zip(increase.max).map(|(a, b)| a.max(b));
+        self.sum = self.sum.zip(increase.sum).map(|(sum, more)| sum + more);
+        self.min = self
+            .min
+            .zip(increase.min)
+            .map(|(min, other_min)| min.min(other_min));
+        self.max = self
+            .max
+            .zip(increase.max)
+            .map(|(max, other_max)| max.max(other_max));
     }
 }
 
 impl ExplicitBuckets {
-    fn check_counts_against_bounds(&self) -> anyhow::Result<()> {
+    pub fn new(bounds: Vec<f64>, counts: Vec<u64>) -> anyhow::Result<Self> {
         ensure!(
-            self.counts.len() == self.bounds.len() + 1,
+            counts.len() == bounds.len() + 1,
             "a histogram with {} bounds needs {} counts, not {}",
-            self.bounds.len(),
-            self.bounds.len() + 1,
-            self.counts.len()
+            bounds.len(),
+            bounds.len() + 1,
+            counts.len()
         );
         ensure!(
-            self.bounds.windows(2).all(|pair| pair[0] < pair[1]),
+            bounds.windows(2).all(|pair| pair[0] < pair[1]),
             "the bounds of a histogram have to ascend"
         );
-        Ok(())
+        Ok(Self { bounds, counts })
     }
 
     fn subtract_counts_of(&self, earlier: &Self) -> Option<Self> {
@@ -146,52 +180,73 @@ impl ExplicitBuckets {
                 .counts
                 .iter()
                 .zip(&more.counts)
-                .map(|(a, b)| a + b)
+                .map(|(count, more_count)| count + more_count)
                 .collect(),
         })
     }
 
+    fn estimate_percentiles(&self) -> Option<Percentiles> {
+        Some(Percentiles {
+            p50: self.estimate_quantile(0.5)?,
+            p90: self.estimate_quantile(0.9)?,
+            p99: self.estimate_quantile(0.99)?,
+        })
+    }
+
     #[expect(clippy::cast_precision_loss, reason = "an estimate")]
-    fn estimate_quantile(&self, q: f64) -> Option<f64> {
-        let total: u64 = self.counts.iter().sum();
-        if total == 0 {
+    fn estimate_quantile(&self, quantile: f64) -> Option<f64> {
+        let total_count: u64 = self.counts.iter().sum();
+        if total_count == 0 {
             return None;
         }
-        let rank = q * total as f64;
-        let mut below = 0.0;
-        for (i, &count) in self.counts.iter().enumerate() {
+        let rank = quantile * total_count as f64;
+        let mut count_below = 0.0;
+        for (bucket_index, &count) in self.counts.iter().enumerate() {
             let count = count as f64;
-            if count > 0.0 && below + count >= rank {
-                let Some(&upper) = self.bounds.get(i) else {
+            if count > 0.0 && count_below + count >= rank {
+                let Some(&upper_bound) = self.bounds.get(bucket_index) else {
                     return self.bounds.last().copied();
                 };
-                let lower = match i {
-                    0 => upper.min(0.0),
-                    _ => self.bounds[i - 1],
+                let lower_bound = match bucket_index {
+                    0 => upper_bound.min(0.0),
+                    _ => self.bounds[bucket_index - 1],
                 };
-                return Some((upper - lower).mul_add((rank - below) / count, lower));
+                return Some(
+                    (upper_bound - lower_bound).mul_add((rank - count_below) / count, lower_bound),
+                );
             }
-            below += count;
+            count_below += count;
         }
         self.bounds.last().copied()
     }
 }
 
 impl ExponentialBuckets {
-    fn check_scale_and_size(&self) -> anyhow::Result<()> {
+    pub fn new(
+        scale: i32,
+        zero_count: u64,
+        positive: IndexedCounts,
+        negative: IndexedCounts,
+    ) -> anyhow::Result<Self> {
         ensure!(
-            OTLP_EXPONENTIAL_SCALES.contains(&self.scale),
+            OTLP_EXPONENTIAL_SCALES.contains(&scale),
             "an exponential histogram has a scale from {} to {}, not {}",
             OTLP_EXPONENTIAL_SCALES.start(),
             OTLP_EXPONENTIAL_SCALES.end(),
-            self.scale
+            scale
         );
+        let buckets = Self {
+            scale,
+            zero_count,
+            positive,
+            negative,
+        };
         ensure!(
-            i64::try_from(self.bucket_count()).is_ok_and(|count| count <= MAX_SPANNED_BUCKETS),
+            i64::try_from(buckets.bucket_count()).is_ok_and(|count| count <= MAX_SPANNED_BUCKETS),
             "an exponential histogram has at most {MAX_SPANNED_BUCKETS} buckets, not {}",
-            self.bucket_count()
+            buckets.bucket_count()
         );
-        Ok(())
+        Ok(buckets)
     }
 
     fn join_buckets_down_to_scale(&self, scale: i32) -> Self {
@@ -370,11 +425,15 @@ pub struct Distribution {
     /// Estimates of the median and the 90th and 99th percentiles, by linear
     /// interpolation inside a bucket. `None` without values.
     #[schema(required = true)]
-    pub p50: Option<f64>,
-    #[schema(required = true)]
-    pub p90: Option<f64>,
-    #[schema(required = true)]
-    pub p99: Option<f64>,
+    pub percentiles: Option<Percentiles>,
+}
+
+/// Percentiles of the values a histogram recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct Percentiles {
+    pub p50: f64,
+    pub p90: f64,
+    pub p99: f64,
 }
 
 impl From<Histogram> for Distribution {
@@ -393,9 +452,7 @@ impl From<Histogram> for Distribution {
             counts: shown.counts,
             count: histogram.count,
             sum: histogram.sum,
-            p50: estimated.estimate_quantile(0.5),
-            p90: estimated.estimate_quantile(0.9),
-            p99: estimated.estimate_quantile(0.99),
+            percentiles: estimated.estimate_percentiles(),
         }
     }
 }
@@ -404,7 +461,7 @@ impl From<Histogram> for Distribution {
 pub struct StepHistograms {
     temporality: Temporality,
     previous_point: Option<Histogram>,
-    by_step: BTreeMap<i64, Histogram>,
+    histograms_by_step: BTreeMap<i64, Histogram>,
 }
 
 impl StepHistograms {
@@ -413,11 +470,11 @@ impl StepHistograms {
         Self {
             temporality,
             previous_point: None,
-            by_step: BTreeMap::new(),
+            histograms_by_step: BTreeMap::new(),
         }
     }
 
-    pub fn add_point(&mut self, step: i64, point: Histogram) {
+    pub fn add_point(&mut self, step_start_at: i64, point: Histogram) {
         let increase = match self.temporality {
             Temporality::Delta => point,
             Temporality::Cumulative => {
@@ -428,16 +485,16 @@ impl StepHistograms {
                 point.increase_since(&previous).unwrap_or(point)
             }
         };
-        match self.by_step.get_mut(&step) {
+        match self.histograms_by_step.get_mut(&step_start_at) {
             Some(merged) => merged.add_increase(increase),
             None => {
-                self.by_step.insert(step, increase);
+                self.histograms_by_step.insert(step_start_at, increase);
             }
         }
     }
 
     #[must_use]
     pub fn into_histograms_by_step(self) -> BTreeMap<i64, Histogram> {
-        self.by_step
+        self.histograms_by_step
     }
 }

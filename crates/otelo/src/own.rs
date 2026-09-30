@@ -66,19 +66,19 @@ impl fmt::Display for Destination {
 
 #[derive(Clone)]
 pub struct Telemetry {
-    tracer: SdkTracerProvider,
-    logger: SdkLoggerProvider,
+    tracer_provider: SdkTracerProvider,
+    logger_provider: SdkLoggerProvider,
     // Cleared at shutdown: the stopped exporters would warn about each later span and event.
     exporting: Arc<AtomicBool>,
 }
 
 impl Telemetry {
-    pub fn start(
+    pub fn spawn_exporters(
         destination: &Destination,
         own_receiver_addr: SocketAddr,
         host: &HostIdentity,
     ) -> anyhow::Result<Option<Self>> {
-        let base = match destination {
+        let receiver_url = match destination {
             Destination::Off => return Ok(None),
             Destination::OwnReceiver => format!("http://{own_receiver_addr}"),
             Destination::OtherReceiver(url) => url.clone(),
@@ -95,36 +95,36 @@ impl Telemetry {
                     .map(|(key, value)| opentelemetry::KeyValue::new(key, value)),
             )
             .build();
-        let spans = SpanExporter::builder()
+        let span_exporter = SpanExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(format!("{base}/v1/traces"))
+            .with_endpoint(format!("{receiver_url}/v1/traces"))
             .build()
             .context("build the span exporter")?;
-        let logs = LogExporter::builder()
+        let log_exporter = LogExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(format!("{base}/v1/logs"))
+            .with_endpoint(format!("{receiver_url}/v1/logs"))
             .build()
             .context("build the log exporter")?;
         Ok(Some(Self {
-            tracer: SdkTracerProvider::builder()
+            tracer_provider: SdkTracerProvider::builder()
                 .with_resource(resource.clone())
-                .with_batch_exporter(spans)
+                .with_batch_exporter(span_exporter)
                 .build(),
-            logger: SdkLoggerProvider::builder()
+            logger_provider: SdkLoggerProvider::builder()
                 .with_resource(resource)
-                .with_batch_exporter(logs)
+                .with_batch_exporter(log_exporter)
                 .build(),
             exporting: Arc::new(AtomicBool::new(true)),
         }))
     }
 
-    pub fn shutdown(&self) {
+    pub fn shut_down_exporters(&self) {
         self.exporting.store(false, Ordering::Relaxed);
         for (signal, result) in [
-            ("traces", self.tracer.shutdown()),
-            ("logs", self.logger.shutdown()),
+            ("traces", self.tracer_provider.shutdown()),
+            ("logs", self.logger_provider.shutdown()),
         ] {
             match result {
                 Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
@@ -134,34 +134,35 @@ impl Telemetry {
     }
 }
 
-pub fn init_logging(own: Option<&Telemetry>) {
-    let stderr = tracing_subscriber::fmt::layer()
+pub fn install_tracing_subscriber(own_telemetry: Option<&Telemetry>) {
+    let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(io::stderr)
         .with_ansi(io::stderr().is_terminal())
         .with_filter(build_env_filter(&[]));
     // A span on the path from the OTLP receiver to the day files would export itself forever.
-    let traces = own.map(|own| {
+    let trace_export_layer = own_telemetry.map(|own_telemetry| {
         tracing_opentelemetry::layer()
-            .with_tracer(own.tracer.tracer("otelo"))
+            .with_tracer(own_telemetry.tracer_provider.tracer("otelo"))
             .with_tracked_inactivity(false)
             .with_target(false)
-            .with_filter(own.build_exporter_filter())
+            .with_filter(own_telemetry.build_exporter_filter())
     });
-    let logs = own.map(|own| {
-        OpenTelemetryTracingBridge::new(&own.logger).with_filter(own.build_exporter_filter())
+    let log_export_layer = own_telemetry.map(|own_telemetry| {
+        OpenTelemetryTracingBridge::new(&own_telemetry.logger_provider)
+            .with_filter(own_telemetry.build_exporter_filter())
     });
     tracing_subscriber::registry()
-        .with(stderr)
-        .with(traces)
-        .with(logs)
+        .with(stderr_layer)
+        .with(trace_export_layer)
+        .with(log_export_layer)
         .init();
 }
 
 impl Telemetry {
     fn build_exporter_filter<S>(&self) -> impl Filter<S> + use<S> {
         let exporting = Arc::clone(&self.exporting);
-        let open = filter_fn(move |_| exporting.load(Ordering::Relaxed));
-        build_env_filter(&EXPORTER_TARGETS).and(open)
+        let while_exporting = filter_fn(move |_| exporting.load(Ordering::Relaxed));
+        build_env_filter(&EXPORTER_TARGETS).and(while_exporting)
     }
 }
 

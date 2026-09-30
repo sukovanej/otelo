@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
 use std::thread::JoinHandle;
@@ -8,7 +9,7 @@ use std::{fs, io, ptr, thread};
 
 use anyhow::Context;
 use otelo_storage::{
-    AttributeValue, Attributes, HistogramPoint, Inbox, IndexedAttribute, Log, Metric,
+    AttributeValue, Attributes, BatchInbox, HistogramPoint, IndexedAttribute, Log, Metric,
     MetricRetention, NumberPoint, Points, Records, Resource, Span, Temporality,
 };
 use rusqlite::{Connection, Transaction, params};
@@ -18,18 +19,23 @@ use crate::day::Day;
 use crate::indexes::{Indexes, VersionedAttributes, apply_indexes_to_day_file};
 use crate::rollup::{RollupProgress, Rollups};
 use crate::series::{
-    MAX_SERIES_PER_METRIC, SeriesCache, SeriesIdentity, StoredResource, StoredSeries,
+    MAX_SERIES_PER_METRIC, ResourceId, SeriesCache, SeriesIdentity, StoredResource, StoredSeries,
     find_or_insert_resource_id, find_or_insert_series_id,
 };
 use crate::stored_schema::{StoredSchema, read_stored_schema};
 
-const SCHEMA: &str = include_str!("schema.sql");
+const DAY_FILE_SCHEMA: &str = include_str!("schema.sql");
 
 // A day file of another version keeps tables this code cannot read or write.
-const SCHEMA_VERSION: i32 = 1;
+const DAY_FILE_SCHEMA_VERSION: i32 = 1;
 
-const NO_ATTRIBUTES: &BTreeSet<IndexedAttribute> = &BTreeSet::new();
+const NO_INDEXED_ATTRIBUTES: &BTreeSet<IndexedAttribute> = &BTreeSet::new();
 
+const DEFAULT_RETENTION_DAYS: NonZeroU16 = NonZeroU16::new(7).expect("seven is not zero");
+const DEFAULT_MINUTE_ROLLUP_RETENTION_DAYS: NonZeroU16 =
+    NonZeroU16::new(14).expect("fourteen is not zero");
+const DEFAULT_HOUR_ROLLUP_RETENTION_DAYS: NonZeroU16 =
+    NonZeroU16::new(90).expect("ninety is not zero");
 const LOSS_REPORT_INTERVAL: Duration = Duration::from_mins(1);
 const RETENTION_INTERVAL: Duration = Duration::from_hours(1);
 const ROLLUP_INTERVAL: Duration = Duration::from_mins(1);
@@ -38,35 +44,39 @@ const INDEX_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct Config {
-    pub dir: PathBuf,
-    pub retention_days: u16,
-    pub minute_rollup_retention_days: u16,
-    pub hour_rollup_retention_days: u16,
+    pub directory: PathBuf,
+    pub retention_days: NonZeroU16,
+    pub minute_rollup_retention_days: NonZeroU16,
+    pub hour_rollup_retention_days: NonZeroU16,
     pub indexes: Indexes,
 }
 
 impl Config {
     #[must_use]
-    pub fn new(dir: PathBuf) -> Self {
+    pub fn new(directory: PathBuf) -> Self {
         Self {
-            dir,
-            retention_days: 7,
-            minute_rollup_retention_days: 14,
-            hour_rollup_retention_days: 90,
+            directory,
+            retention_days: DEFAULT_RETENTION_DAYS,
+            minute_rollup_retention_days: DEFAULT_MINUTE_ROLLUP_RETENTION_DAYS,
+            hour_rollup_retention_days: DEFAULT_HOUR_ROLLUP_RETENTION_DAYS,
             indexes: Indexes::new(BTreeSet::new()),
         }
     }
 
     pub(crate) fn oldest_retained_day(&self, today: Day) -> Day {
-        today.plus(1 - i64::from(self.retention_days.max(1)))
+        today.add_days(1 - i64::from(self.retention_days.get()))
     }
 
     pub(crate) fn metric_retention(&self, today: Day) -> MetricRetention {
-        let oldest_day_of = |days: u16| today.plus(1 - i64::from(days.max(1))).start();
+        let oldest_kept_at = |retention_days: NonZeroU16| {
+            today
+                .add_days(1 - i64::from(retention_days.get()))
+                .start_at()
+        };
         MetricRetention {
-            oldest_raw_at: oldest_day_of(self.retention_days),
-            oldest_minute_at: oldest_day_of(self.minute_rollup_retention_days),
-            oldest_hour_at: oldest_day_of(self.hour_rollup_retention_days),
+            oldest_raw_at: oldest_kept_at(self.retention_days),
+            oldest_minute_at: oldest_kept_at(self.minute_rollup_retention_days),
+            oldest_hour_at: oldest_kept_at(self.hour_rollup_retention_days),
         }
     }
 }
@@ -76,14 +86,18 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn spawn(config: Config, inbox: Inbox) -> anyhow::Result<Self> {
-        fs::create_dir_all(&config.dir)
-            .with_context(|| format!("make the telemetry directory {}", config.dir.display()))?;
+    pub fn spawn(config: Config, inbox: BatchInbox) -> anyhow::Result<Self> {
+        fs::create_dir_all(&config.directory).with_context(|| {
+            format!(
+                "make the telemetry directory {}",
+                config.directory.display()
+            )
+        })?;
         // No reader has a day file open yet, so a file can move.
-        set_aside_day_files_of_another_schema(&config.dir)?;
+        set_aside_day_files_of_another_schema(&config.directory)?;
         let thread = thread::Builder::new()
             .name("telemetry-writer".into())
-            .spawn(move || State::new(config).run(&inbox))
+            .spawn(move || WriterState::new(config).write_batches_until_disconnected(&inbox))
             .context("start the telemetry writer")?;
         Ok(Self { thread })
     }
@@ -95,9 +109,9 @@ impl Writer {
     }
 }
 
-struct State {
+struct WriterState {
     config: Config,
-    files: HashMap<Day, DayFile>,
+    day_files: HashMap<Day, DayFile>,
     reported_dropped_batches: u64,
     rejected_points: u64,
     reported_rejected_points: u64,
@@ -106,15 +120,15 @@ struct State {
     rollups: Option<Rollups>,
 }
 
-impl State {
+impl WriterState {
     fn new(config: Config) -> Self {
-        let rollups = Rollups::open(&config.dir)
+        let rollups = Rollups::open(&config.directory)
             .inspect_err(|error| tracing::error!("no metric rollups: {error:#}"))
             .ok();
         Self {
             rollups,
             config,
-            files: HashMap::new(),
+            day_files: HashMap::new(),
             reported_dropped_batches: 0,
             rejected_points: 0,
             reported_rejected_points: 0,
@@ -122,39 +136,43 @@ impl State {
         }
     }
 
-    fn run(mut self, inbox: &Inbox) {
+    fn write_batches_until_disconnected(mut self, inbox: &BatchInbox) {
         self.apply_retention();
-        let mut next_report = Instant::now() + LOSS_REPORT_INTERVAL;
-        let mut next_retain = Instant::now() + RETENTION_INTERVAL;
-        let mut next_rollup = Instant::now();
+        let mut next_report_at = Instant::now() + LOSS_REPORT_INTERVAL;
+        let mut next_retention_at = Instant::now() + RETENTION_INTERVAL;
+        let mut next_rollup_at = Instant::now();
         loop {
             self.apply_index_changes();
-            let wait = next_report
-                .min(next_retain)
-                .min(next_rollup)
+            let timeout = next_report_at
+                .min(next_retention_at)
+                .min(next_rollup_at)
                 .saturating_duration_since(Instant::now())
                 .min(INDEX_CHECK_INTERVAL);
-            match inbox.recv_timeout(wait) {
+            match inbox.wait_for_batch(timeout) {
                 Ok(batch) => {
                     let mut batches = vec![batch];
-                    batches.extend(inbox.try_iter().take(MAX_BATCHES_PER_TRANSACTION - 1));
+                    batches.extend(
+                        inbox
+                            .take_queued_batches()
+                            .take(MAX_BATCHES_PER_TRANSACTION - 1),
+                    );
                     self.write_records(batches.iter().flatten());
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             let now = Instant::now();
-            if now >= next_report {
+            if now >= next_report_at {
                 self.report_lost_telemetry(inbox.dropped_batches());
-                next_report = now + LOSS_REPORT_INTERVAL;
+                next_report_at = now + LOSS_REPORT_INTERVAL;
             }
-            if now >= next_retain {
+            if now >= next_retention_at {
                 self.apply_retention();
-                next_retain = now + RETENTION_INTERVAL;
+                next_retention_at = now + RETENTION_INTERVAL;
             }
-            if now >= next_rollup {
+            if now >= next_rollup_at {
                 // A daemon that was down has hours to roll up, and takes batches in between.
-                next_rollup = match self.roll_up_next_due_metrics() {
+                next_rollup_at = match self.roll_up_next_due_metrics() {
                     RollupProgress::MoreIsDue => now,
                     RollupProgress::CaughtUp => now + ROLLUP_INTERVAL,
                 };
@@ -166,81 +184,100 @@ impl State {
     fn write_records<'a>(&mut self, records: impl Iterator<Item = &'a Records>) {
         let today = Day::today();
         // Retention would delete an older file, and a file more than a day ahead would outlive it.
-        let retained_days = self.config.oldest_retained_day(today)..=today.plus(1);
-        let mut parts: BTreeMap<(Day, usize), ResourceDayRecords<'a>> = BTreeMap::new();
+        let retained_days = self.config.oldest_retained_day(today)..=today.add_days(1);
+        let mut records_by_day_and_resource: BTreeMap<(Day, usize), ResourceDayRecords<'a>> =
+            BTreeMap::new();
         let mut resources = Vec::new();
-        for (index, records) in records.enumerate() {
-            resources.push(&records.resource);
-            for log in &records.logs {
-                let key = (Day::of(log.logged_at), index);
-                parts.entry(key).or_default().logs.push(log);
+        for (resource_index, resource_records) in records.enumerate() {
+            resources.push(&resource_records.resource);
+            for log in &resource_records.logs {
+                let day_and_resource = (Day::from_unix_nanos(log.logged_at), resource_index);
+                records_by_day_and_resource
+                    .entry(day_and_resource)
+                    .or_default()
+                    .logs
+                    .push(log);
             }
-            for span in &records.spans {
-                let key = (Day::of(span.started_at), index);
-                parts.entry(key).or_default().spans.push(span);
+            for span in &resource_records.spans {
+                let day_and_resource = (Day::from_unix_nanos(span.started_at), resource_index);
+                records_by_day_and_resource
+                    .entry(day_and_resource)
+                    .or_default()
+                    .spans
+                    .push(span);
             }
-            for metric in &records.metrics {
-                for point in rows_of_points(&metric.points) {
-                    let key = (Day::of(point.recorded_at()), index);
-                    parts.entry(key).or_default().push_point(metric, point);
+            for metric in &resource_records.metrics {
+                for point_row in rows_of_points(&metric.points) {
+                    let day_and_resource = (
+                        Day::from_unix_nanos(point_row.recorded_at()),
+                        resource_index,
+                    );
+                    records_by_day_and_resource
+                        .entry(day_and_resource)
+                        .or_default()
+                        .push_point(metric, point_row);
                 }
             }
         }
-        let mut days: BTreeMap<Day, Vec<(&Resource, ResourceDayRecords)>> = BTreeMap::new();
-        let mut skipped = 0;
-        for ((day, index), part) in parts {
+        let mut resource_records_by_day: BTreeMap<Day, Vec<(&Resource, ResourceDayRecords)>> =
+            BTreeMap::new();
+        let mut skipped_records = 0;
+        for ((day, resource_index), records) in records_by_day_and_resource {
             if retained_days.contains(&day) {
-                days.entry(day).or_default().push((resources[index], part));
+                resource_records_by_day
+                    .entry(day)
+                    .or_default()
+                    .push((resources[resource_index], records));
             } else {
-                skipped += part.len();
+                skipped_records += records.len();
             }
         }
-        if skipped > 0 {
-            tracing::debug!(skipped, "skipped records outside the retention");
+        if skipped_records > 0 {
+            tracing::debug!(
+                skipped = skipped_records,
+                "skipped records outside the retention"
+            );
         }
-        for (day, parts) in days {
-            match self.write_day(day, &parts) {
+        for (day, resource_records) in resource_records_by_day {
+            match self.write_day_records(day, &resource_records) {
                 Ok(rejected_points) => self.rejected_points += rejected_points,
                 Err(error) => tracing::error!(%day, "write telemetry: {error:#}"),
             }
         }
     }
 
-    fn write_day(
+    fn write_day_records(
         &mut self,
         day: Day,
-        parts: &[(&Resource, ResourceDayRecords)],
+        resource_records: &[(&Resource, ResourceDayRecords)],
     ) -> anyhow::Result<u64> {
-        let file = match self.files.entry(day) {
+        let day_file = match self.day_files.entry(day) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => entry.insert(DayFile::open(
-                &self.config.dir,
+                &self.config.directory,
                 day,
                 self.applied_indexes
                     .as_ref()
-                    .map_or(NO_ATTRIBUTES, |applied| &applied.attributes),
+                    .map_or(NO_INDEXED_ATTRIBUTES, |applied| &applied.attributes),
             )?),
         };
-        let result = file.write(parts);
+        let result = day_file.write_records(resource_records);
         if result.is_err() {
-            // The rollback took back what the caches learned.
-            file.resource_ids_by_hash.clear();
-            file.series = SeriesCache::default();
-            file.catalog = CatalogCache::load(&file.conn).unwrap_or_default();
+            day_file.reload_caches_after_rollback();
         }
         result
     }
 
     fn apply_index_changes(&mut self) {
-        let wanted = self.config.indexes.versioned_attributes();
+        let wanted_indexes = self.config.indexes.versioned_attributes();
         if self
             .applied_indexes
             .as_ref()
-            .is_some_and(|applied| applied.version == wanted.version)
+            .is_some_and(|applied| applied.version == wanted_indexes.version)
         {
             return;
         }
-        let names = match fs::read_dir(&self.config.dir) {
+        let days_with_files = match fs::read_dir(&self.config.directory) {
             Ok(entries) => entries
                 .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
                 .filter(|name| name.ends_with(".sqlite"))
@@ -251,15 +288,17 @@ impl State {
                 return;
             }
         };
-        for day in names {
-            let result = match self.files.get(&day) {
-                Some(file) => apply_indexes_to_day_file(&file.conn, &wanted.attributes)
-                    .map_err(anyhow::Error::from),
+        for day in days_with_files {
+            let result = match self.day_files.get(&day) {
+                Some(day_file) => {
+                    apply_indexes_to_day_file(&day_file.connection, &wanted_indexes.attributes)
+                        .map_err(anyhow::Error::from)
+                }
                 // A file from an older otelo may lack the newer tables.
-                None => Connection::open(self.config.dir.join(day.file_name()))
-                    .and_then(|conn| {
-                        create_schema(&conn)?;
-                        apply_indexes_to_day_file(&conn, &wanted.attributes)
+                None => Connection::open(self.config.directory.join(day.file_name()))
+                    .and_then(|connection| {
+                        create_day_file_schema(&connection)?;
+                        apply_indexes_to_day_file(&connection, &wanted_indexes.attributes)
                     })
                     .map_err(anyhow::Error::from),
             };
@@ -267,7 +306,7 @@ impl State {
                 tracing::error!(%day, "index the attributes: {error:#}");
             }
         }
-        self.applied_indexes = Some(wanted);
+        self.applied_indexes = Some(wanted_indexes);
     }
 
     fn report_lost_telemetry(&mut self, dropped_batches: u64) {
@@ -288,7 +327,7 @@ impl State {
         }
         let recorded_at = otelo_storage::now_unix_nanos();
         #[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
-        let counters = [
+        let loss_counters = [
             (
                 "otelo.telemetry.dropped_batches",
                 "{batch}",
@@ -312,17 +351,20 @@ impl State {
                 }],
             ),
         });
-        let otelo = Resource {
+        let otelo_resource = Resource {
             service: "otelo".into(),
             attributes: Attributes::new(),
         };
-        let mut part = ResourceDayRecords::default();
-        for counter in &counters {
-            for row in rows_of_points(&counter.points) {
-                part.push_point(counter, row);
+        let mut records = ResourceDayRecords::default();
+        for loss_counter in &loss_counters {
+            for point_row in rows_of_points(&loss_counter.points) {
+                records.push_point(loss_counter, point_row);
             }
         }
-        if let Err(error) = self.write_day(Day::of(recorded_at), &[(&otelo, part)]) {
+        if let Err(error) = self.write_day_records(
+            Day::from_unix_nanos(recorded_at),
+            &[(&otelo_resource, records)],
+        ) {
             tracing::error!("write the counters of lost telemetry: {error:#}");
         }
     }
@@ -331,14 +373,14 @@ impl State {
         let Some(rollups) = &mut self.rollups else {
             return RollupProgress::CaughtUp;
         };
-        let oldest_raw_at = self.config.oldest_retained_day(Day::today()).start();
+        let oldest_raw_at = self.config.oldest_retained_day(Day::today()).start_at();
         // The reader opens a span for each file and statement. Here no request is their parent,
         // so each would show as a request of otelo itself, every minute.
-        let rolled_up =
+        let progress =
             tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
                 rollups.roll_up_next_due(otelo_storage::now_unix_nanos(), oldest_raw_at)
             });
-        rolled_up.unwrap_or_else(|error| {
+        progress.unwrap_or_else(|error| {
             tracing::error!("roll up the metrics: {error:#}");
             RollupProgress::CaughtUp
         })
@@ -354,12 +396,12 @@ impl State {
                 tracing::error!("delete old metric rollups: {error:#}");
             }
         }
-        let oldest = self.config.oldest_retained_day(today);
+        let oldest_retained_day = self.config.oldest_retained_day(today);
         // Closing the files of past days frees their memory.
-        self.files.retain(|&day, _| day == today);
-        match delete_day_files_before(&self.config.dir, oldest) {
-            Ok(deleted) => {
-                for name in deleted {
+        self.day_files.retain(|&day, _| day == today);
+        match delete_day_files_before(&self.config.directory, oldest_retained_day) {
+            Ok(deleted_file_names) => {
+                for name in deleted_file_names {
                     tracing::info!(file = %name, "deleted telemetry past the retention");
                 }
             }
@@ -368,20 +410,20 @@ impl State {
     }
 }
 
-fn delete_day_files_before(dir: &Path, oldest: Day) -> io::Result<Vec<String>> {
-    let mut deleted = Vec::new();
-    for entry in fs::read_dir(dir)? {
+fn delete_day_files_before(directory: &Path, oldest_retained_day: Day) -> io::Result<Vec<String>> {
+    let mut deleted_file_names = Vec::new();
+    for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        if Day::from_file_name(&name).is_some_and(|day| day < oldest) {
+        if Day::from_file_name(&name).is_some_and(|day| day < oldest_retained_day) {
             fs::remove_file(entry.path())?;
-            deleted.push(name);
+            deleted_file_names.push(name);
         }
     }
-    deleted.sort();
-    Ok(deleted)
+    deleted_file_names.sort();
+    Ok(deleted_file_names)
 }
 
 #[derive(Clone, Copy)]
@@ -412,94 +454,119 @@ fn rows_of_points(points: &Points) -> Vec<PointRow<'_>> {
 struct ResourceDayRecords<'a> {
     logs: Vec<&'a Log>,
     spans: Vec<&'a Span>,
-    points: Vec<(&'a Metric, Vec<PointRow<'a>>)>,
+    point_rows_by_metric: Vec<(&'a Metric, Vec<PointRow<'a>>)>,
 }
 
 impl<'a> ResourceDayRecords<'a> {
     fn len(&self) -> usize {
-        let points: usize = self.points.iter().map(|(_, points)| points.len()).sum();
-        self.logs.len() + self.spans.len() + points
+        let point_count: usize = self
+            .point_rows_by_metric
+            .iter()
+            .map(|(_, point_rows)| point_rows.len())
+            .sum();
+        self.logs.len() + self.spans.len() + point_count
     }
 
-    fn push_point(&mut self, metric: &'a Metric, point: PointRow<'a>) {
-        match self.points.last_mut() {
-            Some((last, points)) if ptr::eq(*last, metric) => points.push(point),
-            _ => self.points.push((metric, vec![point])),
+    fn push_point(&mut self, metric: &'a Metric, point_row: PointRow<'a>) {
+        match self.point_rows_by_metric.last_mut() {
+            Some((last_metric, point_rows)) if ptr::eq(*last_metric, metric) => {
+                point_rows.push(point_row);
+            }
+            _ => self.point_rows_by_metric.push((metric, vec![point_row])),
         }
     }
 }
 
 struct DayFile {
-    conn: Connection,
-    resource_ids_by_hash: HashMap<i64, i64>,
-    series: SeriesCache,
+    connection: Connection,
+    resource_ids_by_hash: HashMap<i64, ResourceId>,
+    series_cache: SeriesCache,
     catalog: CatalogCache,
 }
 
 impl DayFile {
-    fn open(dir: &Path, day: Day, indexed: &BTreeSet<IndexedAttribute>) -> anyhow::Result<Self> {
-        let path = dir.join(day.file_name());
-        let conn = Connection::open(&path).with_context(|| format!("open {}", path.display()))?;
-        create_schema(&conn).with_context(|| format!("create the schema in {}", path.display()))?;
-        apply_indexes_to_day_file(&conn, indexed)
+    fn open(
+        directory: &Path,
+        day: Day,
+        indexed_attributes: &BTreeSet<IndexedAttribute>,
+    ) -> anyhow::Result<Self> {
+        let path = directory.join(day.file_name());
+        let connection =
+            Connection::open(&path).with_context(|| format!("open {}", path.display()))?;
+        create_day_file_schema(&connection)
+            .with_context(|| format!("create the schema in {}", path.display()))?;
+        apply_indexes_to_day_file(&connection, indexed_attributes)
             .with_context(|| format!("index the attributes in {}", path.display()))?;
-        let catalog = CatalogCache::load(&conn)
+        let catalog = CatalogCache::load(&connection)
             .with_context(|| format!("read the attribute catalog of {}", path.display()))?;
         Ok(Self {
-            conn,
+            connection,
             resource_ids_by_hash: HashMap::new(),
-            series: SeriesCache::default(),
+            series_cache: SeriesCache::default(),
             catalog,
         })
     }
 
-    fn write(&mut self, parts: &[(&Resource, ResourceDayRecords)]) -> anyhow::Result<u64> {
-        let tx = self.conn.transaction()?;
+    fn reload_caches_after_rollback(&mut self) {
+        self.resource_ids_by_hash.clear();
+        self.series_cache = SeriesCache::default();
+        self.catalog = CatalogCache::load(&self.connection).unwrap_or_default();
+    }
+
+    fn write_records(
+        &mut self,
+        resource_records: &[(&Resource, ResourceDayRecords)],
+    ) -> anyhow::Result<u64> {
+        let transaction = self.connection.transaction()?;
         let mut rejected_points = 0;
-        let mut delta = CatalogDelta::default();
+        let mut catalog_delta = CatalogDelta::default();
         let catalog = &mut self.catalog;
-        for (resource, part) in parts {
+        for (resource, records) in resource_records {
             let stored_resource = find_or_insert_resource_id(
-                &tx,
+                &transaction,
                 &mut self.resource_ids_by_hash,
                 &resource.service,
                 &resource.attributes.to_json(),
             )?;
             if matches!(stored_resource, StoredResource::Inserted(_)) {
-                catalog.count_attributes(&mut delta, KeyGroup::Resource, &resource.attributes);
+                catalog.count_attributes(
+                    &mut catalog_delta,
+                    KeyGroup::Resource,
+                    &resource.attributes,
+                );
             }
             let resource_id = stored_resource.id();
-            let mut insert = tx.prepare_cached(
+            let mut insert_log = transaction.prepare_cached(
                 "INSERT INTO logs (ts, resource_id, severity, body, trace_id, span_id, attributes, source)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
-            for log in &part.logs {
-                catalog.count_attributes(&mut delta, KeyGroup::Logs, &log.attributes);
-                insert.execute(params![
+            for log in &records.logs {
+                catalog.count_attributes(&mut catalog_delta, KeyGroup::Logs, &log.attributes);
+                insert_log.execute(params![
                     log.logged_at,
                     resource_id,
                     log.severity.number(),
                     log.body,
-                    log.trace_id.map(|id| id.0),
-                    log.span_id.map(|id| id.0),
+                    log.trace_context.trace_id().map(|trace_id| trace_id.0),
+                    log.trace_context.span_id().map(|span_id| span_id.0),
                     log.attributes.to_json(),
-                    log.source,
+                    log.source.name(),
                 ])?;
             }
-            let mut insert = tx.prepare_cached(
+            let mut insert_span = transaction.prepare_cached(
                 "INSERT INTO spans (trace_id, span_id, parent_span_id, resource_id, name, kind,
                                     start_ts, duration_ns, status, attributes, events)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
-            for span in &part.spans {
-                catalog.count_attributes(&mut delta, KeyGroup::Spans, &span.attributes);
+            for span in &records.spans {
+                catalog.count_attributes(&mut catalog_delta, KeyGroup::Spans, &span.attributes);
                 catalog.count_value(
-                    &mut delta,
+                    &mut catalog_delta,
                     KeyGroup::SpanNames,
                     "name",
                     &AttributeValue::String(span.name.clone()),
                 );
-                insert.execute(params![
+                insert_span.execute(params![
                     span.trace_id.0,
                     span.span_id.0,
                     span.parent_span_id.map(|id| id.0),
@@ -514,38 +581,38 @@ impl DayFile {
                 ])?;
             }
             rejected_points += write_points_and_count_rejected(
-                &tx,
-                &mut self.series,
+                &transaction,
+                &mut self.series_cache,
                 resource_id,
-                &part.points,
+                &records.point_rows_by_metric,
                 |labels| {
-                    catalog.count_attributes(&mut delta, KeyGroup::Metrics, labels);
+                    catalog.count_attributes(&mut catalog_delta, KeyGroup::Metrics, labels);
                 },
             )?;
         }
-        catalog.write_delta(&tx, delta)?;
-        tx.commit()?;
+        catalog.write_delta(&transaction, catalog_delta)?;
+        transaction.commit()?;
         Ok(rejected_points)
     }
 }
 
 fn write_points_and_count_rejected(
-    tx: &Transaction,
-    cache: &mut SeriesCache,
-    resource_id: i64,
-    points_by_metric: &[(&Metric, Vec<PointRow>)],
+    transaction: &Transaction,
+    series_cache: &mut SeriesCache,
+    resource_id: ResourceId,
+    point_rows_by_metric: &[(&Metric, Vec<PointRow>)],
     mut on_new_series: impl FnMut(&Attributes),
 ) -> anyhow::Result<u64> {
     let mut rejected_points = 0;
-    let mut insert = tx.prepare_cached(
+    let mut insert_point = transaction.prepare_cached(
         "INSERT INTO points (series_id, ts, value, histogram) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (series_id, ts) DO UPDATE
          SET value = excluded.value, histogram = excluded.histogram",
     )?;
-    for (metric, points) in points_by_metric {
-        let series = find_or_insert_series_id(
-            tx,
-            cache,
+    for (metric, point_rows) in point_rows_by_metric {
+        let stored_series = find_or_insert_series_id(
+            transaction,
+            series_cache,
             resource_id,
             &SeriesIdentity {
                 name: &metric.name,
@@ -554,44 +621,43 @@ fn write_points_and_count_rejected(
                 labels_json: &metric.labels.to_json(),
             },
         )?;
-        let series_id = match series {
-            StoredSeries::Found(id) => id,
-            StoredSeries::Inserted(id) => {
+        let series_id = match stored_series {
+            StoredSeries::Found(series_id) => series_id,
+            StoredSeries::Inserted(series_id) => {
                 on_new_series(&metric.labels);
-                id
+                series_id
             }
-            StoredSeries::PastTheMostOfItsMetric => {
-                rejected_points += points.len() as u64;
+            StoredSeries::PastSeriesLimit => {
+                rejected_points += point_rows.len() as u64;
                 continue;
             }
         };
-        for point in points {
-            let (value, histogram) = match point {
+        for point_row in point_rows {
+            let (value, histogram_json) = match point_row {
                 PointRow::Number(point) => (point.value, None),
-                PointRow::Histogram(point) => match point.histogram.check_buckets() {
-                    Ok(()) => (
-                        point.histogram.sum.unwrap_or(0.0),
-                        Some(serde_json::to_string(&point.histogram)?),
-                    ),
-                    Err(error) => {
-                        tracing::debug!(metric = %metric.name, "skipped a point: {error:#}");
-                        continue;
-                    }
-                },
+                PointRow::Histogram(point) => (
+                    point.histogram.sum.unwrap_or(0.0),
+                    Some(serde_json::to_string(&point.histogram)?),
+                ),
             };
-            insert.execute(params![series_id, point.recorded_at(), value, histogram])?;
+            insert_point.execute(params![
+                series_id,
+                point_row.recorded_at(),
+                value,
+                histogram_json
+            ])?;
         }
     }
     Ok(rejected_points)
 }
 
-pub fn create_schema(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(SCHEMA)?;
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+pub fn create_day_file_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(DAY_FILE_SCHEMA)?;
+    connection.pragma_update(None, "user_version", DAY_FILE_SCHEMA_VERSION)
 }
 
-fn set_aside_day_files_of_another_schema(dir: &Path) -> anyhow::Result<()> {
-    for entry in fs::read_dir(dir)? {
+fn set_aside_day_files_of_another_schema(directory: &Path) -> anyhow::Result<()> {
+    for entry in fs::read_dir(directory)? {
         let path = entry?.path();
         let is_day_file = path
             .file_name()
@@ -606,16 +672,16 @@ fn set_aside_day_files_of_another_schema(dir: &Path) -> anyhow::Result<()> {
 }
 
 fn set_aside_day_file_of_another_schema(path: &Path) -> anyhow::Result<()> {
-    let conn = Connection::open(path)?;
-    let version = match read_stored_schema(&conn)? {
-        StoredSchema::NotWritten | StoredSchema::Version(SCHEMA_VERSION) => return Ok(()),
+    let connection = Connection::open(path)?;
+    let version = match read_stored_schema(&connection)? {
+        StoredSchema::NotWritten | StoredSchema::Version(DAY_FILE_SCHEMA_VERSION) => return Ok(()),
         StoredSchema::Version(version) => version,
     };
     // The file has to hold all its rows before it moves without its write-ahead log.
-    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
-    drop(conn);
-    let aside = path.with_extension(format!("sqlite.schema-{version}"));
-    fs::rename(path, &aside)?;
+    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+    drop(connection);
+    let set_aside_path = path.with_extension(format!("sqlite.schema-{version}"));
+    fs::rename(path, &set_aside_path)?;
     // A write-ahead log left behind would be read as the log of the next file of the day.
     for suffix in ["sqlite-wal", "sqlite-shm"] {
         match fs::remove_file(path.with_extension(suffix)) {
@@ -624,9 +690,9 @@ fn set_aside_day_file_of_another_schema(path: &Path) -> anyhow::Result<()> {
         }
     }
     tracing::warn!(
-        file = %aside.display(),
+        file = %set_aside_path.display(),
         "set aside a day file of schema version {version}; this otelo reads version \
-         {SCHEMA_VERSION}"
+         {DAY_FILE_SCHEMA_VERSION}"
     );
     Ok(())
 }

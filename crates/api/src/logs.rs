@@ -2,9 +2,9 @@ use axum::extract::{Query, State};
 use otelo_query::Signal;
 use otelo_storage::query::{LogGroups, Logs};
 
-use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_query};
+use crate::{Api, DefaultSince};
 
 /// Log lines, newest first.
 #[utoipa::path(
@@ -16,13 +16,18 @@ use crate::params::{QueryParams, parse_query};
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn logs(State(api): State<Api>, Query(params): Query<QueryParams>) -> ApiResult<Logs> {
-    let query = parse_query(params.q.as_deref(), Signal::Logs)?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 100),
-        move |r| Ok(r.queries.logs(&query, r.limit)?),
+pub async fn list_logs(
+    State(api): State<Api>,
+    Query(params): Query<QueryParams>,
+) -> ApiResult<Logs> {
+    let query = parse_query(params.query.as_deref(), Signal::Logs)?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        100,
+        move |opened, limit| Ok(opened.queries.list_logs(&query, limit)?),
     )
     .await
 }
@@ -39,16 +44,18 @@ pub async fn logs(State(api): State<Api>, Query(params): Query<QueryParams>) -> 
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn log_groups(
+pub async fn list_log_groups(
     State(api): State<Api>,
     Query(params): Query<QueryParams>,
 ) -> ApiResult<LogGroups> {
-    let query = parse_query(params.q.as_deref(), Signal::Logs)?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 50),
-        move |r| Ok(r.queries.log_groups(&query, r.limit)?),
+    let query = parse_query(params.query.as_deref(), Signal::Logs)?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        50,
+        move |opened, limit| Ok(opened.queries.list_log_groups(&query, limit)?),
     )
     .await
 }

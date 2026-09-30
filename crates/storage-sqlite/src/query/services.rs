@@ -1,27 +1,32 @@
 use std::collections::{BTreeMap, HashMap};
+use std::ops::ControlFlow;
 
 use anyhow::ensure;
 use otelo_storage::query::{
-    Latency, MAX_BUCKETS, Operation, OperationDetail, RequestBucket, Requests, Service,
+    Latency, MAX_BUCKETS_IN_RANGE, Operation, OperationDetail, RequestBucket, Requests, Service,
     ServiceBucket, ServiceStats, ServiceSummary, Services,
 };
 use otelo_storage::{Attributes, Severity, SpanKind, SpanStatus};
 
-use super::{WhereClause, new_statement_span, timestamp_from_nanos, truncate_to_limit};
-use crate::Reader;
+use super::{DaySchema, WhereClause, new_statement_span, timestamp_from_nanos, truncate_to_limit};
+use crate::{Day, Reader};
 
-// Kind 2 is server and kind 5 is consumer.
-const ENTRY_SPAN_CLAUSE: &str = "(s.parent_span_id IS NULL OR s.kind IN (2, 5))";
+fn entry_span_condition() -> String {
+    format!(
+        "(s.parent_span_id IS NULL OR s.kind IN ({}, {}))",
+        SpanKind::Server.number(),
+        SpanKind::Consumer.number()
+    )
+}
 
 // A value is taken for the middle of its bucket, 2γ^i/(γ+1), which is off by (γ-1)/(γ+1), about 1%.
 const SKETCH_BUCKET_GROWTH: f64 = 1.02;
 
-// Buckets that grow by a factor keep a percentile's relative error at any size, in memory
-// that grows with the logarithm of the range of the durations, not with their count.
+// Buckets that grow by a factor keep the relative error of a percentile, in memory that grows with the logarithm of the durations.
 #[derive(Default)]
 struct DurationSketch {
-    zeros: u64,
-    counts: BTreeMap<i32, u64>,
+    zero_count: u64,
+    counts_by_bucket_index: BTreeMap<i32, u64>,
 }
 
 impl DurationSketch {
@@ -30,12 +35,12 @@ impl DurationSketch {
         clippy::cast_possible_truncation,
         reason = "the index of a bucket is below 2000 for any i64"
     )]
-    fn add_duration(&mut self, nanos: i64) {
-        if nanos <= 0 {
-            self.zeros += 1;
+    fn add_duration(&mut self, duration_ns: i64) {
+        if duration_ns <= 0 {
+            self.zero_count += 1;
         } else {
-            let index = (nanos as f64).log(SKETCH_BUCKET_GROWTH).ceil() as i32;
-            *self.counts.entry(index).or_default() += 1;
+            let index = (duration_ns as f64).log(SKETCH_BUCKET_GROWTH).ceil() as i32;
+            *self.counts_by_bucket_index.entry(index).or_default() += 1;
         }
     }
 
@@ -45,14 +50,14 @@ impl DurationSketch {
         clippy::cast_sign_loss,
         reason = "an estimate"
     )]
-    fn nearest_rank_quantile(&self, q: f64, count: u64) -> i64 {
-        let rank = ((q * count as f64).ceil() as u64).max(1) - 1;
-        let mut seen = self.zeros;
+    fn nearest_rank_quantile(&self, quantile: f64, count: u64) -> i64 {
+        let rank = ((quantile * count as f64).ceil() as u64).max(1) - 1;
+        let mut seen = self.zero_count;
         if rank < seen {
             return 0;
         }
-        for (&index, &n) in &self.counts {
-            seen += n;
+        for (&index, &bucket_count) in &self.counts_by_bucket_index {
+            seen += bucket_count;
             if rank < seen {
                 return (2.0 * SKETCH_BUCKET_GROWTH.powi(index) / (SKETCH_BUCKET_GROWTH + 1.0))
                     .round() as i64;
@@ -71,9 +76,9 @@ pub(super) struct RequestTally {
 }
 
 impl RequestTally {
-    pub(super) fn add_request(&mut self, duration_ns: i64, error: bool) {
+    pub(super) fn add_request(&mut self, duration_ns: i64, failed: bool) {
         self.count += 1;
-        self.errors += u64::from(error);
+        self.errors += u64::from(failed);
         self.total_ns = self.total_ns.saturating_add(duration_ns);
         self.sketch.add_duration(duration_ns);
     }
@@ -93,33 +98,43 @@ impl RequestTally {
 }
 
 #[derive(Default)]
-struct ServiceTally {
+struct StepTally {
     requests: RequestTally,
     logs: u64,
     error_logs: u64,
-    steps: HashMap<i64, (RequestTally, u64, u64)>,
+}
+
+#[derive(Default)]
+struct ServiceTally {
+    total: StepTally,
+    steps: HashMap<i64, StepTally>,
 }
 
 impl ServiceTally {
-    fn stats(&self) -> ServiceStats {
+    fn to_service_stats(&self) -> ServiceStats {
         ServiceStats {
-            requests: self.requests.to_requests(),
-            logs: self.logs,
-            error_logs: self.error_logs,
+            requests: self.total.requests.to_requests(),
+            logs: self.total.logs,
+            error_logs: self.total.error_logs,
         }
     }
 
-    fn step_buckets(&self, first: i64, until: i64, step: i64) -> Vec<ServiceBucket> {
-        let empty = (RequestTally::default(), 0, 0);
-        (first..until)
-            .step_by(usize::try_from(step).unwrap_or(usize::MAX))
-            .map(|start| {
-                let (requests, logs, error_logs) = self.steps.get(&start).unwrap_or(&empty);
+    fn to_service_buckets(
+        &self,
+        first_step_at: i64,
+        end_at: i64,
+        step_ns: i64,
+    ) -> Vec<ServiceBucket> {
+        let empty = StepTally::default();
+        (first_step_at..end_at)
+            .step_by(usize::try_from(step_ns).unwrap_or(usize::MAX))
+            .map(|start_at| {
+                let step = self.steps.get(&start_at).unwrap_or(&empty);
                 ServiceBucket {
-                    start_at: timestamp_from_nanos(start),
-                    requests: requests.to_requests(),
-                    logs: *logs,
-                    error_logs: *error_logs,
+                    start_at: timestamp_from_nanos(start_at),
+                    requests: step.requests.to_requests(),
+                    logs: step.logs,
+                    error_logs: step.error_logs,
                 }
             })
             .collect()
@@ -128,7 +143,7 @@ impl ServiceTally {
 
 #[derive(Clone, Copy)]
 enum TallyScope<'a> {
-    Every,
+    EveryService,
     Service(&'a str),
     Operation {
         service: &'a str,
@@ -140,7 +155,7 @@ enum TallyScope<'a> {
 impl<'a> TallyScope<'a> {
     const fn service(self) -> Option<&'a str> {
         match self {
-            Self::Every => None,
+            Self::EveryService => None,
             Self::Service(service) | Self::Operation { service, .. } => Some(service),
         }
     }
@@ -156,80 +171,114 @@ struct EntrySpan {
     location: SpanLocation,
 }
 
-pub(super) type SpanLocation = (String, i64);
-
-#[derive(Default)]
-pub(super) struct OperationTally {
-    pub(super) requests: RequestTally,
-    pub(super) newest_request: Option<(i64, SpanLocation)>,
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct SpanLocation {
+    pub(super) day: Day,
+    pub(super) rowid: i64,
 }
 
-impl OperationTally {
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct NewestRequest<Detail = ()> {
+    pub(super) started_at: i64,
+    pub(super) location: SpanLocation,
+    pub(super) detail: Detail,
+}
+
+fn keep_newest_request<Detail>(
+    newest_request: &mut Option<NewestRequest<Detail>>,
+    started_at: i64,
+    location: SpanLocation,
+    detail: impl FnOnce() -> Detail,
+) {
+    if newest_request
+        .as_ref()
+        .is_none_or(|request| started_at >= request.started_at)
+    {
+        *newest_request = Some(NewestRequest {
+            started_at,
+            location,
+            detail: detail(),
+        });
+    }
+}
+
+pub(super) struct OperationTally<Detail = ()> {
+    pub(super) requests: RequestTally,
+    pub(super) newest_request: Option<NewestRequest<Detail>>,
+}
+
+impl<Detail> Default for OperationTally<Detail> {
+    fn default() -> Self {
+        Self {
+            requests: RequestTally::default(),
+            newest_request: None,
+        }
+    }
+}
+
+impl<Detail> OperationTally<Detail> {
     pub(super) fn add_request_at(
         &mut self,
         started_at: i64,
         duration_ns: i64,
         failed: bool,
-        location: &SpanLocation,
+        location: SpanLocation,
+        detail: impl FnOnce() -> Detail,
     ) {
         self.requests.add_request(duration_ns, failed);
-        if self
-            .newest_request
-            .as_ref()
-            .is_none_or(|(newest_at, _)| started_at >= *newest_at)
-        {
-            self.newest_request = Some((started_at, location.clone()));
-        }
-    }
-
-    pub(super) fn is_newest_request_at(&self, started_at: i64) -> bool {
-        self.newest_request
-            .as_ref()
-            .is_some_and(|(newest_at, _)| *newest_at == started_at)
+        keep_newest_request(&mut self.newest_request, started_at, location, detail);
     }
 }
 
 impl Reader {
-    pub(super) fn read_span_attributes<'a>(
+    pub(super) fn read_span_attributes(
         &self,
-        rows: impl Iterator<Item = &'a SpanLocation>,
+        locations: impl Iterator<Item = SpanLocation>,
     ) -> anyhow::Result<HashMap<SpanLocation, Attributes>> {
-        let mut by_day: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
-        for (day, rowid) in rows {
-            by_day.entry(day).or_default().push(*rowid);
+        let mut rowids_by_day: BTreeMap<Day, Vec<i64>> = BTreeMap::new();
+        for location in locations {
+            rowids_by_day
+                .entry(location.day)
+                .or_default()
+                .push(location.rowid);
         }
-        let mut out = HashMap::new();
-        for (day, rowids) in by_day {
-            let list = rowids
+        let mut attributes_by_location = HashMap::new();
+        for (day, rowids) in rowids_by_day {
+            let day_schema = DaySchema { day };
+            let rowid_list = rowids
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ");
-            let sql =
-                format!("SELECT rowid, attributes FROM \"{day}\".spans WHERE rowid IN ({list})");
-            let span = new_statement_span(&sql);
-            let _entered = span.enter();
-            let mut stmt = self.conn().prepare(&sql)?;
-            let mut rows = stmt.query([])?;
-            let mut read = 0_i64;
+            let sql = format!(
+                "SELECT rowid, attributes FROM {day_schema}.spans WHERE rowid IN ({rowid_list})"
+            );
+            let statement_span = new_statement_span(&sql);
+            let _entered = statement_span.enter();
+            let mut statement = self.connection().prepare(&sql)?;
+            let mut rows = statement.query([])?;
+            let mut returned_rows = 0_i64;
             while let Some(row) = rows.next()? {
-                read += 1;
+                returned_rows += 1;
                 let attributes: String = row.get(1)?;
-                out.insert(
-                    (day.to_owned(), row.get(0)?),
+                attributes_by_location.insert(
+                    SpanLocation {
+                        day,
+                        rowid: row.get(0)?,
+                    },
                     serde_json::from_str(&attributes)?,
                 );
             }
-            span.record("db.response.returned_rows", read);
+            statement_span.record("db.response.returned_rows", returned_rows);
         }
-        Ok(out)
+        Ok(attributes_by_location)
     }
 
     pub(super) fn check_step(&self, step_ns: i64) -> anyhow::Result<()> {
         ensure!(step_ns > 0, "the step has to be longer than zero");
         ensure!(
-            self.range().length() / step_ns <= MAX_BUCKETS,
-            "the step makes more than {MAX_BUCKETS} buckets in the range; raise the step"
+            self.range().length_ns() / step_ns <= MAX_BUCKETS_IN_RANGE,
+            "the step makes more than {MAX_BUCKETS_IN_RANGE} buckets in the range; raise the step"
         );
         Ok(())
     }
@@ -237,33 +286,37 @@ impl Reader {
     fn tally_services(
         &self,
         scope: TallyScope,
-        step: i64,
+        step_ns: i64,
         mut on_entry_span: impl FnMut(&EntrySpan),
     ) -> anyhow::Result<HashMap<String, ServiceTally>> {
         let mut tallies: HashMap<String, ServiceTally> = HashMap::new();
 
-        let mut where_ = WhereClause::within_reader_range(self, "s.start_ts");
-        where_.push_clause(ENTRY_SPAN_CLAUSE.into());
+        let mut where_clause = WhereClause::within_reader_range(self, "s.start_ts");
+        where_clause.push_condition(entry_span_condition());
         if let Some(service) = scope.service() {
-            where_.push_clause_with_param("r.service = :service", ":service", service.to_owned());
+            where_clause.push_condition_with_param(
+                "r.service = :service",
+                ":service",
+                service.to_owned(),
+            );
         }
         if let TallyScope::Operation { name, kind, .. } = scope {
-            where_.push_clause_with_param("s.name = :name", ":name", name.to_owned());
-            where_.push_clause_with_param("s.kind = :kind", ":kind", kind.number());
+            where_clause.push_condition_with_param("s.name = :name", ":name", name.to_owned());
+            where_clause.push_condition_with_param("s.kind = :kind", ":kind", kind.number());
         }
         self.scan_rows(
             ["", ""],
-            |day| {
+            |day_schema| {
                 format!(
                     "SELECT r.service, s.name, s.kind, s.start_ts, s.duration_ns, s.status,
                             '{}', s.rowid
-                     FROM {day}.spans s JOIN {day}.resources r ON r.id = s.resource_id
+                     FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
                      WHERE {}",
-                    day.trim_matches('"'),
-                    where_.sql_for_day(day)
+                    day_schema.day,
+                    where_clause.sql_for_day(day_schema)
                 )
             },
-            &where_,
+            &where_clause,
             |row| {
                 let entry = EntrySpan {
                     service: row.get(0)?,
@@ -272,15 +325,25 @@ impl Reader {
                     started_at: row.get(3)?,
                     duration_ns: row.get(4)?,
                     failed: SpanStatus::from_number(row.get(5)?).is_error(),
-                    location: (row.get(6)?, row.get(7)?),
+                    location: SpanLocation {
+                        day: row.get(6)?,
+                        rowid: row.get(7)?,
+                    },
                 };
                 let tally = tallies.entry(entry.service.clone()).or_default();
-                tally.requests.add_request(entry.duration_ns, entry.failed);
-                let start = entry.started_at.div_euclid(step) * step;
-                let (requests, _, _) = tally.steps.entry(start).or_default();
-                requests.add_request(entry.duration_ns, entry.failed);
+                tally
+                    .total
+                    .requests
+                    .add_request(entry.duration_ns, entry.failed);
+                let step_at = entry.started_at.div_euclid(step_ns) * step_ns;
+                tally
+                    .steps
+                    .entry(step_at)
+                    .or_default()
+                    .requests
+                    .add_request(entry.duration_ns, entry.failed);
                 on_entry_span(&entry);
-                Ok(true)
+                Ok(ControlFlow::Continue(()))
             },
         )?;
 
@@ -288,38 +351,42 @@ impl Reader {
         if matches!(scope, TallyScope::Operation { .. }) {
             return Ok(tallies);
         }
-        let mut where_ = WhereClause::within_reader_range(self, "l.ts");
-        where_.push_param(":step", step);
+        let mut where_clause = WhereClause::within_reader_range(self, "l.ts");
+        where_clause.push_param(":step", step_ns);
         if let Some(service) = scope.service() {
-            where_.push_clause_with_param("r.service = :service", ":service", service.to_owned());
+            where_clause.push_condition_with_param(
+                "r.service = :service",
+                ":service",
+                service.to_owned(),
+            );
         }
         self.scan_rows(
             [
                 "SELECT service, start, sum(n), sum(errors) FROM (",
                 ") GROUP BY service, start",
             ],
-            |day| {
+            |day_schema| {
                 format!(
                     "SELECT r.service, l.ts / :step * :step AS start, count(*) AS n,
                             sum(l.severity >= {}) AS errors
-                     FROM {day}.logs l JOIN {day}.resources r ON r.id = l.resource_id
+                     FROM {day_schema}.logs l JOIN {day_schema}.resources r ON r.id = l.resource_id
                      WHERE {}
                      GROUP BY 1, 2",
                     Severity::ERROR.number(),
-                    where_.sql_for_day(day)
+                    where_clause.sql_for_day(day_schema)
                 )
             },
-            &where_,
+            &where_clause,
             |row| {
                 let logs = u64::try_from(row.get::<_, i64>(2)?)?;
-                let errors = u64::try_from(row.get::<_, i64>(3)?)?;
+                let error_logs = u64::try_from(row.get::<_, i64>(3)?)?;
                 let tally = tallies.entry(row.get(0)?).or_default();
-                tally.logs += logs;
-                tally.error_logs += errors;
-                let (_, step_logs, step_errors) = tally.steps.entry(row.get(1)?).or_default();
-                *step_logs += logs;
-                *step_errors += errors;
-                Ok(true)
+                tally.total.logs += logs;
+                tally.total.error_logs += error_logs;
+                let step = tally.steps.entry(row.get(1)?).or_default();
+                step.logs += logs;
+                step.error_logs += error_logs;
+                Ok(ControlFlow::Continue(()))
             },
         )?;
         Ok(tallies)
@@ -329,9 +396,13 @@ impl Reader {
         &self,
         only_service: Option<&str>,
     ) -> anyhow::Result<HashMap<String, Attributes>> {
-        let mut where_ = WhereClause::new();
+        let mut where_clause = WhereClause::new();
         if let Some(service) = only_service {
-            where_.push_clause_with_param("service = :service", ":service", service.to_owned());
+            where_clause.push_condition_with_param(
+                "service = :service",
+                ":service",
+                service.to_owned(),
+            );
         }
         let mut resources = HashMap::new();
         self.scan_rows(
@@ -340,18 +411,18 @@ impl Reader {
                 // A resource with attributes wins over one without, such as the writer's own.
                 ") ORDER BY attributes != '{}', day, id",
             ],
-            |day| {
+            |day_schema| {
                 format!(
-                    "SELECT '{}' AS day, id, service, attributes FROM {day}.resources WHERE {}",
-                    day.trim_matches('"'),
-                    where_.sql_for_day(day)
+                    "SELECT '{}' AS day, id, service, attributes FROM {day_schema}.resources WHERE {}",
+                    day_schema.day,
+                    where_clause.sql_for_day(day_schema)
                 )
             },
-            &where_,
+            &where_clause,
             |row| {
                 let attributes: String = row.get(1)?;
                 resources.insert(row.get(0)?, serde_json::from_str(&attributes)?);
-                Ok(true)
+                Ok(ControlFlow::Continue(()))
             },
         )?;
         Ok(resources)
@@ -364,15 +435,15 @@ pub(super) fn summarize_services(
     limit: usize,
 ) -> anyhow::Result<Services> {
     reader.check_step(step_ns)?;
-    let tallies = reader.tally_services(TallyScope::Every, step_ns, |_| {})?;
+    let tallies = reader.tally_services(TallyScope::EveryService, step_ns, |_| {})?;
     let mut resources = reader.read_resource_attributes(None)?;
-    let first = reader.range().start_at().div_euclid(step_ns) * step_ns;
+    let first_step_at = reader.range().start_at().div_euclid(step_ns) * step_ns;
     let mut services: Vec<_> = tallies
         .into_iter()
         .map(|(service, tally)| ServiceSummary {
             resource: resources.remove(&service).unwrap_or_default(),
-            stats: tally.stats(),
-            buckets: tally.step_buckets(first, reader.range().end_at(), step_ns),
+            stats: tally.to_service_stats(),
+            buckets: tally.to_service_buckets(first_step_at, reader.range().end_at(), step_ns),
             service,
         })
         .collect();
@@ -407,7 +478,8 @@ pub(super) fn summarize_service(
                 entry.started_at,
                 entry.duration_ns,
                 entry.failed,
-                &entry.location,
+                entry.location,
+                || (),
             );
     })?;
     let tally = tallies.remove(service).unwrap_or_default();
@@ -420,11 +492,13 @@ pub(super) fn summarize_service(
             .then_with(|| a_kind.cmp(b_kind))
     });
     let truncated = truncate_to_limit(&mut operations, limit);
-    let mut attributes = reader.read_span_attributes(
-        operations
-            .iter()
-            .filter_map(|(_, o)| Some(&o.newest_request.as_ref()?.1)),
-    )?;
+    let mut attributes =
+        reader.read_span_attributes(operations.iter().filter_map(|(_, operation)| {
+            operation
+                .newest_request
+                .as_ref()
+                .map(|newest_request| newest_request.location)
+        }))?;
     let operations = operations
         .into_iter()
         .map(|((name, kind), operation)| Operation {
@@ -432,12 +506,12 @@ pub(super) fn summarize_service(
             kind,
             attributes: operation
                 .newest_request
-                .and_then(|(_, row)| attributes.remove(&row))
+                .and_then(|newest_request| attributes.remove(&newest_request.location))
                 .unwrap_or_default(),
             requests: operation.requests.to_requests(),
         })
         .collect();
-    let first = reader.range().start_at().div_euclid(step_ns) * step_ns;
+    let first_step_at = reader.range().start_at().div_euclid(step_ns) * step_ns;
     Ok(Service {
         service: service.to_owned(),
         resource: reader
@@ -447,8 +521,8 @@ pub(super) fn summarize_service(
         start_at: timestamp_from_nanos(reader.range().start_at()),
         end_at: timestamp_from_nanos(reader.range().end_at()),
         step_ns,
-        stats: tally.stats(),
-        buckets: tally.step_buckets(first, reader.range().end_at(), step_ns),
+        stats: tally.to_service_stats(),
+        buckets: tally.to_service_buckets(first_step_at, reader.range().end_at(), step_ns),
         operations,
         truncated,
     })
@@ -462,28 +536,23 @@ pub(super) fn summarize_operation(
     step_ns: i64,
 ) -> anyhow::Result<OperationDetail> {
     reader.check_step(step_ns)?;
-    let mut newest: Option<(i64, SpanLocation)> = None;
+    let mut newest_request: Option<NewestRequest> = None;
     let scope = TallyScope::Operation {
         service,
         name,
         kind,
     };
     let mut tallies = reader.tally_services(scope, step_ns, |entry| {
-        if newest
-            .as_ref()
-            .is_none_or(|(start, _)| entry.started_at >= *start)
-        {
-            newest = Some((entry.started_at, entry.location.clone()));
-        }
+        keep_newest_request(&mut newest_request, entry.started_at, entry.location, || ());
     })?;
     let tally = tallies.remove(service).unwrap_or_default();
-    let attributes = match newest {
-        Some((_, row)) => reader
-            .read_span_attributes(std::iter::once(&row))?
-            .remove(&row),
+    let attributes = match newest_request {
+        Some(newest_request) => reader
+            .read_span_attributes(std::iter::once(newest_request.location))?
+            .remove(&newest_request.location),
         None => None,
     };
-    let first = reader.range().start_at().div_euclid(step_ns) * step_ns;
+    let first_step_at = reader.range().start_at().div_euclid(step_ns) * step_ns;
     Ok(OperationDetail {
         service: service.to_owned(),
         name: name.to_owned(),
@@ -492,9 +561,9 @@ pub(super) fn summarize_operation(
         start_at: timestamp_from_nanos(reader.range().start_at()),
         end_at: timestamp_from_nanos(reader.range().end_at()),
         step_ns,
-        requests: tally.requests.to_requests(),
+        requests: tally.total.requests.to_requests(),
         buckets: tally
-            .step_buckets(first, reader.range().end_at(), step_ns)
+            .to_service_buckets(first_step_at, reader.range().end_at(), step_ns)
             .into_iter()
             .map(|bucket| RequestBucket {
                 start_at: bucket.start_at,

@@ -26,27 +26,27 @@ const FILESYSTEM_TYPES_WITHOUT_DISK: [&str; 8] = [
 
 const LOOPBACK_INTERFACE_NAMES: [&str; 2] = ["lo", "lo0"];
 
-pub struct Mapping {
+pub struct SnapshotMapper {
     host: HostIdentity,
     previous_cpu_ticks: Option<CpuTicks>,
-    cpu_of_process_trees: HashMap<String, ProcessTreeCpu>,
+    process_tree_cpu_by_job_label: HashMap<String, ProcessTreeCpu>,
 }
 
 // A sum over the live processes of a tree would fall when a child exits, and a reader takes a
 // counter that fell for one that started again. This total only grows.
 #[derive(Default)]
 struct ProcessTreeCpu {
-    total: Duration,
-    seen_by_pid: HashMap<Pid, Duration>,
+    total_cpu_time: Duration,
+    cpu_time_seen_by_pid: HashMap<Pid, Duration>,
 }
 
-impl Mapping {
+impl SnapshotMapper {
     #[must_use]
     pub fn new(host: HostIdentity) -> Self {
         Self {
             host,
             previous_cpu_ticks: None,
-            cpu_of_process_trees: HashMap::new(),
+            process_tree_cpu_by_job_label: HashMap::new(),
         }
     }
 
@@ -57,66 +57,67 @@ impl Mapping {
         storage_size: Option<StorageSize>,
     ) -> Batch {
         let mut otelo_metrics = TickMetrics::new(recorded_at);
-        self.push_cpu(&mut otelo_metrics, snapshot.cpu);
+        self.push_cpu_utilization(&mut otelo_metrics, snapshot.cpu);
         push_load_average(&mut otelo_metrics, snapshot);
         push_memory(&mut otelo_metrics, snapshot.memory);
         push_swap(&mut otelo_metrics, snapshot);
         push_filesystems(&mut otelo_metrics, &snapshot.filesystems);
         push_interfaces(&mut otelo_metrics, &snapshot.interfaces);
         push_process_usage(&mut otelo_metrics, snapshot.otelo_process);
-        if let Some(size) = storage_size {
-            push_storage_size(&mut otelo_metrics, size);
+        if let Some(storage_size) = storage_size {
+            push_storage_size(&mut otelo_metrics, storage_size);
         }
         let mut batch = vec![self.records_of_service(OTELO_SERVICE_NAME, otelo_metrics)];
-        for (service, metrics) in self.map_services(recorded_at, &snapshot.services) {
-            batch.push(self.records_of_service(&service, metrics));
+        for (service, tick_metrics) in self.map_services(recorded_at, &snapshot.services) {
+            batch.push(self.records_of_service(&service, tick_metrics));
         }
         batch
     }
 
-    fn records_of_service(&self, service: &str, metrics: TickMetrics) -> Records {
+    fn records_of_service(&self, service: &str, tick_metrics: TickMetrics) -> Records {
         Records {
             resource: self.host.resource_of_service(service),
             logs: Vec::new(),
             spans: Vec::new(),
-            metrics: metrics.collected,
+            metrics: tick_metrics.metrics,
         }
     }
 
     // The shares need two readings, so the first snapshot gives none.
-    fn push_cpu(&mut self, metrics: &mut TickMetrics, cpu: Cpu) {
+    fn push_cpu_utilization(&mut self, metrics: &mut TickMetrics, cpu: Cpu) {
         match cpu {
             Cpu::Utilization(share) => {
                 metrics.push_gauge("system.cpu.utilization", RATIO_UNIT, &[], share);
             }
             Cpu::TicksByMode(ticks) => {
-                let Some(previous) = self.previous_cpu_ticks.replace(ticks) else {
+                let Some(previous_ticks) = self.previous_cpu_ticks.replace(ticks) else {
                     return;
                 };
-                let since = |now: u64, before: u64| now.saturating_sub(before);
+                let ticks_since = |now: u64, before: u64| now.saturating_sub(before);
                 let ticks_by_mode = [
-                    ("user", since(ticks.user, previous.user)),
-                    ("nice", since(ticks.nice, previous.nice)),
-                    ("system", since(ticks.system, previous.system)),
+                    ("user", ticks_since(ticks.user, previous_ticks.user)),
+                    ("nice", ticks_since(ticks.nice, previous_ticks.nice)),
+                    ("system", ticks_since(ticks.system, previous_ticks.system)),
                     (
                         "interrupt",
-                        since(ticks.irq, previous.irq) + since(ticks.softirq, previous.softirq),
+                        ticks_since(ticks.irq, previous_ticks.irq)
+                            + ticks_since(ticks.softirq, previous_ticks.softirq),
                     ),
-                    ("iowait", since(ticks.iowait, previous.iowait)),
-                    ("steal", since(ticks.steal, previous.steal)),
-                    ("idle", since(ticks.idle, previous.idle)),
+                    ("iowait", ticks_since(ticks.iowait, previous_ticks.iowait)),
+                    ("steal", ticks_since(ticks.steal, previous_ticks.steal)),
+                    ("idle", ticks_since(ticks.idle, previous_ticks.idle)),
                 ];
-                let all: u64 = ticks_by_mode.iter().map(|(_, ticks)| ticks).sum();
-                if all == 0 {
+                let all_ticks: u64 = ticks_by_mode.iter().map(|(_, ticks)| ticks).sum();
+                if all_ticks == 0 {
                     return;
                 }
                 #[expect(clippy::cast_precision_loss, reason = "the ticks of 15 seconds")]
-                for (mode, ticks) in ticks_by_mode {
+                for (mode, mode_ticks) in ticks_by_mode {
                     metrics.push_gauge(
                         "system.cpu.utilization",
                         RATIO_UNIT,
                         &[("cpu.mode", mode)],
-                        ticks as f64 / all as f64,
+                        mode_ticks as f64 / all_ticks as f64,
                     );
                 }
             }
@@ -130,9 +131,12 @@ impl Mapping {
     ) -> Vec<(String, TickMetrics)> {
         match services {
             Services::Unavailable => Vec::new(),
-            Services::Cgroups { units, otelo_unit } => units
+            Services::Cgroups {
+                units,
+                otelo_unit_name,
+            } => units
                 .iter()
-                .filter(|unit| otelo_unit.as_deref() != Some(unit.name.as_str()))
+                .filter(|unit| otelo_unit_name.as_deref() != Some(unit.name.as_str()))
                 .map(|unit| (unit.name.clone(), metrics_of_unit(recorded_at, unit)))
                 .collect(),
             Services::ProcessTrees {
@@ -150,102 +154,110 @@ impl Mapping {
         processes: &[Process],
         otelo_pid: Pid,
     ) -> Vec<(String, TickMetrics)> {
-        let trees = ProcessTrees::of_processes(processes);
-        let mut mapped = Vec::new();
-        let mut running = HashSet::new();
+        let process_trees = ProcessTrees::from_processes(processes);
+        let mut metrics_by_job_label = Vec::new();
+        let mut running_job_labels = HashSet::new();
         for job in jobs {
-            let tree = trees.processes_under(job.main_pid);
-            if tree.is_empty() || tree.iter().any(|process| process.pid == otelo_pid) {
+            let tree_processes = process_trees.collect_processes_under(job.main_pid);
+            if tree_processes.is_empty()
+                || tree_processes
+                    .iter()
+                    .any(|process| process.pid == otelo_pid)
+            {
                 continue;
             }
-            running.insert(job.label.as_str());
-            let cpu = self.cpu_of_process_trees.entry(job.label.clone());
-            let is_first_reading = matches!(cpu, std::collections::hash_map::Entry::Vacant(_));
-            let cpu = cpu.or_default();
-            let mut seen_by_pid = HashMap::new();
-            for process in &tree {
-                let now = process.usage.cpu_time;
+            running_job_labels.insert(job.label.as_str());
+            let tree_cpu_entry = self.process_tree_cpu_by_job_label.entry(job.label.clone());
+            let is_first_reading =
+                matches!(tree_cpu_entry, std::collections::hash_map::Entry::Vacant(_));
+            let tree_cpu = tree_cpu_entry.or_default();
+            let mut cpu_time_seen_by_pid = HashMap::new();
+            for process in &tree_processes {
+                let cpu_time = process.usage.cpu_time;
                 // A process the last reading did not have started after it, and so did one
                 // whose time fell: another process took its PID.
-                let gained = cpu
-                    .seen_by_pid
+                let gained_cpu_time = tree_cpu
+                    .cpu_time_seen_by_pid
                     .get(&process.pid)
-                    .and_then(|&before| now.checked_sub(before))
-                    .unwrap_or(now);
+                    .and_then(|&seen_cpu_time| cpu_time.checked_sub(seen_cpu_time))
+                    .unwrap_or(cpu_time);
                 if !is_first_reading {
-                    cpu.total += gained;
+                    tree_cpu.total_cpu_time += gained_cpu_time;
                 }
-                seen_by_pid.insert(process.pid, now);
+                cpu_time_seen_by_pid.insert(process.pid, cpu_time);
             }
-            cpu.seen_by_pid = seen_by_pid;
+            tree_cpu.cpu_time_seen_by_pid = cpu_time_seen_by_pid;
             let mut metrics = TickMetrics::new(recorded_at);
             push_process_usage(
                 &mut metrics,
                 ProcessUsage {
-                    cpu_time: cpu.total,
-                    resident_bytes: tree
+                    cpu_time: tree_cpu.total_cpu_time,
+                    resident_bytes: tree_processes
                         .iter()
                         .map(|process| process.usage.resident_bytes)
                         .sum(),
                 },
             );
-            mapped.push((job.label.clone(), metrics));
+            metrics_by_job_label.push((job.label.clone(), metrics));
         }
-        self.cpu_of_process_trees
-            .retain(|label, _| running.contains(label.as_str()));
-        mapped
+        self.process_tree_cpu_by_job_label
+            .retain(|job_label, _| running_job_labels.contains(job_label.as_str()));
+        metrics_by_job_label
     }
 }
 
 struct ProcessTrees<'a> {
-    by_pid: HashMap<Pid, &'a Process>,
-    children: HashMap<Pid, Vec<Pid>>,
+    processes_by_pid: HashMap<Pid, &'a Process>,
+    child_pids_by_pid: HashMap<Pid, Vec<Pid>>,
 }
 
 impl<'a> ProcessTrees<'a> {
-    fn of_processes(processes: &'a [Process]) -> Self {
-        let mut children: HashMap<Pid, Vec<Pid>> = HashMap::new();
+    fn from_processes(processes: &'a [Process]) -> Self {
+        let mut child_pids_by_pid: HashMap<Pid, Vec<Pid>> = HashMap::new();
         for process in processes {
-            if let Some(parent) = process.parent_pid {
-                children.entry(parent).or_default().push(process.pid);
+            if let Some(parent_pid) = process.parent_pid {
+                child_pids_by_pid
+                    .entry(parent_pid)
+                    .or_default()
+                    .push(process.pid);
             }
         }
         Self {
-            by_pid: processes
+            processes_by_pid: processes
                 .iter()
                 .map(|process| (process.pid, process))
                 .collect(),
-            children,
+            child_pids_by_pid,
         }
     }
 
-    fn processes_under(&self, root: Pid) -> Vec<&'a Process> {
-        let mut tree = Vec::new();
-        let mut visited = HashSet::new();
-        let mut next = vec![root];
-        while let Some(pid) = next.pop() {
-            if !visited.insert(pid) {
+    fn collect_processes_under(&self, root_pid: Pid) -> Vec<&'a Process> {
+        let mut tree_processes = Vec::new();
+        let mut visited_pids = HashSet::new();
+        let mut pids_to_visit = vec![root_pid];
+        while let Some(pid) = pids_to_visit.pop() {
+            if !visited_pids.insert(pid) {
                 continue;
             }
-            if let Some(process) = self.by_pid.get(&pid) {
-                tree.push(*process);
-                next.extend(self.children.get(&pid).into_iter().flatten());
+            if let Some(process) = self.processes_by_pid.get(&pid) {
+                tree_processes.push(*process);
+                pids_to_visit.extend(self.child_pids_by_pid.get(&pid).into_iter().flatten());
             }
         }
-        tree
+        tree_processes
     }
 }
 
 struct TickMetrics {
     recorded_at: i64,
-    collected: Vec<Metric>,
+    metrics: Vec<Metric>,
 }
 
 impl TickMetrics {
     const fn new(recorded_at: i64) -> Self {
         Self {
             recorded_at,
-            collected: Vec::new(),
+            metrics: Vec::new(),
         }
     }
 
@@ -257,14 +269,14 @@ impl TickMetrics {
         value: f64,
         points_of_kind: fn(Vec<NumberPoint>) -> Points,
     ) {
-        let mut attributes = Attributes::new();
-        for &(key, label) in labels {
-            attributes.insert(key, label);
+        let mut label_attributes = Attributes::new();
+        for &(key, value) in labels {
+            label_attributes.insert(key, value);
         }
-        self.collected.push(Metric {
+        self.metrics.push(Metric {
             name: name.into(),
             unit: unit.into(),
-            labels: attributes,
+            labels: label_attributes,
             points: points_of_kind(vec![NumberPoint {
                 recorded_at: self.recorded_at,
                 value,
@@ -289,18 +301,18 @@ impl TickMetrics {
 }
 
 fn push_load_average(metrics: &mut TickMetrics, snapshot: &Snapshot) {
-    let load = snapshot.load_average;
+    let load_average = snapshot.load_average;
     for (name, threads) in [
-        ("system.cpu.load_average.1m", load.one_minute),
-        ("system.cpu.load_average.5m", load.five_minutes),
-        ("system.cpu.load_average.15m", load.fifteen_minutes),
+        ("system.cpu.load_average.1m", load_average.one_minute),
+        ("system.cpu.load_average.5m", load_average.five_minutes),
+        ("system.cpu.load_average.15m", load_average.fifteen_minutes),
     ] {
         metrics.push_gauge(name, THREADS_UNIT, &[], threads);
     }
 }
 
 fn push_memory(metrics: &mut TickMetrics, memory: Memory) {
-    let (total, by_state) = match memory {
+    let (limit_bytes, bytes_by_state) = match memory {
         Memory::Meminfo {
             total_bytes,
             free_bytes,
@@ -309,17 +321,17 @@ fn push_memory(metrics: &mut TickMetrics, memory: Memory) {
             buffers_bytes,
         } => {
             // The OpenTelemetry Collector counts the slab the kernel can give back as cache.
-            let cached = cached_bytes + reclaimable_slab_bytes;
-            let used = total_bytes
+            let cache_bytes = cached_bytes + reclaimable_slab_bytes;
+            let used_bytes = total_bytes
                 .saturating_sub(free_bytes)
-                .saturating_sub(cached)
+                .saturating_sub(cache_bytes)
                 .saturating_sub(buffers_bytes);
             (
                 total_bytes,
                 vec![
-                    ("used", used),
+                    ("used", used_bytes),
                     ("free", free_bytes),
-                    ("cached", cached),
+                    ("cached", cache_bytes),
                     ("buffers", buffers_bytes),
                 ],
             )
@@ -333,7 +345,7 @@ fn push_memory(metrics: &mut TickMetrics, memory: Memory) {
             vec![("used", used_bytes), ("free", free_bytes)],
         ),
     };
-    for (state, bytes) in by_state {
+    for (state, bytes) in bytes_by_state {
         metrics.push_level(
             "system.memory.usage",
             BYTES_UNIT,
@@ -341,7 +353,7 @@ fn push_memory(metrics: &mut TickMetrics, memory: Memory) {
             bytes,
         );
     }
-    metrics.push_level("system.memory.limit", BYTES_UNIT, &[], total);
+    metrics.push_level("system.memory.limit", BYTES_UNIT, &[], limit_bytes);
 }
 
 fn push_swap(metrics: &mut TickMetrics, snapshot: &Snapshot) {
@@ -370,7 +382,7 @@ fn push_filesystems(metrics: &mut TickMetrics, filesystems: &[Filesystem]) {
             available_bytes: u64,
         },
     }
-    let mut by_disk: BTreeMap<Disk, &Filesystem> = BTreeMap::new();
+    let mut shortest_mounted_by_disk: BTreeMap<Disk, &Filesystem> = BTreeMap::new();
     for filesystem in filesystems {
         let filesystem_type = filesystem.filesystem_type.as_str();
         if filesystem.total_bytes == 0 || FILESYSTEM_TYPES_WITHOUT_DISK.contains(&filesystem_type) {
@@ -384,29 +396,29 @@ fn push_filesystems(metrics: &mut TickMetrics, filesystems: &[Filesystem]) {
         } else {
             Disk::Device(&filesystem.device)
         };
-        let mount_length = |filesystem: &Filesystem| {
+        let mount_point_sort_key = |filesystem: &Filesystem| {
             (
                 filesystem.mount_point.as_os_str().len(),
                 filesystem.mount_point.clone(),
             )
         };
-        by_disk
+        shortest_mounted_by_disk
             .entry(disk)
-            .and_modify(|shortest| {
-                if mount_length(filesystem) < mount_length(shortest) {
-                    *shortest = filesystem;
+            .and_modify(|shortest_mounted| {
+                if mount_point_sort_key(filesystem) < mount_point_sort_key(shortest_mounted) {
+                    *shortest_mounted = filesystem;
                 }
             })
             .or_insert(filesystem);
     }
-    let mut shown: Vec<&Filesystem> = by_disk.into_values().collect();
-    shown.sort_by(|a, b| a.mount_point.cmp(&b.mount_point));
-    for filesystem in shown {
+    let mut shown_filesystems: Vec<&Filesystem> = shortest_mounted_by_disk.into_values().collect();
+    shown_filesystems.sort_by(|a, b| a.mount_point.cmp(&b.mount_point));
+    for filesystem in shown_filesystems {
         let mount_point = filesystem.mount_point.to_string_lossy();
-        let used = filesystem
+        let used_bytes = filesystem
             .total_bytes
             .saturating_sub(filesystem.available_bytes);
-        for (state, bytes) in [("used", used), ("free", filesystem.available_bytes)] {
+        for (state, bytes) in [("used", used_bytes), ("free", filesystem.available_bytes)] {
             metrics.push_level(
                 "system.filesystem.usage",
                 BYTES_UNIT,
@@ -423,13 +435,13 @@ fn push_filesystems(metrics: &mut TickMetrics, filesystems: &[Filesystem]) {
 }
 
 fn push_interfaces(metrics: &mut TickMetrics, interfaces: &[Interface]) {
-    let mut shown: Vec<&Interface> = interfaces
+    let mut shown_interfaces: Vec<&Interface> = interfaces
         .iter()
         .filter(|interface| !LOOPBACK_INTERFACE_NAMES.contains(&interface.name.as_str()))
         .filter(|interface| interface.received_bytes + interface.transmitted_bytes > 0)
         .collect();
-    shown.sort_by(|a, b| a.name.cmp(&b.name));
-    for interface in shown {
+    shown_interfaces.sort_by(|a, b| a.name.cmp(&b.name));
+    for interface in shown_interfaces {
         #[expect(clippy::cast_precision_loss, reason = "a byte count far below 2^53")]
         for (direction, bytes) in [
             ("receive", interface.received_bytes),
@@ -488,16 +500,16 @@ fn metrics_of_unit(recorded_at: i64, unit: &Unit) -> TickMetrics {
     metrics
 }
 
-fn push_storage_size(metrics: &mut TickMetrics, size: StorageSize) {
-    for (file, bytes) in [
-        ("telemetry", size.telemetry_bytes),
-        ("rollup", size.rollup_bytes),
-        ("state", size.state_bytes),
+fn push_storage_size(metrics: &mut TickMetrics, storage_size: StorageSize) {
+    for (file_kind, bytes) in [
+        ("telemetry", storage_size.telemetry_bytes),
+        ("rollup", storage_size.rollup_bytes),
+        ("state", storage_size.state_bytes),
     ] {
         metrics.push_level(
             "otelo.storage.size",
             BYTES_UNIT,
-            &[("otelo.storage.file", file)],
+            &[("otelo.storage.file", file_kind)],
             bytes,
         );
     }

@@ -97,7 +97,7 @@ pub struct CallDetail {
     /// The calls, as the requests of an operation named after the span name
     /// of the newest one.
     #[serde(flatten)]
-    pub detail: OperationDetail,
+    pub operation: OperationDetail,
     pub target: TargetKey,
     /// What the calls do, as [`CallOperation::summary`] says.
     pub summary: String,
@@ -110,14 +110,18 @@ pub struct CallDetail {
 }
 
 fn is_id_segment(segment: &str) -> bool {
-    let hex = segment.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    let only_hex_digits_and_dashes = segment
+        .chars()
+        .all(|character| character.is_ascii_hexdigit() || character == '-');
     !segment.is_empty()
-        && (segment.chars().all(|c| c.is_ascii_digit())
-            || (hex && segment.len() >= 8 && segment.chars().any(|c| c.is_ascii_digit())))
+        && (segment.chars().all(|character| character.is_ascii_digit())
+            || (only_hex_digits_and_dashes
+                && segment.len() >= 8
+                && segment.chars().any(|character| character.is_ascii_digit())))
 }
 
 #[must_use]
-pub fn path_template(path: &str) -> String {
+pub fn replace_ids_in_path(path: &str) -> String {
     path.split('/')
         .map(|segment| {
             if is_id_segment(segment) {
@@ -130,78 +134,78 @@ pub fn path_template(path: &str) -> String {
         .join("/")
 }
 
-fn starts_parameter(c: char, next: Option<char>) -> bool {
-    next.is_some_and(|d| match c {
-        ':' => d.is_ascii_alphabetic() || d == '_',
-        _ => d.is_ascii_digit(),
+fn starts_parameter(character: char, next_character: Option<char>) -> bool {
+    next_character.is_some_and(|following| match character {
+        ':' => following.is_ascii_alphabetic() || following == '_',
+        _ => following.is_ascii_digit(),
     })
 }
 
 #[must_use]
-pub fn query_template(query: &str) -> String {
-    let mut out = String::with_capacity(query.len());
+pub fn replace_values_in_query(query: &str) -> String {
+    let mut template = String::with_capacity(query.len());
     let mut chars = query.chars().peekable();
     let mut after_name_character = false;
-    while let Some(c) = chars.next() {
-        match c {
+    while let Some(character) = chars.next() {
+        match character {
             '\'' => {
-                while let Some(d) = chars.next() {
-                    if d == '\'' && chars.next_if_eq(&'\'').is_none() {
+                while let Some(quoted) = chars.next() {
+                    if quoted == '\'' && chars.next_if_eq(&'\'').is_none() {
                         break;
                     }
                 }
-                out.push('?');
+                template.push('?');
                 after_name_character = false;
             }
             '"' | '`' => {
-                out.push(c);
-                for d in chars.by_ref() {
-                    out.push(d);
-                    if d == c {
+                template.push(character);
+                for quoted in chars.by_ref() {
+                    template.push(quoted);
+                    if quoted == character {
                         break;
                     }
                 }
                 after_name_character = true;
             }
             '$' | '?' | ':'
-                if !after_name_character && starts_parameter(c, chars.peek().copied()) =>
+                if !after_name_character && starts_parameter(character, chars.peek().copied()) =>
             {
                 while chars
-                    .next_if(|d| d.is_ascii_alphanumeric() || *d == '_')
+                    .next_if(|following| following.is_ascii_alphanumeric() || *following == '_')
                     .is_some()
                 {}
-                out.push('?');
+                template.push('?');
             }
-            c if c.is_ascii_digit() && !after_name_character => {
+            _ if character.is_ascii_digit() && !after_name_character => {
                 while chars
-                    .next_if(|d| d.is_ascii_alphanumeric() || *d == '.')
+                    .next_if(|following| following.is_ascii_alphanumeric() || *following == '.')
                     .is_some()
                 {}
-                out.push('?');
+                template.push('?');
             }
-            c if c.is_whitespace() => {
-                if !out.is_empty() && !out.ends_with(' ') {
-                    out.push(' ');
+            _ if character.is_whitespace() => {
+                if !template.is_empty() && !template.ends_with(' ') {
+                    template.push(' ');
                 }
                 after_name_character = false;
             }
-            c => {
-                out.push(c);
+            _ => {
+                template.push(character);
                 after_name_character =
-                    c.is_alphanumeric() || matches!(c, '_' | '$' | '?' | ':' | '@');
+                    character.is_alphanumeric() || matches!(character, '_' | '$' | '?' | ':' | '@');
             }
         }
     }
-    let mut out = out.trim_end().to_owned();
+    let mut template = template.trim_end().to_owned();
     for (list, one) in [
         ("?, ?", "?"),
         ("?,?", "?"),
         ("(?), (?)", "(?)"),
         ("(?),(?)", "(?)"),
     ] {
-        while out.contains(list) {
-            out = out.replace(list, one);
+        while template.contains(list) {
+            template = template.replace(list, one);
         }
     }
-    out
+    template
 }

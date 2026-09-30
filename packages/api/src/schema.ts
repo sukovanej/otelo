@@ -13,7 +13,7 @@ export interface paths {
          * The attribute keys of the records of a signal and of their resources over
          *     the retention, the most common first, with their types.
          */
-        get: operations["attributes"];
+        get: operations["list_attribute_keys"];
         put?: never;
         post?: never;
         delete?: never;
@@ -34,7 +34,7 @@ export interface paths {
          *     cursor of a query, from the attributes and values of the retention, and
          *     describes the field of the term the cursor is in.
          */
-        get: operations["complete"];
+        get: operations["complete_query"];
         put?: never;
         post?: never;
         delete?: never;
@@ -90,7 +90,7 @@ export interface paths {
             cookie?: never;
         };
         /** Log lines, newest first. */
-        get: operations["logs"];
+        get: operations["list_logs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -111,7 +111,7 @@ export interface paths {
          *     template replaces numbers, UUIDs, hex IDs, and quoted strings with
          *     placeholders.
          */
-        get: operations["log_groups"];
+        get: operations["list_log_groups"];
         put?: never;
         post?: never;
         delete?: never;
@@ -133,7 +133,7 @@ export interface paths {
          *     the resource. A range of metrics can go back 90 days, further than the
          *     logs and the spans.
          */
-        get: operations["metrics"];
+        get: operations["list_metrics"];
         put?: never;
         post?: never;
         delete?: never;
@@ -154,7 +154,7 @@ export interface paths {
          *     minimum, the average, the maximum, and the last value, the rate of a
          *     counter, and the distribution of a histogram.
          */
-        get: operations["metric"];
+        get: operations["get_metric_series"];
         put?: never;
         post?: never;
         delete?: never;
@@ -176,7 +176,7 @@ export interface paths {
          *     span of the server or the consumer kind. Each service has its requests and
          *     its logs over the range and in buckets of one step.
          */
-        get: operations["services"];
+        get: operations["list_services"];
         put?: never;
         post?: never;
         delete?: never;
@@ -197,7 +197,7 @@ export interface paths {
          *     step, and its requests by span name, the most first. A service without
          *     telemetry in the range has none of either.
          */
-        get: operations["service"];
+        get: operations["get_service"];
         put?: never;
         post?: never;
         delete?: never;
@@ -218,7 +218,7 @@ export interface paths {
          *     over the range and in buckets of one step, the attributes of the newest
          *     one, and the newest 50. A call without spans in the range has none.
          */
-        get: operations["call"];
+        get: operations["get_call"];
         put?: never;
         post?: never;
         delete?: never;
@@ -244,7 +244,7 @@ export interface paths {
          *     method and the path of an HTTP request with its ids taken out, or else
          *     its span name.
          */
-        get: operations["calls"];
+        get: operations["list_calls"];
         put?: never;
         post?: never;
         delete?: never;
@@ -265,7 +265,7 @@ export interface paths {
          *     one step, and the attributes of its newest request. An operation without
          *     requests in the range has none.
          */
-        get: operations["operation"];
+        get: operations["get_operation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -282,7 +282,7 @@ export interface paths {
             cookie?: never;
         };
         /** Spans, newest first. */
-        get: operations["spans"];
+        get: operations["list_spans"];
         put?: never;
         post?: never;
         delete?: never;
@@ -301,7 +301,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Runs a read-only SQL query over the day files of the range. */
-        post: operations["sql"];
+        post: operations["run_sql"];
         delete?: never;
         options?: never;
         head?: never;
@@ -316,7 +316,7 @@ export interface paths {
             cookie?: never;
         };
         /** Traces with a span that the query keeps, by their root span, newest first. */
-        get: operations["traces"];
+        get: operations["list_traces"];
         put?: never;
         post?: never;
         delete?: never;
@@ -333,7 +333,7 @@ export interface paths {
             cookie?: never;
         };
         /** One trace: its spans by start time, and the logs that carry its ID. */
-        get: operations["trace"];
+        get: operations["get_trace"];
         put?: never;
         post?: never;
         delete?: never;
@@ -360,7 +360,7 @@ export interface components {
              * @description The JSON type of the values: `string`, `int`, `float`, `bool`,
              *     `array`, `object`, or `mixed`.
              */
-            type: string;
+            type: components["schemas"]["ValueType"];
         };
         /** @description The attribute keys of a signal, over the attached days. */
         AttributeKeys: {
@@ -513,16 +513,7 @@ export interface components {
             /** Format: int64 */
             count: number;
             counts: number[];
-            /**
-             * Format: double
-             * @description Estimates of the median and the 90th and 99th percentiles, by linear
-             *     interpolation inside a bucket. `None` without values.
-             */
-            p50: number | null;
-            /** Format: double */
-            p90: number | null;
-            /** Format: double */
-            p99: number | null;
+            percentiles: null | components["schemas"]["Percentiles"];
             /** Format: double */
             sum: number | null;
         };
@@ -531,16 +522,7 @@ export interface components {
             error: string;
         };
         /** @description A field of a query: where it comes from, its type, and its values. */
-        FieldBody: {
-            /**
-             * Format: int64
-             * @description How many records have the attribute, or how many resources for an
-             *     attribute of a resource. Missing for a built-in field, which every
-             *     record has.
-             */
-            count: number | null;
-            /** @description What a built-in field holds. Missing for an attribute. */
-            description: string | null;
+        FieldBody: components["schemas"]["FieldOriginBody"] & {
             /** @description How many distinct values the daemon knows. */
             distinct_values: number;
             /**
@@ -550,13 +532,12 @@ export interface components {
             many_values: boolean;
             /** @description The field as a query writes it. */
             name: string;
-            source: components["schemas"]["FieldSource"];
             /**
              * @description The type of the values. Of an attribute: `string`, `int`, `float`,
              *     `bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,
              *     `bool`, or `duration`.
              */
-            type: string;
+            type: components["schemas"]["ValueType"];
             /**
              * @description The values, the most common first, and 10 at most. For a built-in
              *     field with fixed values, those, in their order.
@@ -566,9 +547,29 @@ export interface components {
         /**
          * @description Where a field comes from: the query language, the attributes of the
          *     records, or the attributes of their resources.
-         * @enum {string}
          */
-        FieldSource: "builtin" | "attribute" | "resource";
+        FieldOriginBody: {
+            /** @description What the field holds. */
+            description: string;
+            /** @enum {string} */
+            source: "builtin";
+        } | {
+            /**
+             * Format: int64
+             * @description How many records have the attribute.
+             */
+            count: number;
+            /** @enum {string} */
+            source: "attribute";
+        } | {
+            /**
+             * Format: int64
+             * @description How many resources have the attribute.
+             */
+            count: number;
+            /** @enum {string} */
+            source: "resource";
+        };
         FieldValueBody: {
             /**
              * Format: int64
@@ -582,12 +583,18 @@ export interface components {
         IndexBody: {
             key: string;
             /** @description `logs` or `spans`. */
-            signal: components["schemas"]["Signal"];
+            signal: components["schemas"]["IndexedSignal"];
         };
         /** @description The attributes that have an index. */
         IndexList: {
             indexes: components["schemas"]["IndexBody"][];
         };
+        /**
+         * @description The kind of record whose attributes can have an index, as the API names
+         *     it.
+         * @enum {string}
+         */
+        IndexedSignal: "logs" | "spans";
         /** @description Percentiles of durations, in nanoseconds. */
         Latency: {
             /** Format: int64 */
@@ -651,10 +658,15 @@ export interface components {
              */
             severity: number;
             /** @description `otlp`, or the service log source that read the line. */
-            source: string;
+            source: components["schemas"]["LogSource"];
             span_id: string | null;
             trace_id: string | null;
         };
+        /**
+         * @description How a log line arrived.
+         * @enum {string}
+         */
+        LogSource: "otlp";
         /** @description Log lines, newest first. */
         Logs: {
             logs: components["schemas"]["LogLine"][];
@@ -757,6 +769,15 @@ export interface components {
              * @description The length of a bucket in nanoseconds.
              */
             step_ns: number;
+        };
+        /** @description Percentiles of the values a histogram recorded. */
+        Percentiles: {
+            /** Format: double */
+            p50: number;
+            /** Format: double */
+            p90: number;
+            /** Format: double */
+            p99: number;
         };
         /** @description The requests of one step. */
         RequestBucket: {
@@ -1066,6 +1087,13 @@ export interface components {
             /** @description The attributes the query compares that have no index. */
             unindexed: string[];
         };
+        /**
+         * @description The type of the values of a field. `mixed` when the values of an
+         *     attribute have more than one type, and `duration` only for a built-in
+         *     field.
+         * @enum {string}
+         */
+        ValueType: "null" | "bool" | "int" | "float" | "string" | "array" | "object" | "mixed" | "duration";
     };
     responses: never;
     parameters: never;
@@ -1075,7 +1103,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    attributes: {
+    list_attribute_keys: {
         parameters: {
             query: {
                 signal: components["schemas"]["Signal"];
@@ -1104,7 +1132,7 @@ export interface operations {
             };
         };
     };
-    complete: {
+    complete_query: {
         parameters: {
             query: {
                 signal: components["schemas"]["Signal"];
@@ -1165,7 +1193,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description `logs` or `spans` */
-                signal: components["schemas"]["Signal"];
+                signal: components["schemas"]["IndexedSignal"];
                 /** @description The attribute key, such as `user.id` */
                 key: string;
             };
@@ -1197,7 +1225,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description `logs` or `spans` */
-                signal: components["schemas"]["Signal"];
+                signal: components["schemas"]["IndexedSignal"];
                 /** @description The attribute key, such as `user.id` */
                 key: string;
             };
@@ -1231,7 +1259,7 @@ export interface operations {
             };
         };
     };
-    logs: {
+    list_logs: {
         parameters: {
             query?: {
                 /**
@@ -1273,7 +1301,7 @@ export interface operations {
             };
         };
     };
-    log_groups: {
+    list_log_groups: {
         parameters: {
             query?: {
                 /**
@@ -1315,7 +1343,7 @@ export interface operations {
             };
         };
     };
-    metrics: {
+    list_metrics: {
         parameters: {
             query?: {
                 /**
@@ -1357,7 +1385,7 @@ export interface operations {
             };
         };
     };
-    metric: {
+    get_metric_series: {
         parameters: {
             query?: {
                 /**
@@ -1414,7 +1442,7 @@ export interface operations {
             };
         };
     };
-    services: {
+    list_services: {
         parameters: {
             query?: {
                 /**
@@ -1456,7 +1484,7 @@ export interface operations {
             };
         };
     };
-    service: {
+    get_service: {
         parameters: {
             query?: {
                 /**
@@ -1501,7 +1529,7 @@ export interface operations {
             };
         };
     };
-    call: {
+    get_call: {
         parameters: {
             query: {
                 /** @description What the target is. */
@@ -1563,7 +1591,7 @@ export interface operations {
             };
         };
     };
-    calls: {
+    list_calls: {
         parameters: {
             query?: {
                 /**
@@ -1608,7 +1636,7 @@ export interface operations {
             };
         };
     };
-    operation: {
+    get_operation: {
         parameters: {
             query: {
                 /** @description The span name of the operation, such as `GET /users/{id}`. */
@@ -1655,7 +1683,7 @@ export interface operations {
             };
         };
     };
-    spans: {
+    list_spans: {
         parameters: {
             query?: {
                 /**
@@ -1697,7 +1725,7 @@ export interface operations {
             };
         };
     };
-    sql: {
+    run_sql: {
         parameters: {
             query?: never;
             header?: never;
@@ -1728,7 +1756,7 @@ export interface operations {
             };
         };
     };
-    traces: {
+    list_traces: {
         parameters: {
             query?: {
                 /**
@@ -1770,7 +1798,7 @@ export interface operations {
             };
         };
     };
-    trace: {
+    get_trace: {
         parameters: {
             query?: {
                 /**

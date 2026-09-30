@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, ensure};
-use axum::extract::{MatchedPath, Request as HttpRequest};
+use axum::extract::{MatchedPath, Request};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::get;
@@ -30,25 +30,31 @@ use crate::error::{ApiError, ApiResult};
 use crate::time::check_limit;
 
 pub use catalog::{
-    CompletionKind, Completions, FieldBody, FieldSource, FieldValueBody, SignalName, SuggestionBody,
+    CompletionKind, Completions, FieldBody, FieldOriginBody, FieldValueBody, SignalName,
+    SuggestionBody,
 };
 pub use error::ErrorBody;
-pub use indexes::{IndexBody, IndexList};
+pub use indexes::{IndexBody, IndexList, IndexedSignalName};
 pub use sql::SqlRequest;
-pub use time::{nanos, parse_duration, parse_time};
+pub use time::{convert_to_unix_nanos, parse_duration, parse_time};
 
-pub(crate) const MAX_LIMIT: usize = 10_000;
+pub(crate) const MAX_ROW_LIMIT: usize = 10_000;
 
 pub(crate) const QUERY_TIME_LIMIT: Duration = Duration::from_secs(10);
 
-const DEFAULT_SINCE: &str = "1h";
+const HOUR_NS: i64 = 3_600_000_000_000;
 
+// The `signal` query parameters refer to the Signal schema, and no body holds one, so only
+// this list puts it in the spec.
 #[derive(OpenApi)]
-#[openapi(info(
-    title = "otelo",
-    description = "Query the logs, traces, and metrics that otelo keeps."
-))]
-struct Spec;
+#[openapi(
+    info(
+        title = "otelo",
+        description = "Query the logs, traces, and metrics that otelo keeps."
+    ),
+    components(schemas(SignalName))
+)]
+struct OpenApiInfo;
 
 #[derive(Clone)]
 pub struct Api {
@@ -56,32 +62,32 @@ pub struct Api {
 }
 
 fn build_query_routes() -> OpenApiRouter<Api> {
-    OpenApiRouter::with_openapi(Spec::openapi())
-        .routes(routes!(logs::logs))
-        .routes(routes!(logs::log_groups))
-        .routes(routes!(traces::spans))
-        .routes(routes!(traces::traces))
-        .routes(routes!(traces::trace))
-        .routes(routes!(metrics::metrics))
-        .routes(routes!(metrics::metric))
-        .routes(routes!(services::services))
-        .routes(routes!(services::service))
-        .routes(routes!(services::operation))
-        .routes(routes!(services::calls))
-        .routes(routes!(services::call))
-        .routes(routes!(sql::sql))
-        .routes(routes!(catalog::attributes))
-        .routes(routes!(catalog::complete))
+    OpenApiRouter::with_openapi(OpenApiInfo::openapi())
+        .routes(routes!(logs::list_logs))
+        .routes(routes!(logs::list_log_groups))
+        .routes(routes!(traces::list_spans))
+        .routes(routes!(traces::list_traces))
+        .routes(routes!(traces::get_trace))
+        .routes(routes!(metrics::list_metrics))
+        .routes(routes!(metrics::get_metric_series))
+        .routes(routes!(services::list_services))
+        .routes(routes!(services::get_service))
+        .routes(routes!(services::get_operation))
+        .routes(routes!(services::list_calls))
+        .routes(routes!(services::get_call))
+        .routes(routes!(sql::run_sql))
+        .routes(routes!(catalog::list_attribute_keys))
+        .routes(routes!(catalog::complete_query))
         .routes(routes!(indexes::list_indexes))
         .routes(routes!(indexes::add_index, indexes::remove_index))
 }
 
 #[must_use]
-pub fn spec() -> utoipa::openapi::OpenApi {
+pub fn build_openapi_spec() -> utoipa::openapi::OpenApi {
     build_query_routes().into_openapi()
 }
 
-pub fn router(api: Api) -> Router {
+pub fn build_router(api: Api) -> Router {
     let (router, spec) = build_query_routes().with_state(api).split_for_parts();
     router
         .route(
@@ -91,7 +97,7 @@ pub fn router(api: Api) -> Router {
         .route_layer(middleware::from_fn(trace_request))
 }
 
-async fn trace_request(request: HttpRequest, next: Next) -> Response {
+async fn trace_request(request: Request, next: Next) -> Response {
     let route = request
         .extensions()
         .get::<MatchedPath>()
@@ -118,13 +124,16 @@ async fn trace_request(request: HttpRequest, next: Next) -> Response {
     response
 }
 
-pub(crate) struct Request {
+pub(crate) struct OpenedRange {
     queries: Box<dyn RangeQueries>,
     range: TimeRange,
-    limit: usize,
 }
 
-pub(crate) const WHOLE_RETENTION: Option<i64> = Some(i64::MIN);
+#[derive(Clone, Copy)]
+pub enum DefaultSince {
+    HourBeforeNow,
+    OldestRetained,
+}
 
 #[derive(Clone, Copy)]
 enum RetentionOf {
@@ -134,69 +143,116 @@ enum RetentionOf {
 }
 
 impl Api {
-    async fn run_range_query<T: Send + 'static>(
+    async fn run_blocking_query<T: Send + 'static>(
         &self,
-        range: [Option<String>; 2],
-        default_since: Option<i64>,
-        limit: (Option<usize>, usize),
-        query: impl FnOnce(Request) -> Result<T, ApiError> + Send + 'static,
-    ) -> ApiResult<T> {
-        self.run_query_within(
-            RetentionOf::LogsAndSpans,
-            range,
-            default_since,
-            limit,
-            query,
-        )
-        .await
-    }
-
-    async fn run_metric_range_query<T: Send + 'static>(
-        &self,
-        range: [Option<String>; 2],
-        limit: (Option<usize>, usize),
-        query: impl FnOnce(Request) -> Result<T, ApiError> + Send + 'static,
-    ) -> ApiResult<T> {
-        self.run_query_within(RetentionOf::Metrics, range, None, limit, query)
-            .await
-    }
-
-    async fn run_query_within<T: Send + 'static>(
-        &self,
-        retention: RetentionOf,
-        range: [Option<String>; 2],
-        default_since: Option<i64>,
-        limit: (Option<usize>, usize),
-        query: impl FnOnce(Request) -> Result<T, ApiError> + Send + 'static,
+        query: impl FnOnce(&Self) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         let api = self.clone();
         let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || {
             let _entered = span.enter();
-            let [since, until] = range;
-            let range = api
-                .resolve_range_within(retention, since.as_deref(), until.as_deref(), default_since)
-                .map_err(|e| ApiError::bad_request(&e))?;
-            let limit = check_limit(limit.0, limit.1).map_err(|e| ApiError::bad_request(&e))?;
-            let queries = api.storage.open_range(range, QUERY_TIME_LIMIT)?;
-            query(Request {
-                queries,
-                range,
-                limit,
-            })
+            query(&api)
         })
         .await
         .context("run the query")?
         .map(Json)
     }
 
+    async fn run_range_query<T: Send + 'static>(
+        &self,
+        since: Option<String>,
+        until: Option<String>,
+        default_since: DefaultSince,
+        query: impl FnOnce(OpenedRange) -> Result<T, ApiError> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.run_blocking_query(move |api| {
+            let range = api.resolve_requested_range(
+                RetentionOf::LogsAndSpans,
+                since.as_deref(),
+                until.as_deref(),
+                default_since,
+            )?;
+            query(api.open_range(range)?)
+        })
+        .await
+    }
+
+    async fn run_limited_range_query<T: Send + 'static>(
+        &self,
+        since: Option<String>,
+        until: Option<String>,
+        default_since: DefaultSince,
+        requested_limit: Option<usize>,
+        default_limit: usize,
+        query: impl FnOnce(OpenedRange, usize) -> Result<T, ApiError> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.run_blocking_query(move |api| {
+            let range = api.resolve_requested_range(
+                RetentionOf::LogsAndSpans,
+                since.as_deref(),
+                until.as_deref(),
+                default_since,
+            )?;
+            let limit = check_limit(requested_limit, default_limit)
+                .map_err(|error| ApiError::bad_request(&error))?;
+            query(api.open_range(range)?, limit)
+        })
+        .await
+    }
+
+    async fn run_limited_metric_range_query<T: Send + 'static>(
+        &self,
+        since: Option<String>,
+        until: Option<String>,
+        requested_limit: Option<usize>,
+        default_limit: usize,
+        query: impl FnOnce(OpenedRange, usize) -> Result<T, ApiError> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.run_blocking_query(move |api| {
+            let range = api.resolve_requested_range(
+                RetentionOf::Metrics,
+                since.as_deref(),
+                until.as_deref(),
+                DefaultSince::HourBeforeNow,
+            )?;
+            let limit = check_limit(requested_limit, default_limit)
+                .map_err(|error| ApiError::bad_request(&error))?;
+            query(api.open_range(range)?, limit)
+        })
+        .await
+    }
+
+    async fn run_retention_query<T: Send + 'static>(
+        &self,
+        query: impl FnOnce(OpenedRange) -> Result<T, ApiError> + Send + 'static,
+    ) -> ApiResult<T> {
+        self.run_range_query(None, None, DefaultSince::OldestRetained, query)
+            .await
+    }
+
+    fn resolve_requested_range(
+        &self,
+        retention: RetentionOf,
+        since: Option<&str>,
+        until: Option<&str>,
+        default_since: DefaultSince,
+    ) -> Result<TimeRange, ApiError> {
+        self.resolve_range_within_retention(retention, since, until, default_since)
+            .map_err(|error| ApiError::bad_request(&error))
+    }
+
+    fn open_range(&self, range: TimeRange) -> Result<OpenedRange, ApiError> {
+        let queries = self.storage.open_range(range, QUERY_TIME_LIMIT)?;
+        Ok(OpenedRange { queries, range })
+    }
+
     pub fn resolve_range(
         &self,
         since: Option<&str>,
         until: Option<&str>,
-        default_since: Option<i64>,
+        default_since: DefaultSince,
     ) -> anyhow::Result<TimeRange> {
-        self.resolve_range_within(RetentionOf::LogsAndSpans, since, until, default_since)
+        self.resolve_range_within_retention(RetentionOf::LogsAndSpans, since, until, default_since)
     }
 
     pub fn resolve_metric_range(
@@ -204,23 +260,32 @@ impl Api {
         since: Option<&str>,
         until: Option<&str>,
     ) -> anyhow::Result<TimeRange> {
-        self.resolve_range_within(RetentionOf::Metrics, since, until, None)
+        self.resolve_range_within_retention(
+            RetentionOf::Metrics,
+            since,
+            until,
+            DefaultSince::HourBeforeNow,
+        )
     }
 
-    fn resolve_range_within(
+    fn resolve_range_within_retention(
         &self,
         retention: RetentionOf,
         since: Option<&str>,
         until: Option<&str>,
-        default_since: Option<i64>,
+        default_since: DefaultSince,
     ) -> anyhow::Result<TimeRange> {
-        let now = nanos(Timestamp::now());
+        let now = convert_to_unix_nanos(Timestamp::now());
         let until = until.map_or(Ok(now), |text| parse_time(text, now))?;
-        let since = match since {
-            Some(text) => parse_time(text, now)?,
-            None => default_since.unwrap_or(now - parse_duration(DEFAULT_SINCE)?),
+        let since = match (since, default_since) {
+            (Some(text), _) => Some(parse_time(text, now)?),
+            (None, DefaultSince::HourBeforeNow) => Some(now - HOUR_NS),
+            (None, DefaultSince::OldestRetained) => None,
         };
-        ensure!(since < until, "since has to be before until");
+        ensure!(
+            since.is_none_or(|since| since < until),
+            "since has to be before until"
+        );
         let oldest_retained_at = match retention {
             RetentionOf::LogsAndSpans => self.storage.oldest_retained_at(),
             RetentionOf::Metrics => self.storage.metric_retention().oldest_hour_at,
@@ -229,6 +294,7 @@ impl Api {
             oldest_retained_at < until,
             "the range ends before the oldest telemetry otelo keeps"
         );
-        TimeRange::new(since.max(oldest_retained_at), until)
+        let start_at = since.map_or(oldest_retained_at, |since| since.max(oldest_retained_at));
+        TimeRange::new(start_at, until)
     }
 }

@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 
-use common::{get, start_daemon, stop_daemon};
+use common::{StopSignal, send_get_request, start_daemon, stop_daemon};
 
 fn ui_dist_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/app/dist")
@@ -49,7 +49,7 @@ fn every_page_gets_the_index_of_the_ui() {
         "/traces?view=spans",
         "/traces/0af7651916cd43dd8448eb211c80319c?span=b7ad6b7169203331",
     ] {
-        let response = get(&daemon.addr, path);
+        let response = send_get_request(&daemon.api_addr, path);
         if ui_is_built() {
             assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
             assert_eq!(
@@ -66,7 +66,7 @@ fn every_page_gets_the_index_of_the_ui() {
             assert!(response.contains("mise run web:build"), "{response}");
         }
     }
-    stop_daemon(daemon, "TERM");
+    stop_daemon(daemon, StopSignal::Term);
 }
 
 #[test]
@@ -76,28 +76,39 @@ fn an_unchanged_file_is_not_sent_again() {
     }
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
-    let first = get(&daemon.addr, "/");
-    let etag = find_header_value(&first, "etag").unwrap();
-    let again = send_request(&daemon.addr, "GET", "/", &[("If-None-Match", etag)]);
-    assert!(again.starts_with("HTTP/1.1 304"), "{again}");
-    stop_daemon(daemon, "TERM");
+    let first_response = send_get_request(&daemon.api_addr, "/");
+    let etag = find_header_value(&first_response, "etag").unwrap();
+    let second_response = send_request(&daemon.api_addr, "GET", "/", &[("If-None-Match", etag)]);
+    assert!(
+        second_response.starts_with("HTTP/1.1 304"),
+        "{second_response}"
+    );
+    stop_daemon(daemon, StopSignal::Term);
 }
 
 #[test]
 fn the_api_and_the_assets_do_not_fall_back_to_the_index() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
-    let api = get(&daemon.addr, "/api/nothing");
-    assert!(api.starts_with("HTTP/1.1 404"), "{api}");
+    let api_response = send_get_request(&daemon.api_addr, "/api/nothing");
+    assert!(api_response.starts_with("HTTP/1.1 404"), "{api_response}");
     assert!(
-        api.contains(r#"{"error":"no endpoint at /api/nothing"}"#),
-        "{api}"
+        api_response.contains(r#"{"error":"no endpoint at /api/nothing"}"#),
+        "{api_response}"
     );
-    let asset = get(&daemon.addr, "/assets/index-gone.js");
-    assert!(asset.starts_with("HTTP/1.1 404"), "{asset}");
-    let post = send_request(&daemon.addr, "POST", "/logs", &[("Content-Length", "0")]);
-    assert!(post.starts_with("HTTP/1.1 405"), "{post}");
-    stop_daemon(daemon, "TERM");
+    let asset_response = send_get_request(&daemon.api_addr, "/assets/index-gone.js");
+    assert!(
+        asset_response.starts_with("HTTP/1.1 404"),
+        "{asset_response}"
+    );
+    let post_response = send_request(
+        &daemon.api_addr,
+        "POST",
+        "/logs",
+        &[("Content-Length", "0")],
+    );
+    assert!(post_response.starts_with("HTTP/1.1 405"), "{post_response}");
+    stop_daemon(daemon, StopSignal::Term);
 }
 
 #[test]
@@ -118,7 +129,7 @@ fn the_fonts_are_served_as_woff2_for_good() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
     // HEAD, since the body is not text.
-    let response = send_request(&daemon.addr, "HEAD", &format!("/assets/{font}"), &[]);
+    let response = send_request(&daemon.api_addr, "HEAD", &format!("/assets/{font}"), &[]);
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert_eq!(
         find_header_value(&response, "content-type"),
@@ -128,5 +139,5 @@ fn the_fonts_are_served_as_woff2_for_good() {
         find_header_value(&response, "cache-control"),
         Some("public, max-age=31536000, immutable")
     );
-    stop_daemon(daemon, "TERM");
+    stop_daemon(daemon, StopSignal::Term);
 }

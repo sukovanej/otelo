@@ -77,8 +77,8 @@ impl std::fmt::Display for SqlValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Null => f.write_str("NULL"),
-            Self::Integer(n) => write!(f, "{n}"),
-            Self::Real(x) => write!(f, "{x}"),
+            Self::Integer(integer) => write!(f, "{integer}"),
+            Self::Real(real) => write!(f, "{real}"),
             Self::Text(text) => f.write_str(text),
         }
     }

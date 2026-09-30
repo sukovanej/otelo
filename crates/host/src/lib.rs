@@ -10,7 +10,7 @@ use otelo_storage::{Batch, StorageSize};
 pub use identity::{HostIdentity, find_platform_uuid_in_ioreg_output};
 pub use launchd::find_running_jobs_in_launchctl_list;
 pub use linux::LinuxFiles;
-pub use mapping::Mapping;
+pub use mapping::SnapshotMapper;
 pub use reader::MachineReader;
 pub use snapshot::{
     CgroupMemory, Cpu, CpuTicks, Filesystem, Interface, LaunchdJob, LoadAverage, Memory, Pid,
@@ -18,15 +18,15 @@ pub use snapshot::{
 };
 
 pub struct Collector {
-    reader: MachineReader,
-    mapping: Mapping,
+    machine_reader: MachineReader,
+    snapshot_mapper: SnapshotMapper,
 }
 
 impl Collector {
-    pub fn of_host(host: HostIdentity) -> anyhow::Result<Self> {
+    pub fn new(host: HostIdentity) -> anyhow::Result<Self> {
         Ok(Self {
-            reader: MachineReader::new()?,
-            mapping: Mapping::new(host),
+            machine_reader: MachineReader::new()?,
+            snapshot_mapper: SnapshotMapper::new(host),
         })
     }
 
@@ -36,9 +36,9 @@ impl Collector {
         recorded_at: i64,
         storage_size: Option<StorageSize>,
     ) -> anyhow::Result<Batch> {
-        let snapshot = self.reader.read_snapshot()?;
+        let snapshot = self.machine_reader.read_snapshot()?;
         Ok(self
-            .mapping
+            .snapshot_mapper
             .map_snapshot_to_batch(recorded_at, &snapshot, storage_size))
     }
 }

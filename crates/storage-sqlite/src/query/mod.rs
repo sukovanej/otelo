@@ -7,6 +7,9 @@ mod services;
 mod sql;
 mod traces;
 
+use std::fmt;
+use std::ops::ControlFlow;
+
 use anyhow::bail;
 use jiff::Timestamp;
 use otelo_query::{Query, Signal};
@@ -19,16 +22,16 @@ use rusqlite::types::Value;
 use rusqlite::{Row, ToSql};
 
 pub use compile::InvalidQuery;
-pub use metrics::{BASELINE_LOOKBACK_NS, kind_of_series};
+pub use metrics::{BASELINE_LOOKBACK_NS, metric_kind_from_stored_names, read_series_point};
 
 use crate::reader::timed_out;
 use crate::{Day, Reader};
 
 pub fn hex_digits(bytes: &[u8]) -> String {
     use std::fmt::Write;
-    bytes.iter().fold(String::new(), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
-        out
+    bytes.iter().fold(String::new(), |mut hex, byte| {
+        let _ = write!(hex, "{byte:02x}");
+        hex
     })
 }
 
@@ -51,60 +54,90 @@ pub fn span_id_from_blob(blob: Vec<u8>) -> anyhow::Result<SpanId> {
     Ok(SpanId(bytes))
 }
 
+pub const ROLLUP_SCHEMA_NAME: &str = "rollup";
+
+#[derive(Clone, Copy)]
+pub struct DaySchema {
+    pub day: Day,
+}
+
+impl fmt::Display for DaySchema {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "\"{}\"", self.day)
+    }
+}
+
 pub struct WhereClause {
-    clauses: Vec<String>,
+    conditions: Vec<String>,
     params: Vec<(String, Value)>,
 }
 
 impl WhereClause {
     pub const fn new() -> Self {
         Self {
-            clauses: Vec::new(),
+            conditions: Vec::new(),
             params: Vec::new(),
         }
     }
 
-    pub fn within_reader_range(reader: &Reader, ts_column: &str) -> Self {
-        let mut filter = Self::new();
-        filter.push_clause_with_param(
-            &format!("{ts_column} >= :since"),
+    pub fn within_reader_range(reader: &Reader, instant_column: &str) -> Self {
+        let mut where_clause = Self::new();
+        where_clause.push_condition_with_param(
+            &format!("{instant_column} >= :since"),
             ":since",
             reader.range().start_at(),
         );
-        filter.push_clause_with_param(
-            &format!("{ts_column} < :until"),
+        where_clause.push_condition_with_param(
+            &format!("{instant_column} < :until"),
             ":until",
             reader.range().end_at(),
         );
-        filter
+        where_clause
     }
 
     pub fn push_param(&mut self, name: &str, value: impl Into<Value>) {
         self.params.push((name.to_owned(), value.into()));
     }
 
-    pub fn push_clause_with_param(&mut self, clause: &str, name: &str, value: impl Into<Value>) {
-        self.clauses.push(clause.to_owned());
+    pub fn push_condition_with_param(
+        &mut self,
+        condition: &str,
+        name: &str,
+        value: impl Into<Value>,
+    ) {
+        self.conditions.push(condition.to_owned());
         self.params.push((name.to_owned(), value.into()));
     }
 
     pub fn absorb_params(&mut self, other: Self) {
         for (name, value) in other.params {
-            if !self.params.iter().any(|(n, _)| *n == name) {
+            if !self
+                .params
+                .iter()
+                .any(|(existing_name, _)| *existing_name == name)
+            {
                 self.params.push((name, value));
             }
         }
     }
 
-    pub fn push_clause(&mut self, clause: String) {
-        self.clauses.push(clause);
+    pub fn push_condition(&mut self, condition: String) {
+        self.conditions.push(condition);
     }
 
-    pub fn sql_for_day(&self, quoted_day: &str) -> String {
-        if self.clauses.is_empty() {
+    pub fn sql_for_day(&self, day_schema: DaySchema) -> String {
+        self.sql_for_schema(&day_schema.to_string())
+    }
+
+    pub fn sql_for_rollups(&self) -> String {
+        self.sql_for_schema(ROLLUP_SCHEMA_NAME)
+    }
+
+    fn sql_for_schema(&self, schema: &str) -> String {
+        if self.conditions.is_empty() {
             return "TRUE".into();
         }
-        self.clauses.join(" AND ").replace("$day", quoted_day)
+        self.conditions.join(" AND ").replace("$day", schema)
     }
 
     fn params(&self) -> Vec<(&str, &dyn ToSql)> {
@@ -119,9 +152,9 @@ impl Reader {
     pub(crate) fn scan_rows(
         &self,
         [head, tail]: [&str; 2],
-        select_for_day: impl Fn(&str) -> String,
-        filter: &WhereClause,
-        mut on_row: impl FnMut(&Row) -> anyhow::Result<bool>,
+        select_for_day: impl Fn(DaySchema) -> String,
+        where_clause: &WhereClause,
+        mut on_row: impl FnMut(&Row) -> anyhow::Result<ControlFlow<()>>,
     ) -> anyhow::Result<()> {
         if self.days().is_empty() {
             return Ok(());
@@ -130,18 +163,18 @@ impl Reader {
             "{head}{}{tail}",
             union_day_selects(self.days(), select_for_day)
         );
-        let span = new_statement_span(&sql);
-        let _entered = span.enter();
-        let mut stmt = self.conn().prepare(&sql)?;
-        let mut rows = stmt.query(filter.params().as_slice())?;
-        let mut read = 0_i64;
+        let statement_span = new_statement_span(&sql);
+        let _entered = statement_span.enter();
+        let mut statement = self.connection().prepare(&sql)?;
+        let mut rows = statement.query(where_clause.params().as_slice())?;
+        let mut returned_rows = 0_i64;
         while let Some(row) = rows.next()? {
-            read += 1;
-            if !on_row(row)? {
+            returned_rows += 1;
+            if on_row(row)?.is_break() {
                 break;
             }
         }
-        span.record("db.response.returned_rows", read);
+        statement_span.record("db.response.returned_rows", returned_rows);
         Ok(())
     }
 
@@ -149,32 +182,32 @@ impl Reader {
     pub(crate) fn scan_rollup_rows(
         &self,
         sql: &str,
-        filter: &WhereClause,
-        mut on_row: impl FnMut(&Row) -> anyhow::Result<bool>,
+        where_clause: &WhereClause,
+        mut on_row: impl FnMut(&Row) -> anyhow::Result<ControlFlow<()>>,
     ) -> anyhow::Result<()> {
         if !self.has_rollups() {
             return Ok(());
         }
-        let span = new_statement_span(sql);
-        let _entered = span.enter();
-        let mut stmt = self.conn().prepare(sql)?;
-        let mut rows = stmt.query(filter.params().as_slice())?;
-        let mut read = 0_i64;
+        let statement_span = new_statement_span(sql);
+        let _entered = statement_span.enter();
+        let mut statement = self.connection().prepare(sql)?;
+        let mut rows = statement.query(where_clause.params().as_slice())?;
+        let mut returned_rows = 0_i64;
         while let Some(row) = rows.next()? {
-            read += 1;
-            if !on_row(row)? {
+            returned_rows += 1;
+            if on_row(row)?.is_break() {
                 break;
             }
         }
-        span.record("db.response.returned_rows", read);
+        statement_span.record("db.response.returned_rows", returned_rows);
         Ok(())
     }
 
     pub(crate) fn explain_scan(
         &self,
         [head, tail]: [&str; 2],
-        select_for_day: impl Fn(&str) -> String,
-        filter: &WhereClause,
+        select_for_day: impl Fn(DaySchema) -> String,
+        where_clause: &WhereClause,
     ) -> anyhow::Result<Vec<String>> {
         if self.days().is_empty() {
             return Ok(Vec::new());
@@ -183,24 +216,26 @@ impl Reader {
             "EXPLAIN QUERY PLAN {head}{}{tail}",
             union_day_selects(self.days(), select_for_day)
         );
-        let mut stmt = self.conn().prepare(&sql)?;
-        let steps = stmt.query_map(filter.params().as_slice(), |row| row.get::<_, String>(3))?;
+        let mut statement = self.connection().prepare(&sql)?;
+        let steps = statement.query_map(where_clause.params().as_slice(), |row| {
+            row.get::<_, String>(3)
+        })?;
         Ok(steps.collect::<Result<_, _>>()?)
     }
 
     pub(crate) fn collect_rows<T>(
         &self,
-        around: [&str; 2],
-        select_for_day: impl Fn(&str) -> String,
-        filter: &WhereClause,
+        head_and_tail: [&str; 2],
+        select_for_day: impl Fn(DaySchema) -> String,
+        where_clause: &WhereClause,
         mut map_row: impl FnMut(&Row) -> anyhow::Result<T>,
     ) -> anyhow::Result<Vec<T>> {
-        let mut out = Vec::new();
-        self.scan_rows(around, select_for_day, filter, |row| {
-            out.push(map_row(row)?);
-            Ok(true)
+        let mut rows = Vec::new();
+        self.scan_rows(head_and_tail, select_for_day, where_clause, |row| {
+            rows.push(map_row(row)?);
+            Ok(ControlFlow::Continue(()))
         })?;
-        Ok(out)
+        Ok(rows)
     }
 }
 
@@ -216,9 +251,9 @@ pub fn new_statement_span(sql: &str) -> tracing::Span {
 }
 
 // FTS5 and the row ids only work within one file, so each day file gets a SELECT of its own.
-pub fn union_day_selects(days: &[Day], select_for_day: impl Fn(&str) -> String) -> String {
+pub fn union_day_selects(days: &[Day], select_for_day: impl Fn(DaySchema) -> String) -> String {
     days.iter()
-        .map(|day| select_for_day(&format!("\"{day}\"")))
+        .map(|&day| select_for_day(DaySchema { day }))
         .collect::<Vec<_>>()
         .join(" UNION ALL ")
 }
@@ -229,7 +264,7 @@ pub fn truncate_to_limit<T>(rows: &mut Vec<T>, limit: usize) -> bool {
     truncated
 }
 
-fn explain(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
+fn explain_query(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
     match query.signal {
         Signal::Logs => logs::explain_logs(reader, query),
         Signal::Spans => traces::explain_spans(reader, query),
@@ -247,44 +282,57 @@ fn classify_query_error(error: anyhow::Error) -> Error {
     }
 }
 
+fn classify_user_sql_error(error: &anyhow::Error) -> Error {
+    if timed_out(error) {
+        Error::TimedOut
+    } else {
+        Error::InvalidQuery(format!("{error:#}"))
+    }
+}
+
 impl RangeQueries for Reader {
-    fn logs(&self, query: &Query, limit: usize) -> Result<Logs> {
+    fn list_logs(&self, query: &Query, limit: usize) -> Result<Logs> {
         logs::read_logs(self, query, limit).map_err(classify_query_error)
     }
 
-    fn log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups> {
+    fn list_log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups> {
         logs::group_logs(self, query, limit).map_err(classify_query_error)
     }
 
-    fn spans(&self, query: &Query, limit: usize) -> Result<Spans> {
+    fn list_spans(&self, query: &Query, limit: usize) -> Result<Spans> {
         traces::read_spans(self, query, limit).map_err(classify_query_error)
     }
 
-    fn traces(&self, query: &Query, limit: usize) -> Result<Traces> {
+    fn list_traces(&self, query: &Query, limit: usize) -> Result<Traces> {
         traces::read_traces(self, query, limit).map_err(classify_query_error)
     }
 
-    fn trace(&self, id: TraceId, limit: usize) -> Result<Option<Trace>> {
-        traces::read_trace(self, id, limit).map_err(classify_query_error)
+    fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>> {
+        traces::read_trace(self, trace_id, limit).map_err(classify_query_error)
     }
 
-    fn metrics(&self, query: &Query, resolution: Resolution, limit: usize) -> Result<MetricList> {
+    fn list_metrics(
+        &self,
+        query: &Query,
+        resolution: Resolution,
+        limit: usize,
+    ) -> Result<MetricList> {
         metrics::list_metrics(self, query, resolution, limit).map_err(classify_query_error)
     }
 
-    fn metric(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries> {
+    fn get_metric_series(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries> {
         metrics::read_metric_buckets(self, filter, limit).map_err(classify_query_error)
     }
 
-    fn services(&self, step_ns: i64, limit: usize) -> Result<Services> {
+    fn list_services(&self, step_ns: i64, limit: usize) -> Result<Services> {
         services::summarize_services(self, step_ns, limit).map_err(classify_query_error)
     }
 
-    fn service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service> {
+    fn get_service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service> {
         services::summarize_service(self, service, step_ns, limit).map_err(classify_query_error)
     }
 
-    fn operation(
+    fn get_operation(
         &self,
         service: &str,
         name: &str,
@@ -295,11 +343,11 @@ impl RangeQueries for Reader {
             .map_err(classify_query_error)
     }
 
-    fn calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls> {
+    fn list_calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls> {
         calls::summarize_calls(self, service, step_ns, limit).map_err(classify_query_error)
     }
 
-    fn call(
+    fn get_call(
         &self,
         service: &str,
         target: &TargetKey,
@@ -311,22 +359,15 @@ impl RangeQueries for Reader {
             .map_err(classify_query_error)
     }
 
-    fn attributes(&self, signal: Signal) -> Result<AttributeKeys> {
+    fn list_attribute_keys(&self, signal: Signal) -> Result<AttributeKeys> {
         catalog::list_attribute_keys(self, signal).map_err(classify_query_error)
     }
 
-    fn sql(&self, sql: &str, limit: usize) -> Result<SqlResult> {
-        sql::run_user_sql(self, sql, limit).map_err(|e| {
-            // SQL comes from the user, so every failure but a time out is theirs.
-            if timed_out(&e) {
-                Error::TimedOut
-            } else {
-                Error::InvalidQuery(format!("{e:#}"))
-            }
-        })
+    fn run_sql(&self, sql: &str, limit: usize) -> Result<SqlResult> {
+        sql::run_user_sql(self, sql, limit).map_err(|error| classify_user_sql_error(&error))
     }
 
-    fn explain(&self, query: &Query) -> Result<Vec<String>> {
-        explain(self, query).map_err(classify_query_error)
+    fn explain_query(&self, query: &Query) -> Result<Vec<String>> {
+        explain_query(self, query).map_err(classify_query_error)
     }
 }

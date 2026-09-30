@@ -23,7 +23,7 @@ impl TimeRange {
     }
 
     #[must_use]
-    pub const fn length(self) -> i64 {
+    pub const fn length_ns(self) -> i64 {
         self.end_at - self.start_at
     }
 }

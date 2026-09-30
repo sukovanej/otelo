@@ -5,7 +5,7 @@ use otelo_storage::query::{Spans, Trace, Traces};
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{LookupParams, QueryParams, parse_query};
-use crate::{Api, WHOLE_RETENTION};
+use crate::{Api, DefaultSince};
 
 /// Spans, newest first.
 #[utoipa::path(
@@ -17,13 +17,18 @@ use crate::{Api, WHOLE_RETENTION};
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn spans(State(api): State<Api>, Query(params): Query<QueryParams>) -> ApiResult<Spans> {
-    let query = parse_query(params.q.as_deref(), Signal::Spans)?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 100),
-        move |r| Ok(r.queries.spans(&query, r.limit)?),
+pub async fn list_spans(
+    State(api): State<Api>,
+    Query(params): Query<QueryParams>,
+) -> ApiResult<Spans> {
+    let query = parse_query(params.query.as_deref(), Signal::Spans)?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        100,
+        move |opened, limit| Ok(opened.queries.list_spans(&query, limit)?),
     )
     .await
 }
@@ -38,16 +43,18 @@ pub async fn spans(State(api): State<Api>, Query(params): Query<QueryParams>) ->
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn traces(
+pub async fn list_traces(
     State(api): State<Api>,
     Query(params): Query<QueryParams>,
 ) -> ApiResult<Traces> {
-    let query = parse_query(params.q.as_deref(), Signal::Spans)?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 50),
-        move |r| Ok(r.queries.traces(&query, r.limit)?),
+    let query = parse_query(params.query.as_deref(), Signal::Spans)?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        50,
+        move |opened, limit| Ok(opened.queries.list_traces(&query, limit)?),
     )
     .await
 }
@@ -66,20 +73,23 @@ pub async fn traces(
         (status = 404, body = ErrorBody),
     ),
 )]
-pub async fn trace(
+pub async fn get_trace(
     State(api): State<Api>,
-    Path(trace_id): Path<String>,
+    Path(trace_id_hex): Path<String>,
     Query(params): Query<LookupParams>,
 ) -> ApiResult<Trace> {
-    let id = TraceId::parse_hex(&trace_id).map_err(|e| ApiError::bad_request(&e))?;
-    api.run_range_query(
-        [params.since, params.until],
-        WHOLE_RETENTION,
-        (params.limit, 1000),
-        move |r| {
-            r.queries
-                .trace(id, r.limit)?
-                .ok_or_else(|| ApiError::not_found(format!("no spans or logs of trace {trace_id}")))
+    let trace_id =
+        TraceId::parse_hex(&trace_id_hex).map_err(|error| ApiError::bad_request(&error))?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::OldestRetained,
+        params.limit,
+        1000,
+        move |opened, limit| {
+            opened.queries.get_trace(trace_id, limit)?.ok_or_else(|| {
+                ApiError::not_found(format!("no spans or logs of trace {trace_id_hex}"))
+            })
         },
     )
     .await

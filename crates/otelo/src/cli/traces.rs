@@ -4,9 +4,9 @@ use otelo_query::Signal;
 use otelo_storage::SpanId;
 use otelo_storage::query::{Spans, Trace, TraceSpan, Traces};
 
-use super::client::{Client, escape_path_segment, note_cut, print_json};
+use super::client::{Client, OutputFormat, escape_path_segment, note_truncation, print_json};
 use super::table::{self, Table};
-use super::{QUERY_HELP, Range, join_query_words, note_unindexed};
+use super::{QUERY_HELP, RangeArgs, join_query_words, note_unindexed_keys};
 
 #[derive(clap::Args)]
 pub struct SpansArgs {
@@ -14,44 +14,45 @@ pub struct SpansArgs {
     query: Vec<String>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn spans(args: &SpansArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_spans(args: &SpansArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
-    let spans: Spans = args.client.get("/api/spans", &params)?;
-    if args.client.wants_table() {
-        let mut table = Table::new(&[
-            "TRACE",
-            "START (UTC)",
-            "SERVICE",
-            "DURATION",
-            "ERROR",
-            "NAME",
-        ]);
-        for span in &spans.spans {
-            table.row(vec![
-                span.trace_id.to_string(),
-                table::format_utc_time(span.started_at),
-                span.service.clone(),
-                table::format_duration(span.duration_ns),
-                if span.status.is_error() { "ERROR" } else { "" }.into(),
-                span.name.clone(),
+    let answer: Spans = args.client.get("/api/spans", &params)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let mut table = Table::new(&[
+                "TRACE",
+                "START (UTC)",
+                "SERVICE",
+                "DURATION",
+                "ERROR",
+                "NAME",
             ]);
+            for span in &answer.spans {
+                table.add_row(vec![
+                    span.trace_id.to_string(),
+                    table::format_utc_time(span.started_at),
+                    span.service.clone(),
+                    table::format_duration(span.duration_ns),
+                    if span.status.is_error() { "ERROR" } else { "" }.into(),
+                    span.name.clone(),
+                ]);
+            }
+            table.print()?;
         }
-        table.print()?;
-    } else {
-        print_json(&spans)?;
+        OutputFormat::Json => print_json(&answer)?,
     }
-    note_cut(
-        spans.truncated,
+    note_truncation(
+        answer.truncated,
         "More spans match; narrow them with the query or --since, or raise --limit.",
     );
-    note_unindexed(Signal::Spans, &spans.unindexed);
+    note_unindexed_keys(Signal::Spans, &answer.unindexed);
     Ok(())
 }
 
@@ -63,53 +64,55 @@ pub struct TracesArgs {
     query: Vec<String>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn traces(args: &TracesArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_traces(args: &TracesArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
-    let traces: Traces = args.client.get("/api/traces", &params)?;
-    if args.client.wants_table() {
-        let mut table = Table::new(&[
-            "TRACE",
-            "START (UTC)",
-            "SERVICE",
-            "DURATION",
-            "SPANS",
-            "ERROR",
-            "NAME",
-        ]);
-        for trace in &traces.traces {
-            table.row(vec![
-                trace.trace_id.to_string(),
-                table::format_utc_time(trace.started_at),
-                trace.service.clone(),
-                table::format_duration(trace.duration_ns),
-                trace.spans.to_string(),
-                if trace.error { "ERROR" } else { "" }.into(),
-                trace.name.clone(),
+    let answer: Traces = args.client.get("/api/traces", &params)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let mut table = Table::new(&[
+                "TRACE",
+                "START (UTC)",
+                "SERVICE",
+                "DURATION",
+                "SPANS",
+                "ERROR",
+                "NAME",
             ]);
+            for trace in &answer.traces {
+                table.add_row(vec![
+                    trace.trace_id.to_string(),
+                    table::format_utc_time(trace.started_at),
+                    trace.service.clone(),
+                    table::format_duration(trace.duration_ns),
+                    trace.spans.to_string(),
+                    if trace.error { "ERROR" } else { "" }.into(),
+                    trace.name.clone(),
+                ]);
+            }
+            table.print()?;
         }
-        table.print()?;
-    } else {
-        print_json(&traces)?;
+        OutputFormat::Json => print_json(&answer)?,
     }
-    note_cut(
-        traces.truncated,
+    note_truncation(
+        answer.truncated,
         "More traces match; narrow them with the query or --since, or raise --limit.",
     );
-    note_unindexed(Signal::Spans, &traces.unindexed);
+    note_unindexed_keys(Signal::Spans, &answer.unindexed);
     Ok(())
 }
 
 #[derive(clap::Args)]
 pub struct TraceArgs {
     /// The trace ID, 32 hex digits
-    id: String,
+    #[arg(value_name = "ID")]
+    trace_id: String,
 
     /// Start of the range: a duration before now or an RFC 3339 timestamp
     /// [default: the whole retention]
@@ -128,22 +131,21 @@ pub struct TraceArgs {
     client: Client,
 }
 
-pub fn trace(args: &TraceArgs) -> anyhow::Result<()> {
+pub fn print_trace(args: &TraceArgs) -> anyhow::Result<()> {
     let params = [
         ("since", args.since.clone()),
         ("until", args.until.clone()),
-        ("limit", args.limit.map(|n| n.to_string())),
+        ("limit", args.limit.map(|limit| limit.to_string())),
     ];
     let trace: Trace = args.client.get(
-        &format!("/api/traces/{}", escape_path_segment(&args.id)),
+        &format!("/api/traces/{}", escape_path_segment(&args.trace_id)),
         &params,
     )?;
-    if args.client.wants_table() {
-        print_span_tree_and_logs(&trace)?;
-    } else {
-        print_json(&trace)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => print_span_tree_and_logs(&trace)?,
+        OutputFormat::Json => print_json(&trace)?,
     }
-    note_cut(
+    note_truncation(
         trace.truncated,
         "The trace has more spans or logs; raise --limit.",
     );
@@ -151,9 +153,12 @@ pub fn trace(args: &TraceArgs) -> anyhow::Result<()> {
 }
 
 fn print_span_tree_and_logs(trace: &Trace) -> anyhow::Result<()> {
-    let trace_started_at = trace.spans.iter().map(|s| s.started_at).min();
-    let spans_by_id: HashMap<SpanId, &TraceSpan> =
-        trace.spans.iter().map(|s| (s.span_id, s)).collect();
+    let trace_started_at = trace.spans.iter().map(|span| span.started_at).min();
+    let spans_by_id: HashMap<SpanId, &TraceSpan> = trace
+        .spans
+        .iter()
+        .map(|span| (span.span_id, span))
+        .collect();
     let mut children: HashMap<Option<SpanId>, Vec<&TraceSpan>> = HashMap::new();
     for span in &trace.spans {
         let parent_in_trace = span
@@ -170,39 +175,43 @@ fn print_span_tree_and_logs(trace: &Trace) -> anyhow::Result<()> {
         .map(|&span| (span, String::new(), String::new()))
         .collect();
     while let Some((span, prefix, indent)) = stack.pop() {
-        let offset = trace_started_at.map_or(0, |trace_started_at| {
+        let offset_from_trace_start_ns = trace_started_at.map_or(0, |trace_started_at| {
             i64::try_from(span.started_at.duration_since(trace_started_at).as_nanos())
                 .unwrap_or(i64::MAX)
         });
-        table.row(vec![
+        table.add_row(vec![
             format!("{prefix}{}", span.name),
             span.service.clone(),
-            format!("+{}", table::format_duration(offset)),
+            format!("+{}", table::format_duration(offset_from_trace_start_ns)),
             table::format_duration(span.duration_ns),
             if span.status.is_error() { "ERROR" } else { "" }.into(),
         ]);
-        let kids = children.get(&Some(span.span_id));
-        let kids = kids.map_or(&[][..], Vec::as_slice);
-        for (i, kid) in kids.iter().enumerate().rev() {
-            let last = i + 1 == kids.len();
-            let branch = if last { "└─ " } else { "├─ " };
-            let under = if last { "   " } else { "│  " };
-            stack.push((kid, format!("{indent}{branch}"), format!("{indent}{under}")));
+        let child_spans = children.get(&Some(span.span_id));
+        let child_spans = child_spans.map_or(&[][..], Vec::as_slice);
+        for (position, child) in child_spans.iter().enumerate().rev() {
+            let is_last_child = position + 1 == child_spans.len();
+            let branch = if is_last_child { "└─ " } else { "├─ " };
+            let indent_under = if is_last_child { "   " } else { "│  " };
+            stack.push((
+                child,
+                format!("{indent}{branch}"),
+                format!("{indent}{indent_under}"),
+            ));
         }
     }
     table.print()?;
     if !trace.logs.is_empty() {
         println!();
-        let mut logs = Table::new(&["TIME (UTC)", "SERVICE", "LEVEL", "BODY"]);
+        let mut log_table = Table::new(&["TIME (UTC)", "SERVICE", "LEVEL", "BODY"]);
         for line in trace.logs.iter().rev() {
-            logs.row(vec![
+            log_table.add_row(vec![
                 table::format_utc_time(line.logged_at),
                 line.service.clone(),
                 line.severity.level().into(),
                 line.body.clone(),
             ]);
         }
-        logs.print()?;
+        log_table.print()?;
     }
     Ok(())
 }

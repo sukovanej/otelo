@@ -17,7 +17,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use otelo_storage::Sender;
+use otelo_storage::BatchSender;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tonic::codec::CompressionEncoding;
@@ -29,23 +29,23 @@ use crate::{ExportRequest, MAX_REQUEST_BYTES};
 
 pub async fn serve_grpc(
     listener: TcpListener,
-    sender: Sender,
+    sender: BatchSender,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
-    let receiver = Receiver(sender);
+    let export_service = ExportService { sender };
     Server::builder()
         .add_service(
-            LogsServiceServer::new(receiver.clone())
+            LogsServiceServer::new(export_service.clone())
                 .accept_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(MAX_REQUEST_BYTES),
         )
         .add_service(
-            TraceServiceServer::new(receiver.clone())
+            TraceServiceServer::new(export_service.clone())
                 .accept_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(MAX_REQUEST_BYTES),
         )
         .add_service(
-            MetricsServiceServer::new(receiver)
+            MetricsServiceServer::new(export_service)
                 .accept_compressed(CompressionEncoding::Gzip)
                 .max_decoding_message_size(MAX_REQUEST_BYTES),
         )
@@ -55,40 +55,42 @@ pub async fn serve_grpc(
 }
 
 #[derive(Clone)]
-struct Receiver(Sender);
+struct ExportService {
+    sender: BatchSender,
+}
 
 #[tonic::async_trait]
-impl LogsService for Receiver {
+impl LogsService for ExportService {
     async fn export(
         &self,
         request: Request<ExportLogsServiceRequest>,
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
         Ok(Response::new(
-            request.into_inner().store_and_respond(&self.0),
+            request.into_inner().store_and_respond(&self.sender),
         ))
     }
 }
 
 #[tonic::async_trait]
-impl TraceService for Receiver {
+impl TraceService for ExportService {
     async fn export(
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
         Ok(Response::new(
-            request.into_inner().store_and_respond(&self.0),
+            request.into_inner().store_and_respond(&self.sender),
         ))
     }
 }
 
 #[tonic::async_trait]
-impl MetricsService for Receiver {
+impl MetricsService for ExportService {
     async fn export(
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
         Ok(Response::new(
-            request.into_inner().store_and_respond(&self.0),
+            request.into_inner().store_and_respond(&self.sender),
         ))
     }
 }

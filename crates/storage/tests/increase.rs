@@ -2,20 +2,27 @@ use otelo_storage::{Increase, NumberPoint, StepIncreases, Temporality};
 
 const SECOND: i64 = 1_000_000_000;
 
-fn increases(temporality: Temporality, step: i64, points: &[(i64, f64)]) -> Vec<(i64, Increase)> {
+fn increases(
+    temporality: Temporality,
+    step_seconds: i64,
+    points: &[(i64, f64)],
+) -> Vec<(i64, Increase)> {
     let mut increases = StepIncreases::new(temporality);
     for &(second, value) in points {
         let recorded_at = second * SECOND;
         increases.add_point(
-            recorded_at.div_euclid(step * SECOND) * step,
+            recorded_at.div_euclid(step_seconds * SECOND) * step_seconds,
             NumberPoint { recorded_at, value },
         );
     }
     increases.into_increases_by_step().into_iter().collect()
 }
 
-const fn increase(amount: f64, seconds: f64) -> Increase {
-    Increase { amount, seconds }
+const fn increase(amount: f64, elapsed_seconds: f64) -> Increase {
+    Increase {
+        amount,
+        elapsed_seconds,
+    }
 }
 
 #[test]

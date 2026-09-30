@@ -21,18 +21,20 @@ use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn metrics(
+pub async fn list_metrics(
     State(api): State<Api>,
     Query(params): Query<QueryParams>,
 ) -> ApiResult<MetricList> {
-    let query = parse_query(params.q.as_deref(), Signal::Metrics)?;
+    let query = parse_query(params.query.as_deref(), Signal::Metrics)?;
     let retention = api.storage.metric_retention();
-    api.run_metric_range_query(
-        [params.since, params.until],
-        (params.limit, 100),
-        move |r| {
-            let resolution = Resolution::finest_kept_for(r.range, retention);
-            Ok(r.queries.metrics(&query, resolution, r.limit)?)
+    api.run_limited_metric_range_query(
+        params.since,
+        params.until,
+        params.limit,
+        100,
+        move |opened, limit| {
+            let resolution = Resolution::choose_finest_kept_for(opened.range, retention);
+            Ok(opened.queries.list_metrics(&query, resolution, limit)?)
         },
     )
     .await
@@ -51,7 +53,9 @@ pub struct MetricParams {
     limit: Option<usize>,
     /// The series to keep, by their labels and resource, such as
     /// `state = used`. Every series of the metric when missing.
-    q: Option<String>,
+    #[serde(rename = "q")]
+    #[param(rename = "q")]
+    query: Option<String>,
     /// The length of a bucket, such as `1m`. One that makes 120 buckets at
     /// most when missing.
     step: Option<String>,
@@ -77,24 +81,30 @@ pub struct MetricParams {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn metric(
+pub async fn get_metric_series(
     State(api): State<Api>,
     Path(name): Path<String>,
     Query(params): Query<MetricParams>,
 ) -> ApiResult<MetricSeries> {
-    let query = parse_query(params.q.as_deref(), Signal::Metrics)?;
-    let step = parse_step_ns(params.step.as_deref())?;
+    let query = parse_query(params.query.as_deref(), Signal::Metrics)?;
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     let retention = api.storage.metric_retention();
-    api.run_metric_range_query([params.since, params.until], (params.limit, 20), move |r| {
-        let filter = MetricFilter {
-            name,
-            query,
-            step_ns: resolve_step(&r, step, 120)?,
-            resolution: params
-                .resolution
-                .unwrap_or_else(|| Resolution::finest_kept_for(r.range, retention)),
-        };
-        Ok(r.queries.metric(&filter, r.limit)?)
-    })
+    api.run_limited_metric_range_query(
+        params.since,
+        params.until,
+        params.limit,
+        20,
+        move |opened, limit| {
+            let filter = MetricFilter {
+                name,
+                query,
+                step_ns: resolve_step(opened.range, requested_step_ns, 120)?,
+                resolution: params
+                    .resolution
+                    .unwrap_or_else(|| Resolution::choose_finest_kept_for(opened.range, retention)),
+            };
+            Ok(opened.queries.get_metric_series(&filter, limit)?)
+        },
+    )
     .await
 }

@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
+use otelo_query::{Signal, ValueType};
 use rusqlite::{Connection, Transaction, params};
 
 use otelo_storage::{AttributeValue, Attributes};
 
 pub const MAX_VALUES_PER_KEY: usize = 200;
 
-// A longer value is no use to complete.
-const MAX_VALUE_LEN: usize = 100;
+const MAX_COMPLETABLE_VALUE_BYTES: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KeyGroup {
@@ -19,7 +19,7 @@ pub enum KeyGroup {
 }
 
 impl KeyGroup {
-    pub const fn as_str(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Logs => "logs",
             Self::Spans => "spans",
@@ -38,8 +38,22 @@ impl KeyGroup {
             Self::SpanNames,
         ]
         .into_iter()
-        .find(|group| group.as_str() == text)
+        .find(|group| group.name() == text)
     }
+}
+
+impl From<Signal> for KeyGroup {
+    fn from(signal: Signal) -> Self {
+        match signal {
+            Signal::Logs => Self::Logs,
+            Signal::Spans => Self::Spans,
+            Signal::Metrics => Self::Metrics,
+        }
+    }
+}
+
+pub fn value_type_from_stored_name(name: &str) -> ValueType {
+    ValueType::from_name(name).unwrap_or(ValueType::Mixed)
 }
 
 #[derive(Default)]
@@ -48,38 +62,44 @@ pub struct CatalogCache {
 }
 
 struct KnownKey {
-    kind: &'static str,
+    value_type: ValueType,
     values: HashSet<String>,
     many_values: bool,
 }
 
+struct KeyDelta {
+    value_type: ValueType,
+    count: i64,
+}
+
 #[derive(Default)]
 pub struct CatalogDelta {
-    keys: HashMap<(KeyGroup, String), (&'static str, i64)>,
+    keys: HashMap<(KeyGroup, String), KeyDelta>,
     values: HashMap<(KeyGroup, String, String), i64>,
 }
 
 impl CatalogCache {
-    pub fn load(conn: &Connection) -> rusqlite::Result<Self> {
+    pub fn load(connection: &Connection) -> rusqlite::Result<Self> {
         let mut catalog = Self::default();
-        let mut stmt = conn.prepare("SELECT signal, key, type, many_values FROM attribute_keys")?;
-        let mut rows = stmt.query([])?;
+        let mut keys_statement =
+            connection.prepare("SELECT signal, key, type, many_values FROM attribute_keys")?;
+        let mut rows = keys_statement.query([])?;
         while let Some(row) = rows.next()? {
             let Some(group) = KeyGroup::parse(&row.get::<_, String>(0)?) else {
                 continue;
             };
-            let kind = row.get::<_, String>(2)?;
             catalog.keys.insert(
                 (group, row.get(1)?),
                 KnownKey {
-                    kind: static_type(&kind),
+                    value_type: value_type_from_stored_name(&row.get::<_, String>(2)?),
                     values: HashSet::new(),
                     many_values: row.get(3)?,
                 },
             );
         }
-        let mut stmt = conn.prepare("SELECT signal, key, value FROM attribute_values")?;
-        let mut rows = stmt.query([])?;
+        let mut values_statement =
+            connection.prepare("SELECT signal, key, value FROM attribute_values")?;
+        let mut rows = values_statement.query([])?;
         while let Some(row) = rows.next()? {
             let Some(group) = KeyGroup::parse(&row.get::<_, String>(0)?) else {
                 continue;
@@ -89,7 +109,7 @@ impl CatalogCache {
                 .keys
                 .entry((group, key))
                 .or_insert_with(|| KnownKey {
-                    kind: "string",
+                    value_type: ValueType::String,
                     values: HashSet::new(),
                     many_values: false,
                 });
@@ -116,42 +136,52 @@ impl CatalogCache {
         key: &str,
         value: &AttributeValue,
     ) {
-        let kind = value.type_name();
-        let slot = (group, key.to_owned());
-        let known = self.keys.entry(slot.clone()).or_insert_with(|| KnownKey {
-            kind,
-            values: HashSet::new(),
-            many_values: false,
-        });
-        if known.kind != kind {
-            known.kind = "mixed";
+        let value_type = value.value_type();
+        let group_and_key = (group, key.to_owned());
+        let known = self
+            .keys
+            .entry(group_and_key.clone())
+            .or_insert_with(|| KnownKey {
+                value_type,
+                values: HashSet::new(),
+                many_values: false,
+            });
+        if known.value_type != value_type {
+            known.value_type = ValueType::Mixed;
         }
-        let entry = delta.keys.entry(slot).or_insert((known.kind, 0));
-        entry.0 = known.kind;
-        entry.1 += 1;
-        let Some(text) = completable_value_json(value) else {
+        let key_delta = delta.keys.entry(group_and_key).or_insert(KeyDelta {
+            value_type: known.value_type,
+            count: 0,
+        });
+        key_delta.value_type = known.value_type;
+        key_delta.count += 1;
+        let Some(value_json) = completable_value_json(value) else {
             // A string too long to list is still one of the values of the key.
             known.many_values |= matches!(value, AttributeValue::String(_));
             return;
         };
-        if known.values.contains(&text) {
+        if known.values.contains(&value_json) {
             *delta
                 .values
-                .entry((group, key.to_owned(), text))
+                .entry((group, key.to_owned(), value_json))
                 .or_default() += 1;
         } else if known.values.len() < MAX_VALUES_PER_KEY {
-            known.values.insert(text.clone());
+            known.values.insert(value_json.clone());
             *delta
                 .values
-                .entry((group, key.to_owned(), text))
+                .entry((group, key.to_owned(), value_json))
                 .or_default() += 1;
         } else {
             known.many_values = true;
         }
     }
 
-    pub fn write_delta(&self, tx: &Transaction, delta: CatalogDelta) -> rusqlite::Result<()> {
-        let mut insert = tx.prepare_cached(
+    pub fn write_delta(
+        &self,
+        transaction: &Transaction,
+        delta: CatalogDelta,
+    ) -> rusqlite::Result<()> {
+        let mut insert_key = transaction.prepare_cached(
             "INSERT INTO attribute_keys (signal, key, type, count, many_values)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (signal, key) DO UPDATE SET
@@ -159,19 +189,25 @@ impl CatalogCache {
                type = CASE WHEN type = excluded.type THEN type ELSE 'mixed' END,
                many_values = max(many_values, excluded.many_values)",
         )?;
-        for ((group, key), (kind, count)) in delta.keys {
+        for ((group, key), KeyDelta { value_type, count }) in delta.keys {
             let many_values = self
                 .keys
                 .get(&(group, key.clone()))
-                .is_some_and(|k| k.many_values);
-            insert.execute(params![group.as_str(), key, kind, count, many_values])?;
+                .is_some_and(|known| known.many_values);
+            insert_key.execute(params![
+                group.name(),
+                key,
+                value_type.name(),
+                count,
+                many_values
+            ])?;
         }
-        let mut insert = tx.prepare_cached(
+        let mut insert_value = transaction.prepare_cached(
             "INSERT INTO attribute_values (signal, key, value, count) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (signal, key, value) DO UPDATE SET count = count + excluded.count",
         )?;
         for ((group, key, value), count) in delta.values {
-            insert.execute(params![group.as_str(), key, value, count])?;
+            insert_value.execute(params![group.name(), key, value, count])?;
         }
         Ok(())
     }
@@ -179,18 +215,11 @@ impl CatalogCache {
 
 fn completable_value_json(value: &AttributeValue) -> Option<String> {
     match value {
-        AttributeValue::String(text) if text.len() > MAX_VALUE_LEN => None,
+        AttributeValue::String(text) if text.len() > MAX_COMPLETABLE_VALUE_BYTES => None,
         AttributeValue::String(_)
         | AttributeValue::Int(_)
         | AttributeValue::Double(_)
         | AttributeValue::Bool(_) => Some(value.to_string()),
         _ => None,
     }
-}
-
-fn static_type(kind: &str) -> &'static str {
-    ["null", "bool", "float", "int", "string", "array", "object"]
-        .into_iter()
-        .find(|name| *name == kind)
-        .unwrap_or("mixed")
 }

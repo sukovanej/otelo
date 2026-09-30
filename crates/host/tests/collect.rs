@@ -17,17 +17,17 @@ fn newest_value(batch: &Batch, service: &str, name: &str) -> Option<f64> {
 
 #[test]
 fn reads_the_machine_the_test_runs_on() {
-    let host = HostIdentity::of_this_machine();
+    let host = HostIdentity::read_from_this_machine();
     assert!(host.attributes().iter().any(|(key, _)| *key == "os.type"));
-    let mut collector = Collector::of_host(host).unwrap();
-    let size = StorageSize {
+    let mut collector = Collector::new(host).unwrap();
+    let storage_size = StorageSize {
         telemetry_bytes: 1,
         rollup_bytes: 3,
         state_bytes: 2,
     };
-    let first = collector.collect_batch(1, Some(size)).unwrap();
-    let second = collector.collect_batch(2, Some(size)).unwrap();
-    for batch in [&first, &second] {
+    let first_batch = collector.collect_batch(1, Some(storage_size)).unwrap();
+    let second_batch = collector.collect_batch(2, Some(storage_size)).unwrap();
+    for batch in [&first_batch, &second_batch] {
         assert_eq!(batch[0].resource.service, "otelo");
         assert!(newest_value(batch, "otelo", "system.memory.limit").unwrap() > 0.0);
         assert!(newest_value(batch, "otelo", "process.memory.usage").unwrap() > 0.0);
@@ -35,5 +35,5 @@ fn reads_the_machine_the_test_runs_on() {
         assert!(newest_value(batch, "otelo", "otelo.storage.size").is_some());
     }
     let cpu_time = |batch| newest_value(batch, "otelo", "process.cpu.time").unwrap();
-    assert!(cpu_time(&second) >= cpu_time(&first));
+    assert!(cpu_time(&second_batch) >= cpu_time(&first_batch));
 }

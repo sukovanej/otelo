@@ -5,7 +5,8 @@ export type Attributes = Schemas["Attributes"];
 export type CallOperation = Schemas["CallOperation"];
 export type Calls = Schemas["Calls"];
 export type FieldBody = Schemas["FieldBody"];
-export type FieldSource = Schemas["FieldSource"];
+export type FieldSource = FieldBody["source"];
+export type IndexedSignal = Schemas["IndexedSignal"];
 export type LogGroup = Schemas["LogGroup"];
 export type LogGroups = Schemas["LogGroups"];
 export type LogLine = Schemas["LogLine"];
@@ -143,7 +144,7 @@ export const completeQuery = (
     abortSignal,
   );
 
-export const addIndex = (signal: Signal, key: string) =>
+export const addIndex = (signal: IndexedSignal, key: string) =>
   requestJson<OkBody<"/api/indexes/{signal}/{key}", "put">>(
     "PUT",
     `/api/indexes/${signal}/${encodeURIComponent(key)}`,

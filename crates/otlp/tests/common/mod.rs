@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 
-use otelo_storage::{Inbox, Sender, batch_channel};
+use otelo_storage::{BatchInbox, BatchSender, open_batch_channel};
 use otelo_storage_sqlite::{Config, Day, Writer};
 use rusqlite::Connection;
 use tokio::net::TcpListener;
@@ -13,55 +13,56 @@ use tokio_util::sync::CancellationToken;
 
 pub struct Receiver {
     pub runtime: Runtime,
-    pub http: SocketAddr,
-    pub grpc: SocketAddr,
+    pub http_address: SocketAddr,
+    pub grpc_address: SocketAddr,
     shutdown: CancellationToken,
     servers: Vec<JoinHandle<anyhow::Result<()>>>,
-    sender: Sender,
+    sender: BatchSender,
     writer: Option<Writer>,
 }
 
 impl Receiver {
-    pub fn start_writing_into(dir: &Path) -> Self {
-        let (sender, inbox) = batch_channel(64);
-        let writer = Writer::spawn(Config::new(dir.to_owned()), inbox).unwrap();
-        Self::serve(sender, Some(writer))
+    pub fn start_writing_into(directory: &Path) -> Self {
+        let (sender, inbox) = open_batch_channel(64);
+        let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
+        Self::start_servers(sender, Some(writer))
     }
 
     // Nothing reads the channel of one batch, so the second batch finds it full.
-    pub fn start_with_full_queue() -> (Self, Inbox) {
-        let (sender, inbox) = batch_channel(1);
-        (Self::serve(sender, None), inbox)
+    pub fn start_with_full_queue() -> (Self, BatchInbox) {
+        let (sender, inbox) = open_batch_channel(1);
+        (Self::start_servers(sender, None), inbox)
     }
 
-    fn serve(sender: Sender, writer: Option<Writer>) -> Self {
+    fn start_servers(sender: BatchSender, writer: Option<Writer>) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let shutdown = CancellationToken::new();
-        let (http, grpc, servers) = runtime.block_on(async {
-            let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let grpc = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let addrs = (http.local_addr().unwrap(), grpc.local_addr().unwrap());
+        let (http_address, grpc_address, servers) = runtime.block_on(async {
+            let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let grpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let http_address = http_listener.local_addr().unwrap();
+            let grpc_address = grpc_listener.local_addr().unwrap();
             let servers = vec![
                 tokio::spawn(otelo_otlp::serve_http(
-                    http,
+                    http_listener,
                     sender.clone(),
                     shutdown.clone(),
                 )),
                 tokio::spawn(otelo_otlp::serve_grpc(
-                    grpc,
+                    grpc_listener,
                     sender.clone(),
                     shutdown.clone(),
                 )),
             ];
-            (addrs.0, addrs.1, servers)
+            (http_address, grpc_address, servers)
         });
         Self {
             runtime,
-            http,
-            grpc,
+            http_address,
+            grpc_address,
             shutdown,
             servers,
             sender,
@@ -69,8 +70,8 @@ impl Receiver {
         }
     }
 
-    pub fn url(&self, path: &str) -> String {
-        format!("http://{}{path}", self.http)
+    pub fn http_url(&self, path: &str) -> String {
+        format!("http://{}{path}", self.http_address)
     }
 
     pub fn stop_and_wait_for_writer(self) {
@@ -85,12 +86,16 @@ impl Receiver {
     }
 }
 
-pub fn open_todays_day_file(dir: &Path) -> Connection {
-    Connection::open(dir.join(Day::today().file_name())).unwrap()
+pub fn open_todays_day_file(directory: &Path) -> Connection {
+    Connection::open(directory.join(Day::today().file_name())).unwrap()
 }
 
-pub fn rows<T: rusqlite::types::FromSql>(conn: &Connection, sql: &str) -> Vec<T> {
-    conn.prepare(sql)
+pub fn query_first_column<T: rusqlite::types::FromSql>(
+    connection: &Connection,
+    sql: &str,
+) -> Vec<T> {
+    connection
+        .prepare(sql)
         .unwrap()
         .query_map([], |row| row.get(0))
         .unwrap()

@@ -12,12 +12,13 @@ const MAX_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 pub struct Client {
     /// Address of the otelo daemon
     #[arg(
-        long,
+        long = "daemon",
+        value_name = "DAEMON",
         env = "OTELO_URL",
         default_value = "http://127.0.0.1:7070",
         global = true
     )]
-    daemon: String,
+    daemon_url: String,
 
     /// Print JSON, the default when stdout is not a terminal
     #[arg(long, conflicts_with = "table", global = true)]
@@ -28,13 +29,19 @@ pub struct Client {
     table: bool,
 }
 
+#[derive(Clone, Copy)]
+pub enum OutputFormat {
+    Json,
+    Table,
+}
+
 impl Client {
     #[must_use]
-    pub fn wants_table(&self) -> bool {
-        if self.json {
-            false
+    pub fn choose_output_format(&self) -> OutputFormat {
+        if !self.json && (self.table || io::stdout().is_terminal()) {
+            OutputFormat::Table
         } else {
-            self.table || io::stdout().is_terminal()
+            OutputFormat::Json
         }
     }
 
@@ -43,15 +50,15 @@ impl Client {
         path: &str,
         params: &[(&str, Option<String>)],
     ) -> anyhow::Result<T> {
-        let pairs = params
+        let set_params = params
             .iter()
             .filter_map(|(name, value)| Some((*name, value.as_deref()?)));
-        let response = Self::agent()
-            .get(self.url(path))
-            .query_pairs(pairs)
+        let response = Self::build_agent()
+            .get(self.build_url(path))
+            .query_pairs(set_params)
             .call()
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
-        read(response)
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
+        read_json_response(response)
     }
 
     pub fn post<T: DeserializeOwned>(
@@ -59,49 +66,51 @@ impl Client {
         path: &str,
         body: &impl Serialize,
     ) -> anyhow::Result<T> {
-        let response = Self::agent()
-            .post(self.url(path))
+        let response = Self::build_agent()
+            .post(self.build_url(path))
             .send_json(body)
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
-        read(response)
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
+        read_json_response(response)
     }
 
     pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let response = Self::agent()
-            .put(self.url(path))
+        let response = Self::build_agent()
+            .put(self.build_url(path))
             .send_empty()
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
-        read(response)
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
+        read_json_response(response)
     }
 
     pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let response = Self::agent()
-            .delete(self.url(path))
+        let response = Self::build_agent()
+            .delete(self.build_url(path))
             .call()
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon))?;
-        read(response)
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
+        read_json_response(response)
     }
 
-    fn agent() -> ureq::Agent {
+    fn build_agent() -> ureq::Agent {
         ureq::Agent::config_builder()
             .http_status_as_error(false)
             .build()
             .into()
     }
 
-    fn url(&self, path: &str) -> String {
-        format!("{}{path}", self.daemon.trim_end_matches('/'))
+    fn build_url(&self, path: &str) -> String {
+        format!("{}{path}", self.daemon_url.trim_end_matches('/'))
     }
 }
 
-fn read<T: DeserializeOwned>(mut response: ureq::http::Response<ureq::Body>) -> anyhow::Result<T> {
+fn read_json_response<T: DeserializeOwned>(
+    mut response: ureq::http::Response<ureq::Body>,
+) -> anyhow::Result<T> {
     let status = response.status();
     let body = response.body_mut().with_config().limit(MAX_RESPONSE_BYTES);
     if status.is_success() {
         return body.read_json().context("read the response of the daemon");
     }
     match body.read_json::<ErrorBody>() {
-        Ok(error) => bail!("{}", error.error),
+        Ok(rejection) => bail!("{}", rejection.error),
         Err(_) => bail!("the daemon answered {status}"),
     }
 }
@@ -110,11 +119,11 @@ fn read<T: DeserializeOwned>(mut response: ureq::http::Response<ureq::Body>) -> 
 pub fn escape_path_segment(segment: &str) -> String {
     segment
         .bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                char::from(b).to_string()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                char::from(byte).to_string()
             } else {
-                format!("%{b:02X}")
+                format!("%{byte:02X}")
             }
         })
         .collect()
@@ -127,7 +136,7 @@ pub fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn note_cut(truncated: bool, message: &str) {
+pub fn note_truncation(truncated: bool, message: &str) {
     if truncated {
         eprintln!("{message}");
     }

@@ -1,8 +1,8 @@
 use std::ops::Range;
 
-use crate::lexer::{Tok, Token, is_keyword, lex_tokens, needs_no_backticks};
+use crate::lexer::{Token, TokenType, is_keyword, lex_tokens, needs_no_backticks};
 use crate::parser::resolve_field;
-use crate::{Builtin, Field, Op, Signal, Value, quote};
+use crate::{BuiltinField, Field, Operator, Signal, Value, ValueType, quote_string};
 
 const MAX_SUGGESTIONS: usize = 50;
 
@@ -18,7 +18,7 @@ pub trait Catalog {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyInfo {
     pub key: String,
-    pub kind: String,
+    pub value_type: ValueType,
     pub count: u64,
 }
 
@@ -31,8 +31,7 @@ pub struct ValueInfo {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FieldValues {
     pub listed: Vec<ValueInfo>,
-    // The field has more distinct values than the catalog lists.
-    pub many_values: bool,
+    pub has_more_values_than_listed: bool,
 }
 
 pub struct NoCatalog;
@@ -57,7 +56,7 @@ pub enum SuggestionKind {
 
 impl SuggestionKind {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Field => "field",
             Self::Operator => "operator",
@@ -70,7 +69,7 @@ impl SuggestionKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Suggestion {
     pub text: String,
-    pub replace: Range<usize>,
+    pub replaced_byte_range: Range<usize>,
     pub kind: SuggestionKind,
     pub detail: Option<String>,
 }
@@ -78,17 +77,17 @@ pub struct Suggestion {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Completion {
     pub suggestions: Vec<Suggestion>,
-    pub field_at_cursor: Option<FieldHelp>,
+    pub help_for_field_at_cursor: Option<FieldHelp>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FieldHelp {
     pub name: String,
-    pub type_name: String,
+    pub value_type: ValueType,
     pub origin: FieldOrigin,
     pub most_common_values: Vec<HelpValue>,
     pub distinct_value_count: usize,
-    pub many_values: bool,
+    pub has_more_values_than_listed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,97 +119,109 @@ enum ExpectedNext {
 }
 
 #[must_use]
-pub fn complete(input: &str, cursor: usize, signal: Signal, catalog: &dyn Catalog) -> Completion {
+pub fn complete_query(
+    input: &str,
+    cursor: usize,
+    signal: Signal,
+    catalog: &dyn Catalog,
+) -> Completion {
     let cursor = floor_char_boundary(input, cursor);
     let tokens = lex_tokens(&input[..cursor]);
     let (tokens_before_word, word_at_cursor) = match tokens.last() {
-        Some(last) if last.byte_range.end == cursor && can_extend_token(&last.tok) => {
+        Some(last) if last.byte_range.end == cursor && can_extend_token(&last.token_type) => {
             (&tokens[..tokens.len() - 1], Some(last))
         }
         _ => (&tokens[..], None),
     };
-    let Some((expect, open_parens)) = expected_after_tokens(tokens_before_word, signal) else {
+    let Some((expected, open_parens)) = expected_after_tokens(tokens_before_word, signal) else {
         return Completion::default();
     };
-    let field_at_cursor = field_of_term_at_cursor(&expect, word_at_cursor, signal);
+    let field_at_cursor = field_of_term_at_cursor(&expected, word_at_cursor, signal);
     let known_field = field_at_cursor
         .as_ref()
         .and_then(|field| find_known_field(field, signal, catalog));
-    let completes_value = matches!(expect, ExpectedNext::Value(_) | ExpectedNext::InValue(_));
+    let completes_value = matches!(expected, ExpectedNext::Value(_) | ExpectedNext::InValue(_));
     let values = match &field_at_cursor {
         Some(field) if completes_value || known_field.is_some() => catalog.values(signal, field),
         _ => FieldValues::default(),
     };
-    let replace = word_at_cursor.map_or(cursor..cursor, |token| {
-        // Also replace the part after the cursor, such as the rest of a string and its closing quote.
-        let end = lex_tokens(input)
-            .into_iter()
-            .find(|full| full.byte_range.start == token.byte_range.start)
-            .map_or(cursor, |full| full.byte_range.end);
-        token.byte_range.start..end.max(cursor)
-    });
-    let prefix = word_at_cursor.map_or(String::new(), |token| match &token.tok {
-        Tok::Quoted { text, .. } | Tok::Backticked { text, .. } => text.clone(),
+    let replaced_byte_range = byte_range_of_whole_token_at_cursor(input, word_at_cursor, cursor);
+    let prefix = word_at_cursor.map_or(String::new(), |token| match &token.token_type {
+        TokenType::Quoted { text, .. } | TokenType::Backticked { text, .. } => text.clone(),
         _ => input[token.byte_range.clone()].to_owned(),
     });
-    let mut out = Out {
+    let mut matching = MatchingSuggestions {
         suggestions: Vec::new(),
         lowercase_prefix: prefix.to_lowercase(),
-        replace,
+        replaced_byte_range,
     };
-    match expect {
+    match expected {
         ExpectedNext::Term => {
-            out.push_fields(signal, catalog, true);
-            out.push_keyword("not");
-            out.push_keyword("has(");
-            out.push_keyword("(");
+            matching.push_fields(signal, catalog, true);
+            matching.push_keyword("not");
+            matching.push_keyword("has(");
+            matching.push_keyword("(");
         }
-        ExpectedNext::Operator(field) => out.push_operators(&field),
+        ExpectedNext::Operator(field) => matching.push_operators(&field),
         ExpectedNext::Value(field) | ExpectedNext::InValue(field) => {
-            out.push_values(signal, &field, &values.listed);
+            matching.push_values(signal, &field, &values.listed);
         }
-        ExpectedNext::InOpen | ExpectedNext::HasOpen => out.push_keyword("("),
+        ExpectedNext::InOpen | ExpectedNext::HasOpen => matching.push_keyword("("),
         ExpectedNext::InNext => {
-            out.push_keyword(",");
-            out.push_keyword(")");
+            matching.push_keyword(",");
+            matching.push_keyword(")");
         }
         // Every record has the built-in fields, so has() only makes sense on an attribute.
-        ExpectedNext::HasField => out.push_fields(signal, catalog, false),
-        ExpectedNext::HasClose => out.push_keyword(")"),
+        ExpectedNext::HasField => matching.push_fields(signal, catalog, false),
+        ExpectedNext::HasClose => matching.push_keyword(")"),
         ExpectedNext::AfterTerm => {
-            out.push_keyword("and");
-            out.push_keyword("or");
+            matching.push_keyword("and");
+            matching.push_keyword("or");
             if open_parens > 0 {
-                out.push_keyword(")");
+                matching.push_keyword(")");
             }
-            if !out.lowercase_prefix.is_empty() {
-                out.push_fields(signal, catalog, true);
+            if !matching.lowercase_prefix.is_empty() {
+                matching.push_fields(signal, catalog, true);
             }
         }
     }
-    out.suggestions.truncate(MAX_SUGGESTIONS);
+    matching.suggestions.truncate(MAX_SUGGESTIONS);
     Completion {
-        suggestions: out.suggestions,
-        field_at_cursor: field_at_cursor
-            .zip(known_field)
-            .map(|(field, (type_name, origin))| {
-                describe_field(&field, type_name, origin, signal, &values)
-            }),
+        suggestions: matching.suggestions,
+        help_for_field_at_cursor: field_at_cursor.zip(known_field).map(
+            |(field, (value_type, origin))| {
+                describe_field(&field, value_type, origin, signal, &values)
+            },
+        ),
     }
 }
 
+fn byte_range_of_whole_token_at_cursor(
+    input: &str,
+    word_at_cursor: Option<&Token>,
+    cursor: usize,
+) -> Range<usize> {
+    word_at_cursor.map_or(cursor..cursor, |token| {
+        let end = lex_tokens(input)
+            .into_iter()
+            .find(|whole_token| whole_token.byte_range.start == token.byte_range.start)
+            .map_or(cursor, |whole_token| whole_token.byte_range.end);
+        token.byte_range.start..end.max(cursor)
+    })
+}
+
 fn field_of_term_at_cursor(
-    expect: &ExpectedNext,
+    expected: &ExpectedNext,
     word_at_cursor: Option<&Token>,
     signal: Signal,
 ) -> Option<Field> {
-    match expect {
+    match expected {
         ExpectedNext::Operator(field)
         | ExpectedNext::Value(field)
         | ExpectedNext::InValue(field) => Some(field.clone()),
         ExpectedNext::Term | ExpectedNext::AfterTerm | ExpectedNext::HasField => {
-            match &word_at_cursor?.tok {
-                Tok::Word(word) if !is_keyword(word) => Some(resolve_field(signal, word)),
+            match &word_at_cursor?.token_type {
+                TokenType::Word(word) if !is_keyword(word) => Some(resolve_field(signal, word)),
                 _ => None,
             }
         }
@@ -222,7 +233,7 @@ fn find_known_field(
     field: &Field,
     signal: Signal,
     catalog: &dyn Catalog,
-) -> Option<(String, FieldOrigin)> {
+) -> Option<(ValueType, FieldOrigin)> {
     let find_key = |wanted: &str, resource: bool| {
         catalog
             .keys(signal, resource)
@@ -230,15 +241,15 @@ fn find_known_field(
             .find(|info| info.key == wanted)
     };
     match field {
-        Field::Builtin(builtin) => Some((
-            builtin.type_name().to_owned(),
+        Field::Builtin(builtin_field) => Some((
+            builtin_field.value_type(),
             FieldOrigin::Builtin {
-                description: builtin.description(signal),
+                description: builtin_field.description(signal),
             },
         )),
         Field::Attribute(key) => find_key(key, false).map(|info| {
             (
-                info.kind,
+                info.value_type,
                 FieldOrigin::Attribute {
                     record_count: info.count,
                 },
@@ -246,7 +257,7 @@ fn find_known_field(
         }),
         Field::Resource(key) => find_key(key, true).map(|info| {
             (
-                info.kind,
+                info.value_type,
                 FieldOrigin::Resource {
                     resource_count: info.count,
                 },
@@ -257,13 +268,13 @@ fn find_known_field(
 
 fn describe_field(
     field: &Field,
-    type_name: String,
+    value_type: ValueType,
     origin: FieldOrigin,
     signal: Signal,
     values: &FieldValues,
 ) -> FieldHelp {
     let fixed_values = match field {
-        Field::Builtin(builtin) => builtin.values(signal),
+        Field::Builtin(builtin_field) => builtin_field.fixed_values(signal),
         _ => &[],
     };
     let mut all_values: Vec<HelpValue> = fixed_values
@@ -281,30 +292,30 @@ fn describe_field(
     all_values.truncate(MAX_HELP_VALUES);
     FieldHelp {
         name: field.to_string(),
-        type_name,
+        value_type,
         origin,
         most_common_values: all_values,
         distinct_value_count,
-        many_values: values.many_values,
+        has_more_values_than_listed: values.has_more_values_than_listed,
     }
 }
 
 fn value_as_written(value: &Value) -> String {
     match value {
-        Value::String(text) => quote(text),
+        Value::String(text) => quote_string(text),
         value => value.to_string(),
     }
 }
 
-const fn can_extend_token(tok: &Tok) -> bool {
+const fn can_extend_token(token_type: &TokenType) -> bool {
     matches!(
-        tok,
-        Tok::Word(_)
-            | Tok::Int(_)
-            | Tok::Float(_)
-            | Tok::DurationNanos(_)
-            | Tok::Quoted { closed: false, .. }
-            | Tok::Backticked { closed: false, .. }
+        token_type,
+        TokenType::Word(_)
+            | TokenType::Int(_)
+            | TokenType::Float(_)
+            | TokenType::DurationNanos(_)
+            | TokenType::Quoted { closed: false, .. }
+            | TokenType::Backticked { closed: false, .. }
     )
 }
 
@@ -317,158 +328,173 @@ fn floor_char_boundary(input: &str, cursor: usize) -> usize {
 }
 
 fn expected_after_tokens(tokens: &[Token], signal: Signal) -> Option<(ExpectedNext, usize)> {
-    let mut expect = ExpectedNext::Term;
+    let mut expected = ExpectedNext::Term;
     let mut open_parens = 0_usize;
-    let mut i = 0;
-    while i < tokens.len() {
-        let tok = &tokens[i].tok;
-        let word = match tok {
-            Tok::Word(word) => Some(word.to_ascii_lowercase()),
+    let mut index = 0;
+    while index < tokens.len() {
+        let token_type = &tokens[index].token_type;
+        let word = match token_type {
+            TokenType::Word(word) => Some(word.to_ascii_lowercase()),
             _ => None,
         };
-        expect = match (expect, tok) {
-            (ExpectedNext::AfterTerm, Tok::Word(_))
+        expected = match (expected, token_type) {
+            (ExpectedNext::AfterTerm, TokenType::Word(_))
                 if matches!(word.as_deref(), Some("and" | "or")) =>
             {
                 ExpectedNext::Term
             }
-            (ExpectedNext::AfterTerm, Tok::RParen) if open_parens > 0 => {
+            (ExpectedNext::AfterTerm, TokenType::CloseParen) if open_parens > 0 => {
                 open_parens -= 1;
                 ExpectedNext::AfterTerm
             }
             // A term right after another joins it with AND.
             (ExpectedNext::Term, _)
-            | (ExpectedNext::AfterTerm, Tok::Word(_) | Tok::Backticked { .. } | Tok::LParen) => {
-                expected_after_term_start(
-                    tok,
-                    word.as_deref(),
-                    tokens.get(i + 1),
-                    signal,
-                    &mut open_parens,
-                )?
+            | (
+                ExpectedNext::AfterTerm,
+                TokenType::Word(_) | TokenType::Backticked { .. } | TokenType::OpenParen,
+            ) => expected_after_term_start(
+                token_type,
+                word.as_deref(),
+                tokens.get(index + 1),
+                signal,
+                &mut open_parens,
+            )?,
+            (ExpectedNext::Operator(field), TokenType::Operator(_) | TokenType::Tilde) => {
+                ExpectedNext::Value(field)
             }
-            (ExpectedNext::Operator(field), Tok::Op(_) | Tok::Tilde) => ExpectedNext::Value(field),
-            (ExpectedNext::Operator(field), Tok::Word(_)) if word.as_deref() == Some("in") => {
-                i += 1;
-                match tokens.get(i).map(|t| &t.tok) {
-                    Some(Tok::LParen) => ExpectedNext::InValue(field),
+            (ExpectedNext::Operator(field), TokenType::Word(_))
+                if word.as_deref() == Some("in") =>
+            {
+                index += 1;
+                match tokens.get(index).map(|token| &token.token_type) {
+                    Some(TokenType::OpenParen) => ExpectedNext::InValue(field),
                     None => ExpectedNext::InOpen,
                     Some(_) => return None,
                 }
             }
-            (ExpectedNext::Value(_), tok) if is_value(tok) => ExpectedNext::AfterTerm,
-            (ExpectedNext::InValue(_), tok) if is_value(tok) => ExpectedNext::InNext,
-            (ExpectedNext::InNext, Tok::Comma) => {
-                let field = field_of_open_in_list(&tokens[..i], signal)?;
+            (ExpectedNext::Value(_), _) if is_value_token(token_type) => ExpectedNext::AfterTerm,
+            (ExpectedNext::InValue(_), _) if is_value_token(token_type) => ExpectedNext::InNext,
+            (ExpectedNext::InNext, TokenType::Comma) => {
+                let field = field_of_open_in_list(&tokens[..index], signal)?;
                 ExpectedNext::InValue(field)
             }
-            (ExpectedNext::HasOpen, Tok::LParen) => ExpectedNext::HasField,
-            (ExpectedNext::HasField, Tok::Word(_) | Tok::Backticked { closed: true, .. }) => {
-                ExpectedNext::HasClose
+            (ExpectedNext::HasOpen, TokenType::OpenParen) => ExpectedNext::HasField,
+            (
+                ExpectedNext::HasField,
+                TokenType::Word(_) | TokenType::Backticked { closed: true, .. },
+            ) => ExpectedNext::HasClose,
+            (ExpectedNext::InNext | ExpectedNext::HasClose, TokenType::CloseParen) => {
+                ExpectedNext::AfterTerm
             }
-            (ExpectedNext::InNext | ExpectedNext::HasClose, Tok::RParen) => ExpectedNext::AfterTerm,
             _ => return None,
         };
-        i += 1;
+        index += 1;
     }
-    Some((expect, open_parens))
+    Some((expected, open_parens))
 }
 
 fn expected_after_term_start(
-    tok: &Tok,
+    token_type: &TokenType,
     word: Option<&str>,
-    next: Option<&Token>,
+    next_token: Option<&Token>,
     signal: Signal,
     open_parens: &mut usize,
 ) -> Option<ExpectedNext> {
-    Some(match (tok, word) {
-        (Tok::LParen, _) => {
+    Some(match (token_type, word) {
+        (TokenType::OpenParen, _) => {
             *open_parens += 1;
             ExpectedNext::Term
         }
         (_, Some("not")) => ExpectedNext::Term,
-        (_, Some("has")) if next.is_none_or(|t| t.tok == Tok::LParen) => ExpectedNext::HasOpen,
-        (Tok::Word(text), _) if !is_keyword(text) => {
+        (_, Some("has"))
+            if next_token.is_none_or(|token| token.token_type == TokenType::OpenParen) =>
+        {
+            ExpectedNext::HasOpen
+        }
+        (TokenType::Word(text), _) if !is_keyword(text) => {
             ExpectedNext::Operator(resolve_field(signal, text))
         }
-        (Tok::Backticked { text, closed: true }, _) => {
+        (TokenType::Backticked { text, closed: true }, _) => {
             ExpectedNext::Operator(Field::Attribute(text.clone()))
         }
         _ => return None,
     })
 }
 
-const fn is_value(tok: &Tok) -> bool {
+const fn is_value_token(token_type: &TokenType) -> bool {
     matches!(
-        tok,
-        Tok::Word(_)
-            | Tok::Int(_)
-            | Tok::Float(_)
-            | Tok::DurationNanos(_)
-            | Tok::Quoted { closed: true, .. }
+        token_type,
+        TokenType::Word(_)
+            | TokenType::Int(_)
+            | TokenType::Float(_)
+            | TokenType::DurationNanos(_)
+            | TokenType::Quoted { closed: true, .. }
     )
 }
 
 fn field_of_open_in_list(tokens: &[Token], signal: Signal) -> Option<Field> {
-    let at = tokens
-        .iter()
-        .rposition(|t| matches!(&t.tok, Tok::Word(word) if word.eq_ignore_ascii_case("in")))?;
-    match &tokens.get(at.checked_sub(1)?)?.tok {
-        Tok::Word(word) => Some(resolve_field(signal, word)),
-        Tok::Backticked { text, .. } => Some(Field::Attribute(text.clone())),
+    let in_keyword_index = tokens.iter().rposition(|token| {
+        matches!(&token.token_type, TokenType::Word(word) if word.eq_ignore_ascii_case("in"))
+    })?;
+    match &tokens.get(in_keyword_index.checked_sub(1)?)?.token_type {
+        TokenType::Word(word) => Some(resolve_field(signal, word)),
+        TokenType::Backticked { text, .. } => Some(Field::Attribute(text.clone())),
         _ => None,
     }
 }
 
-struct Out {
+struct MatchingSuggestions {
     suggestions: Vec<Suggestion>,
     lowercase_prefix: String,
-    replace: Range<usize>,
+    replaced_byte_range: Range<usize>,
 }
 
-impl Out {
-    fn push(&mut self, text: String, kind: SuggestionKind, detail: Option<String>) {
+impl MatchingSuggestions {
+    fn push_suggestion(&mut self, text: String, kind: SuggestionKind, detail: Option<String>) {
         if !text.to_lowercase().starts_with(&self.lowercase_prefix)
-            || self.suggestions.iter().any(|s| s.text == text)
+            || self
+                .suggestions
+                .iter()
+                .any(|suggestion| suggestion.text == text)
         {
             return;
         }
         self.suggestions.push(Suggestion {
             text,
-            replace: self.replace.clone(),
+            replaced_byte_range: self.replaced_byte_range.clone(),
             kind,
             detail,
         });
     }
 
     fn push_keyword(&mut self, keyword: &str) {
-        self.push(keyword.into(), SuggestionKind::Keyword, None);
+        self.push_suggestion(keyword.into(), SuggestionKind::Keyword, None);
     }
 
-    fn push_fields(&mut self, signal: Signal, catalog: &dyn Catalog, include_builtins: bool) {
-        if include_builtins {
-            for builtin in signal.builtins() {
-                self.push(
-                    builtin.name().into(),
+    fn push_fields(&mut self, signal: Signal, catalog: &dyn Catalog, include_builtin_fields: bool) {
+        if include_builtin_fields {
+            for builtin_field in signal.builtin_fields() {
+                self.push_suggestion(
+                    builtin_field.name().into(),
                     SuggestionKind::Field,
-                    Some(format!("built-in, {}", builtin.type_name())),
+                    Some(format!("built-in, {}", builtin_field.value_type())),
                 );
             }
         }
-        for key in catalog.keys(signal, false) {
-            let text = Field::Attribute(key.key).to_string();
-            self.push(
-                text,
+        for info in catalog.keys(signal, false) {
+            let detail = describe_key(info.value_type, info.count);
+            self.push_suggestion(
+                Field::Attribute(info.key).to_string(),
                 SuggestionKind::Field,
-                Some(detail(&key.kind, key.count)),
+                Some(detail),
             );
         }
         // A resource key has no backtick form, so one that needs backticks cannot be written.
-        for key in catalog.keys(signal, true) {
-            if needs_no_backticks(&key.key) {
-                let detail = detail(&key.kind, key.count);
-                self.push(
-                    Field::Resource(key.key).to_string(),
+        for info in catalog.keys(signal, true) {
+            if needs_no_backticks(&info.key) {
+                let detail = describe_key(info.value_type, info.count);
+                self.push_suggestion(
+                    Field::Resource(info.key).to_string(),
                     SuggestionKind::Field,
                     Some(detail),
                 );
@@ -477,29 +503,29 @@ impl Out {
     }
 
     fn push_operators(&mut self, field: &Field) {
-        let (ordered, text) = match field {
-            Field::Builtin(builtin) => (builtin.ordered(), builtin.text()),
+        let (is_ordered, is_text) = match field {
+            Field::Builtin(builtin_field) => (builtin_field.is_ordered(), builtin_field.is_text()),
             _ => (true, true),
         };
-        let mut ops = vec![Op::Eq, Op::Ne];
-        if ordered {
-            ops.extend([Op::Lt, Op::Le, Op::Gt, Op::Ge]);
+        let mut operators = vec![Operator::Eq, Operator::Ne];
+        if is_ordered {
+            operators.extend([Operator::Lt, Operator::Le, Operator::Gt, Operator::Ge]);
         }
-        for op in ops {
-            self.push(op.as_str().into(), SuggestionKind::Operator, None);
+        for operator in operators {
+            self.push_suggestion(operator.symbol().into(), SuggestionKind::Operator, None);
         }
-        if text {
-            self.push("~".into(), SuggestionKind::Operator, None);
+        if is_text {
+            self.push_suggestion("~".into(), SuggestionKind::Operator, None);
         }
-        self.push("in".into(), SuggestionKind::Operator, None);
+        self.push_suggestion("in".into(), SuggestionKind::Operator, None);
     }
 
     fn push_values(&mut self, signal: Signal, field: &Field, listed_values: &[ValueInfo]) {
-        if let Field::Builtin(builtin) = field {
-            for value in builtin.values(signal) {
-                self.push((*value).into(), SuggestionKind::Value, None);
+        if let Field::Builtin(builtin_field) = field {
+            for value in builtin_field.fixed_values(signal) {
+                self.push_suggestion((*value).into(), SuggestionKind::Value, None);
             }
-            if matches!(builtin, Builtin::Duration) {
+            if matches!(builtin_field, BuiltinField::Duration) {
                 return;
             }
         }
@@ -510,11 +536,14 @@ impl Out {
                 _ => text.to_lowercase(),
             };
             if unquoted_text.starts_with(&self.lowercase_prefix)
-                && !self.suggestions.iter().any(|s| s.text == text)
+                && !self
+                    .suggestions
+                    .iter()
+                    .any(|suggestion| suggestion.text == text)
             {
                 self.suggestions.push(Suggestion {
                     text,
-                    replace: self.replace.clone(),
+                    replaced_byte_range: self.replaced_byte_range.clone(),
                     kind: SuggestionKind::Value,
                     detail: Some(info.count.to_string()),
                 });
@@ -523,6 +552,6 @@ impl Out {
     }
 }
 
-fn detail(kind: &str, count: u64) -> String {
-    format!("{kind}, {count}")
+fn describe_key(value_type: ValueType, count: u64) -> String {
+    format!("{value_type}, {count}")
 }

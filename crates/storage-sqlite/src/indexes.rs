@@ -6,7 +6,7 @@ use rusqlite::Connection;
 
 use crate::series::hash_fields;
 
-const fn table(attribute: &IndexedAttribute) -> &'static str {
+const fn table_name_of(attribute: &IndexedAttribute) -> &'static str {
     match attribute.signal() {
         IndexedSignal::Logs => "logs",
         IndexedSignal::Spans => "spans",
@@ -16,8 +16,8 @@ const fn table(attribute: &IndexedAttribute) -> &'static str {
 fn index_name(attribute: &IndexedAttribute) -> String {
     format!(
         "attr_{}_{:016x}",
-        table(attribute),
-        hash_fields(&[table(attribute), attribute.key()]).cast_unsigned()
+        table_name_of(attribute),
+        hash_fields(&[table_name_of(attribute), attribute.key()]).cast_unsigned()
     )
 }
 
@@ -41,20 +41,20 @@ impl Indexes {
 
     #[must_use]
     pub fn attributes(&self) -> BTreeSet<IndexedAttribute> {
-        self.lock().attributes.clone()
+        self.lock_attributes().attributes.clone()
     }
 
     pub fn replace_attributes(&self, attributes: BTreeSet<IndexedAttribute>) {
-        let mut versioned = self.lock();
+        let mut versioned = self.lock_attributes();
         versioned.version += 1;
         versioned.attributes = attributes;
     }
 
     pub(crate) fn versioned_attributes(&self) -> VersionedAttributes {
-        self.lock().clone()
+        self.lock_attributes().clone()
     }
 
-    fn lock(&self) -> MutexGuard<'_, VersionedAttributes> {
+    fn lock_attributes(&self) -> MutexGuard<'_, VersionedAttributes> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -64,27 +64,27 @@ pub fn attribute_json_path(key: &str) -> String {
 }
 
 pub fn apply_indexes_to_day_file(
-    conn: &Connection,
+    connection: &Connection,
     attributes: &BTreeSet<IndexedAttribute>,
 ) -> rusqlite::Result<()> {
-    let desired: HashMap<String, &IndexedAttribute> = attributes
+    let attributes_by_index_name: HashMap<String, &IndexedAttribute> = attributes
         .iter()
         .map(|attribute| (index_name(attribute), attribute))
         .collect();
-    let existing: Vec<String> = conn
+    let existing_index_names: Vec<String> = connection
         .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name GLOB 'attr_*'")?
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
-    for name in &existing {
-        if !desired.contains_key(name) {
-            conn.execute_batch(&format!("DROP INDEX \"{name}\""))?;
+    for name in &existing_index_names {
+        if !attributes_by_index_name.contains_key(name) {
+            connection.execute_batch(&format!("DROP INDEX \"{name}\""))?;
         }
     }
-    for (name, attribute) in desired {
-        if !existing.contains(&name) {
-            conn.execute_batch(&format!(
+    for (name, attribute) in attributes_by_index_name {
+        if !existing_index_names.contains(&name) {
+            connection.execute_batch(&format!(
                 "CREATE INDEX \"{name}\" ON {} (json_extract(attributes, {}))",
-                table(attribute),
+                table_name_of(attribute),
                 attribute_json_path(attribute.key())
             ))?;
             tracing::debug!(signal = %attribute.signal(), key = attribute.key(), "indexed an attribute");

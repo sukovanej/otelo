@@ -3,9 +3,9 @@ use std::io;
 use otelo_storage::MetricKind;
 use otelo_storage::query::{Bucket, BucketChange, MetricList, MetricSeries, Resolution};
 
-use super::client::{Client, escape_path_segment, note_cut, print_json};
+use super::client::{Client, OutputFormat, escape_path_segment, note_truncation, print_json};
 use super::table::{self, Table};
-use super::{Range, join_query_words};
+use super::{RangeArgs, join_query_words};
 
 #[derive(clap::Args)]
 pub struct MetricsArgs {
@@ -14,33 +14,34 @@ pub struct MetricsArgs {
     query: Vec<String>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn metrics(args: &MetricsArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_metrics(args: &MetricsArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
-    let list: MetricList = args.client.get("/api/metrics", &params)?;
-    if args.client.wants_table() {
-        let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "LABELS"]);
-        for series in &list.series {
-            table.row(vec![
-                series.name.clone(),
-                series.kind.name().to_owned(),
-                series.unit.clone(),
-                series.service.clone(),
-                table::format_labels(&series.labels),
-            ]);
+    let answer: MetricList = args.client.get("/api/metrics", &params)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "LABELS"]);
+            for series in &answer.series {
+                table.add_row(vec![
+                    series.name.clone(),
+                    series.kind.name().into(),
+                    series.unit.clone(),
+                    series.service.clone(),
+                    table::format_labels(&series.labels),
+                ]);
+            }
+            table.print()?;
         }
-        table.print()?;
-    } else {
-        print_json(&list)?;
+        OutputFormat::Json => print_json(&answer)?,
     }
-    note_cut(
-        list.truncated,
+    note_truncation(
+        answer.truncated,
         "More series exist; narrow them with the query, or raise --limit.",
     );
     Ok(())
@@ -67,14 +68,14 @@ pub struct MetricArgs {
     resolution: Option<Resolution>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_metric_series(args: &MetricArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.extend([
         ("q", join_query_words(&args.query)),
         ("step", args.step.clone()),
@@ -88,39 +89,40 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
         &format!("/api/metrics/{}", escape_path_segment(&args.name)),
         &params,
     )?;
-    if args.client.wants_table() {
-        for (i, series) in metric.series.iter().enumerate() {
-            if i > 0 {
-                println!();
-            }
-            let labels = table::format_labels(&series.labels);
-            println!(
-                "{} {} {} {}{} every {}{}",
-                metric.name,
-                series.service,
-                series.kind.name(),
-                series.unit,
-                if labels.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {labels}")
-                },
-                table::format_duration(metric.step_ns),
-                match metric.resolution {
-                    Resolution::Raw => String::new(),
-                    summaries => format!(" of {} summaries", summaries.name()),
-                },
-            );
-            match series.kind {
-                MetricKind::Gauge | MetricKind::UpDown => print_levels(&series.buckets)?,
-                MetricKind::Counter(_) => print_rates(&series.buckets)?,
-                MetricKind::Histogram(_) => print_distributions(&series.buckets)?,
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            for (position, series) in metric.series.iter().enumerate() {
+                if position > 0 {
+                    println!();
+                }
+                let labels = table::format_labels(&series.labels);
+                println!(
+                    "{} {} {} {}{} every {}{}",
+                    metric.name,
+                    series.service,
+                    series.kind.name(),
+                    series.unit,
+                    if labels.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {labels}")
+                    },
+                    table::format_duration(metric.step_ns),
+                    match metric.resolution {
+                        Resolution::Raw => String::new(),
+                        summaries => format!(" of {} summaries", summaries.name()),
+                    },
+                );
+                match series.kind {
+                    MetricKind::Gauge | MetricKind::UpDown => print_levels(&series.buckets)?,
+                    MetricKind::Counter(_) => print_rates(&series.buckets)?,
+                    MetricKind::Histogram(_) => print_distributions(&series.buckets)?,
+                }
             }
         }
-    } else {
-        print_json(&metric)?;
+        OutputFormat::Json => print_json(&metric)?,
     }
-    note_cut(
+    note_truncation(
         metric.truncated,
         "More series match; narrow them with the query, or raise --limit.",
     );
@@ -130,7 +132,7 @@ pub fn metric(args: &MetricArgs) -> anyhow::Result<()> {
 fn print_levels(buckets: &[Bucket]) -> io::Result<()> {
     let mut table = Table::new(&["TIME (UTC)", "COUNT", "MIN", "AVG", "MAX", "LAST"]);
     for bucket in buckets {
-        table.row(vec![
+        table.add_row(vec![
             table::format_utc_time(bucket.start_at),
             bucket.count.to_string(),
             table::format_number(bucket.min),
@@ -145,7 +147,7 @@ fn print_levels(buckets: &[Bucket]) -> io::Result<()> {
 fn print_rates(buckets: &[Bucket]) -> io::Result<()> {
     let mut table = Table::new(&["TIME (UTC)", "COUNT", "PER SECOND", "TOTAL"]);
     for bucket in buckets {
-        table.row(vec![
+        table.add_row(vec![
             table::format_utc_time(bucket.start_at),
             bucket.count.to_string(),
             match bucket.change {
@@ -161,13 +163,14 @@ fn print_rates(buckets: &[Bucket]) -> io::Result<()> {
 
 fn print_distributions(buckets: &[Bucket]) -> io::Result<()> {
     let mut table = Table::new(&["TIME (UTC)", "COUNT", "AVG", "P50", "P90", "P99"]);
-    let estimate = |value: Option<f64>| value.map_or_else(|| "-".into(), table::format_number);
+    let format_estimate =
+        |value: Option<f64>| value.map_or_else(|| "-".into(), table::format_number);
     for bucket in buckets {
         // The first step of a cumulative histogram has no distribution.
         let BucketChange::Distribution(distribution) = &bucket.change else {
             let mut cells = vec!["-".to_owned(); 6];
             cells[0] = table::format_utc_time(bucket.start_at);
-            table.row(cells);
+            table.add_row(cells);
             continue;
         };
         #[expect(clippy::cast_precision_loss, reason = "an average to print")]
@@ -175,13 +178,14 @@ fn print_distributions(buckets: &[Bucket]) -> io::Result<()> {
             .sum
             .filter(|_| distribution.count > 0)
             .map(|sum| sum / distribution.count as f64);
-        table.row(vec![
+        let percentiles = distribution.percentiles;
+        table.add_row(vec![
             table::format_utc_time(bucket.start_at),
             distribution.count.to_string(),
-            estimate(avg),
-            estimate(distribution.p50),
-            estimate(distribution.p90),
-            estimate(distribution.p99),
+            format_estimate(avg),
+            format_estimate(percentiles.map(|percentiles| percentiles.p50)),
+            format_estimate(percentiles.map(|percentiles| percentiles.p90)),
+            format_estimate(percentiles.map(|percentiles| percentiles.p99)),
         ]);
     }
     table.print()

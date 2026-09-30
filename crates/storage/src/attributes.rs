@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use otelo_query::ValueType;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -13,7 +14,6 @@ use utoipa::ToSchema;
 #[serde(untagged)]
 #[schema(no_recursion)]
 pub enum AttributeValue {
-    /// An empty value.
     Null,
     Bool(bool),
     Int(i64),
@@ -25,15 +25,15 @@ pub enum AttributeValue {
 
 impl AttributeValue {
     #[must_use]
-    pub const fn type_name(&self) -> &'static str {
+    pub const fn value_type(&self) -> ValueType {
         match self {
-            Self::Null => "null",
-            Self::Bool(_) => "bool",
-            Self::Int(_) => "int",
-            Self::Double(_) => "float",
-            Self::String(_) => "string",
-            Self::Array(_) => "array",
-            Self::Map(_) => "object",
+            Self::Null => ValueType::Null,
+            Self::Bool(_) => ValueType::Bool,
+            Self::Int(_) => ValueType::Int,
+            Self::Double(_) => ValueType::Float,
+            Self::String(_) => ValueType::String,
+            Self::Array(_) => ValueType::Array,
+            Self::Map(_) => ValueType::Object,
         }
     }
 

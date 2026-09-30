@@ -1,14 +1,14 @@
 use std::fmt;
 
 use axum::extract::{Query, State};
-use otelo_query::{FieldHelp, FieldOrigin, Signal, SuggestionKind};
+use otelo_query::{FieldHelp, FieldOrigin, Signal, SuggestionKind, ValueType};
 use otelo_storage::query::AttributeKeys;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::parse_signal;
-use crate::{Api, WHOLE_RETENTION};
 
 /// The kind of record a query reads, as the API names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -37,7 +37,7 @@ impl fmt::Display for SignalName {
             Self::Spans => Signal::Spans,
             Self::Metrics => Signal::Metrics,
         };
-        f.write_str(signal.as_str())
+        f.write_str(signal.name())
     }
 }
 
@@ -60,15 +60,13 @@ pub struct SignalParams {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn attributes(
+pub async fn list_attribute_keys(
     State(api): State<Api>,
     Query(params): Query<SignalParams>,
 ) -> ApiResult<AttributeKeys> {
     let signal = parse_signal(&params.signal)?;
-    api.run_range_query([None, None], WHOLE_RETENTION, (None, 1), move |r| {
-        Ok(r.queries.attributes(signal)?)
-    })
-    .await
+    api.run_retention_query(move |opened| Ok(opened.queries.list_attribute_keys(signal)?))
+        .await
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -77,7 +75,9 @@ pub struct CompleteParams {
     #[param(value_type = SignalName)]
     signal: String,
     /// The query as typed so far.
-    q: Option<String>,
+    #[serde(rename = "q")]
+    #[param(rename = "q")]
+    query: Option<String>,
     /// The position of the cursor in the query, in characters. The end of the
     /// query when missing.
     cursor: Option<usize>,
@@ -98,20 +98,13 @@ pub struct Completions {
 pub struct FieldBody {
     /// The field as a query writes it.
     pub name: String,
-    pub source: FieldSource,
+    #[serde(flatten)]
+    pub origin: FieldOriginBody,
     /// The type of the values. Of an attribute: `string`, `int`, `float`,
     /// `bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,
     /// `bool`, or `duration`.
     #[serde(rename = "type")]
-    pub kind: String,
-    /// How many records have the attribute, or how many resources for an
-    /// attribute of a resource. Missing for a built-in field, which every
-    /// record has.
-    #[schema(required = true)]
-    pub count: Option<u64>,
-    /// What a built-in field holds. Missing for an attribute.
-    #[schema(required = true)]
-    pub description: Option<String>,
+    pub value_type: ValueType,
     /// The values, the most common first, and 10 at most. For a built-in
     /// field with fixed values, those, in their order.
     pub values: Vec<FieldValueBody>,
@@ -124,12 +117,38 @@ pub struct FieldBody {
 
 /// Where a field comes from: the query language, the attributes of the
 /// records, or the attributes of their resources.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum FieldSource {
-    Builtin,
-    Attribute,
-    Resource,
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "source", rename_all = "lowercase")]
+pub enum FieldOriginBody {
+    /// A field of the query language, which every record has.
+    Builtin {
+        /// What the field holds.
+        description: String,
+    },
+    /// An attribute of the records.
+    Attribute {
+        /// How many records have the attribute.
+        #[serde(rename = "count")]
+        record_count: u64,
+    },
+    /// An attribute of the resources of the records.
+    Resource {
+        /// How many resources have the attribute.
+        #[serde(rename = "count")]
+        resource_count: u64,
+    },
+}
+
+impl From<FieldOrigin> for FieldOriginBody {
+    fn from(origin: FieldOrigin) -> Self {
+        match origin {
+            FieldOrigin::Builtin { description } => Self::Builtin {
+                description: description.to_owned(),
+            },
+            FieldOrigin::Attribute { record_count } => Self::Attribute { record_count },
+            FieldOrigin::Resource { resource_count } => Self::Resource { resource_count },
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -144,23 +163,10 @@ pub struct FieldValueBody {
 
 impl From<FieldHelp> for FieldBody {
     fn from(help: FieldHelp) -> Self {
-        let (source, count, description) = match help.origin {
-            FieldOrigin::Builtin { description } => {
-                (FieldSource::Builtin, None, Some(description.to_owned()))
-            }
-            FieldOrigin::Attribute { record_count } => {
-                (FieldSource::Attribute, Some(record_count), None)
-            }
-            FieldOrigin::Resource { resource_count } => {
-                (FieldSource::Resource, Some(resource_count), None)
-            }
-        };
         Self {
             name: help.name,
-            source,
-            kind: help.type_name,
-            count,
-            description,
+            origin: help.origin.into(),
+            value_type: help.value_type,
             values: help
                 .most_common_values
                 .into_iter()
@@ -170,7 +176,7 @@ impl From<FieldHelp> for FieldBody {
                 })
                 .collect(),
             distinct_values: help.distinct_value_count,
-            many_values: help.many_values,
+            many_values: help.has_more_values_than_listed,
         }
     }
 }
@@ -217,7 +223,7 @@ impl fmt::Display for CompletionKind {
             Self::Value => SuggestionKind::Value,
             Self::Keyword => SuggestionKind::Keyword,
         };
-        f.write_str(kind.as_str())
+        f.write_str(kind.name())
     }
 }
 
@@ -233,32 +239,38 @@ impl fmt::Display for CompletionKind {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn complete(
+pub async fn complete_query(
     State(api): State<Api>,
     Query(params): Query<CompleteParams>,
 ) -> ApiResult<Completions> {
     let signal = parse_signal(&params.signal)?;
-    let q = params.q.unwrap_or_default();
-    let cursor = params.cursor.map_or(q.len(), |chars| {
-        q.char_indices().nth(chars).map_or(q.len(), |(i, _)| i)
-    });
-    api.run_range_query([None, None], WHOLE_RETENTION, (None, 1), move |r| {
-        let chars = |byte: usize| q[..byte].chars().count();
-        let completion = otelo_query::complete(&q, cursor, signal, &*r.queries);
+    let query_text = params.query.unwrap_or_default();
+    let cursor_byte_offset = params
+        .cursor
+        .map_or(query_text.len(), |cursor_char_offset| {
+            query_text
+                .char_indices()
+                .nth(cursor_char_offset)
+                .map_or(query_text.len(), |(byte_offset, _)| byte_offset)
+        });
+    api.run_retention_query(move |opened| {
+        let count_chars_before = |byte_offset: usize| query_text[..byte_offset].chars().count();
+        let completion =
+            otelo_query::complete_query(&query_text, cursor_byte_offset, signal, &*opened.queries);
         let suggestions = completion
             .suggestions
             .into_iter()
-            .map(|s| SuggestionBody {
-                start: chars(s.replace.start),
-                end: chars(s.replace.end),
-                text: s.text,
-                kind: s.kind.into(),
-                detail: s.detail,
+            .map(|suggestion| SuggestionBody {
+                start: count_chars_before(suggestion.replaced_byte_range.start),
+                end: count_chars_before(suggestion.replaced_byte_range.end),
+                text: suggestion.text,
+                kind: suggestion.kind.into(),
+                detail: suggestion.detail,
             })
             .collect();
         Ok(Completions {
             suggestions,
-            field: completion.field_at_cursor.map(FieldBody::from),
+            field: completion.help_for_field_at_cursor.map(FieldBody::from),
         })
     })
     .await

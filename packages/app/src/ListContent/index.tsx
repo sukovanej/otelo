@@ -1,6 +1,6 @@
 import { type JSX, Show } from "solid-js";
 
-import type { Signal } from "@otelo/api";
+import type { IndexedSignal } from "@otelo/api";
 import { Button, Callout } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
@@ -10,7 +10,7 @@ import ListContentIndexHint from "./list-content-index-hint";
 
 interface ListContentProps<V extends string, R extends ListResult<V>> {
   readonly list: ListState<V, R>;
-  readonly signal: Signal;
+  readonly signal: IndexedSignal;
   readonly singularNoun: string;
   readonly panel: JSX.Element;
   readonly children: JSX.Element;

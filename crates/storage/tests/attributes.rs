@@ -1,3 +1,4 @@
+use otelo_query::ValueType;
 use otelo_storage::{AttributeValue, Attributes};
 
 #[test]
@@ -31,7 +32,7 @@ fn a_value_prints_as_json_and_names_its_type() {
         AttributeValue::Map(Attributes::new()),
     ]
     .iter()
-    .map(|value| format!("{value} {}", value.type_name()))
+    .map(|value| format!("{value} {}", value.value_type()))
     .collect();
     assert_eq!(
         names,
@@ -45,4 +46,13 @@ fn a_value_prints_as_json_and_names_its_type() {
             "{} object"
         ]
     );
+}
+
+#[test]
+fn a_value_type_is_stored_and_sent_under_its_name() {
+    for value_type in ValueType::ALL {
+        assert_eq!(ValueType::from_name(value_type.name()), Some(value_type));
+        assert_eq!(serde_json::to_value(value_type).unwrap(), value_type.name());
+    }
+    assert_eq!(ValueType::from_name("text"), None);
 }

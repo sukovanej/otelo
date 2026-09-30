@@ -4,8 +4,8 @@ use otelo_storage::query::SqlResult;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
+use crate::{Api, DefaultSince};
 
 /// A read-only SQL query.
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -35,13 +35,18 @@ pub struct SqlRequest {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn sql(State(api): State<Api>, Json(request): Json<SqlRequest>) -> ApiResult<SqlResult> {
+pub async fn run_sql(
+    State(api): State<Api>,
+    Json(request): Json<SqlRequest>,
+) -> ApiResult<SqlResult> {
     let sql = request.sql;
-    api.run_range_query(
-        [request.since, request.until],
-        None,
-        (request.limit, 100),
-        move |r| Ok(r.queries.sql(&sql, r.limit)?),
+    api.run_limited_range_query(
+        request.since,
+        request.until,
+        DefaultSince::HourBeforeNow,
+        request.limit,
+        100,
+        move |opened, limit| Ok(opened.queries.run_sql(&sql, limit)?),
     )
     .await
 }

@@ -11,7 +11,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Run the daemon
-    Serve(serve::Args),
+    Serve(serve::ServeArgs),
     /// Print log lines, grouped by message template unless --raw
     Logs(cli::LogsArgs),
     /// List spans, newest first
@@ -44,22 +44,22 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Serve(args) => serve::main(args),
-        Command::Logs(args) => cli::logs(&args),
-        Command::Spans(args) => cli::spans(&args),
-        Command::Traces(args) => cli::traces(&args),
-        Command::Trace(args) => cli::trace(&args),
-        Command::Metrics(args) => cli::metrics(&args),
-        Command::Metric(args) => cli::metric(&args),
-        Command::Services(args) => cli::services(&args),
-        Command::Service(args) => cli::service(&args),
-        Command::Calls(args) => cli::calls(&args),
-        Command::Sql(args) => cli::sql(&args),
-        Command::Attributes(args) => cli::attributes(&args),
-        Command::Complete(args) => cli::complete(&args),
-        Command::Index(args) => cli::index(&args),
+        Command::Serve(args) => serve::run_daemon(args),
+        Command::Logs(args) => cli::print_logs(&args),
+        Command::Spans(args) => cli::print_spans(&args),
+        Command::Traces(args) => cli::print_traces(&args),
+        Command::Trace(args) => cli::print_trace(&args),
+        Command::Metrics(args) => cli::print_metrics(&args),
+        Command::Metric(args) => cli::print_metric_series(&args),
+        Command::Services(args) => cli::print_services(&args),
+        Command::Service(args) => cli::print_service(&args),
+        Command::Calls(args) => cli::print_calls(&args),
+        Command::Sql(args) => cli::run_sql(&args),
+        Command::Attributes(args) => cli::print_attributes(&args),
+        Command::Complete(args) => cli::print_completions(&args),
+        Command::Index(args) => cli::change_and_print_indexes(&args),
         Command::Openapi => {
-            println!("{}", otelo_api::spec().to_pretty_json()?);
+            println!("{}", otelo_api::build_openapi_spec().to_pretty_json()?);
             Ok(())
         }
     }

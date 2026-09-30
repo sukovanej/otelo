@@ -3,8 +3,8 @@ use std::io::{self, Read};
 use otelo_api::SqlRequest;
 use otelo_storage::query::{SqlResult, SqlValue};
 
-use super::Range;
-use super::client::{Client, note_cut, print_json};
+use super::RangeArgs;
+use super::client::{Client, OutputFormat, note_truncation, print_json};
 use super::table::Table;
 
 #[derive(clap::Args)]
@@ -15,13 +15,13 @@ pub struct SqlArgs {
     query: String,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
+pub fn run_sql(args: &SqlArgs) -> anyhow::Result<()> {
     let sql = if args.query == "-" {
         let mut text = String::new();
         io::stdin().read_to_string(&mut text)?;
@@ -36,20 +36,21 @@ pub fn sql(args: &SqlArgs) -> anyhow::Result<()> {
         limit: args.range.limit,
     };
     let result: SqlResult = args.client.post("/api/sql", &request)?;
-    if args.client.wants_table() {
-        let columns: Vec<&str> = result.columns().iter().map(String::as_str).collect();
-        let mut table = Table::new(&columns);
-        for row in result.rows() {
-            table.row(row.iter().map(|value| match value {
-                SqlValue::Null => String::new(),
-                other => other.to_string(),
-            }));
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let columns: Vec<&str> = result.columns().iter().map(String::as_str).collect();
+            let mut table = Table::new(&columns);
+            for row in result.rows() {
+                table.add_row(row.iter().map(|value| match value {
+                    SqlValue::Null => String::new(),
+                    other => other.to_string(),
+                }));
+            }
+            table.print()?;
         }
-        table.print()?;
-    } else {
-        print_json(&result)?;
+        OutputFormat::Json => print_json(&result)?,
     }
-    note_cut(
+    note_truncation(
         result.truncated(),
         "The query returned more rows; narrow it with a WHERE, or raise --limit.",
     );
