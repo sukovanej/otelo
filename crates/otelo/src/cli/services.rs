@@ -8,8 +8,8 @@ use otelo_storage::query::{
 };
 use serde::Serialize;
 
-use super::Range;
-use super::client::{Client, escape_path_segment, note_cut, print_json};
+use super::RangeArgs;
+use super::client::{Client, OutputFormat, escape_path_segment, note_truncation, print_json};
 use super::table::{self, Table};
 
 #[derive(clap::Args)]
@@ -24,55 +24,55 @@ pub struct ServicesArgs {
     step: Option<String>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn services(args: &ServicesArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_services(args: &ServicesArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("step", args.step.clone()));
-    let list: Services = args.client.get("/api/services", &params)?;
-    if args.client.wants_table() {
-        let mut table = Table::new(&[
-            "SERVICE",
-            "REQUESTS",
-            "ERRORS",
-            "P50",
-            "P95",
-            "P99",
-            "LOGS",
-            "ERROR LOGS",
-        ]);
-        for service in &list.services {
-            let mut cells = vec![service.service.clone()];
-            cells.extend(request_cells(&service.stats.requests));
-            cells.extend([
-                service.stats.logs.to_string(),
-                service.stats.error_logs.to_string(),
+    let answer: Services = args.client.get("/api/services", &params)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let mut table = Table::new(&[
+                "SERVICE",
+                "REQUESTS",
+                "ERRORS",
+                "P50",
+                "P95",
+                "P99",
+                "LOGS",
+                "ERROR LOGS",
             ]);
-            table.row(cells);
-        }
-        table.print()?;
-        if args.buckets {
-            for service in &list.services {
-                println!();
-                println!(
-                    "{} every {}",
-                    service.service,
-                    table::format_duration(list.step_ns)
-                );
-                print_steps(&service.buckets)?;
+            for service in &answer.services {
+                let mut cells = vec![service.service.clone()];
+                cells.extend(format_request_cells(&service.stats.requests));
+                cells.extend([
+                    service.stats.logs.to_string(),
+                    service.stats.error_logs.to_string(),
+                ]);
+                table.add_row(cells);
+            }
+            table.print()?;
+            if args.buckets {
+                for service in &answer.services {
+                    println!();
+                    println!(
+                        "{} every {}",
+                        service.service,
+                        table::format_duration(answer.step_ns)
+                    );
+                    print_service_steps(&service.buckets)?;
+                }
             }
         }
-    } else if args.buckets {
-        print_json(&list)?;
-    } else {
-        print_json(&ServicesWithoutBuckets::of(&list))?;
+        OutputFormat::Json if args.buckets => print_json(&answer)?,
+        OutputFormat::Json => print_json(&ServicesWithoutBuckets::from(&answer))?,
     }
-    note_cut(
-        list.truncated,
+    note_truncation(
+        answer.truncated,
         "More services sent telemetry; raise --limit.",
     );
     Ok(())
@@ -93,59 +93,59 @@ pub struct ServiceArgs {
     step: Option<String>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn service(args: &ServiceArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_service(args: &ServiceArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("step", args.step.clone()));
     let service: Service = args.client.get(
         &format!("/api/services/{}", escape_path_segment(&args.name)),
         &params,
     )?;
-    if args.client.wants_table() {
-        let requests = &service.stats.requests;
-        println!(
-            "{}: {} requests, {} errors, {} logs, {} error logs",
-            service.service,
-            requests.count,
-            requests.errors,
-            service.stats.logs,
-            service.stats.error_logs,
-        );
-        if !service.operations.is_empty() {
-            println!();
-            let mut table = Table::new(&[
-                "OPERATION",
-                "REQUESTS",
-                "ERRORS",
-                "P50",
-                "P95",
-                "P99",
-                "TOTAL",
-            ]);
-            for operation in &service.operations {
-                let mut cells = vec![operation.name.clone()];
-                cells.extend(request_cells(&operation.requests));
-                cells.push(table::format_duration(operation.requests.total_ns));
-                table.row(cells);
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let requests = &service.stats.requests;
+            println!(
+                "{}: {} requests, {} errors, {} logs, {} error logs",
+                service.service,
+                requests.count,
+                requests.errors,
+                service.stats.logs,
+                service.stats.error_logs,
+            );
+            if !service.operations.is_empty() {
+                println!();
+                let mut table = Table::new(&[
+                    "OPERATION",
+                    "REQUESTS",
+                    "ERRORS",
+                    "P50",
+                    "P95",
+                    "P99",
+                    "TOTAL",
+                ]);
+                for operation in &service.operations {
+                    let mut cells = vec![operation.name.clone()];
+                    cells.extend(format_request_cells(&operation.requests));
+                    cells.push(table::format_duration(operation.requests.total_ns));
+                    table.add_row(cells);
+                }
+                table.print()?;
             }
-            table.print()?;
+            if args.buckets {
+                println!();
+                println!("every {}", table::format_duration(service.step_ns));
+                print_service_steps(&service.buckets)?;
+            }
         }
-        if args.buckets {
-            println!();
-            println!("every {}", table::format_duration(service.step_ns));
-            print_steps(&service.buckets)?;
-        }
-    } else if args.buckets {
-        print_json(&service)?;
-    } else {
-        print_json(&ServiceWithoutBuckets::of(&service))?;
+        OutputFormat::Json if args.buckets => print_json(&service)?,
+        OutputFormat::Json => print_json(&ServiceWithoutBuckets::from(&service))?,
     }
-    note_cut(
+    note_truncation(
         service.truncated,
         "The service has more operations; raise --limit.",
     );
@@ -167,76 +167,82 @@ pub struct CallsArgs {
     step: Option<String>,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn calls(args: &CallsArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_calls(args: &CallsArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("step", args.step.clone()));
     let answer: Calls = args.client.get(
         &format!("/api/services/{}/calls", escape_path_segment(&args.name)),
         &params,
     )?;
-    if args.client.wants_table() {
-        println!(
-            "{}: {} calls, {} errors, {} in all",
-            answer.service,
-            answer.calls.count,
-            answer.calls.errors,
-            table::format_duration(answer.calls.total_ns),
-        );
-        if !answer.targets.is_empty() {
-            println!();
-            let mut table =
-                Table::new(&["TARGET", "CALLS", "ERRORS", "P50", "P95", "P99", "TOTAL"]);
-            for target in &answer.targets {
-                let mut cells = vec![target_label(&target.key)];
-                cells.extend(request_cells(&target.calls));
-                cells.push(table::format_duration(target.calls.total_ns));
-                table.row(cells);
-            }
-            table.print()?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            println!(
+                "{}: {} calls, {} errors, {} in all",
+                answer.service,
+                answer.calls.count,
+                answer.calls.errors,
+                table::format_duration(answer.calls.total_ns),
+            );
+            if !answer.targets.is_empty() {
+                println!();
+                let mut table =
+                    Table::new(&["TARGET", "CALLS", "ERRORS", "P50", "P95", "P99", "TOTAL"]);
+                for target in &answer.targets {
+                    let mut cells = vec![format_target_label(&target.key)];
+                    cells.extend(format_request_cells(&target.calls));
+                    cells.push(table::format_duration(target.calls.total_ns));
+                    table.add_row(cells);
+                }
+                table.print()?;
 
-            println!();
-            let mut table = Table::new(&[
-                "TARGET", "CALL", "CALLS", "ERRORS", "P50", "P95", "P99", "TOTAL",
-            ]);
-            let mut operations: Vec<_> = answer
-                .targets
-                .iter()
-                .flat_map(|t| t.operations.iter().map(move |o| (&t.key, o)))
-                .collect();
-            operations.sort_by_key(|(_, o)| std::cmp::Reverse(o.calls.total_ns));
-            for (key, operation) in operations {
-                let mut cells = vec![target_label(key), operation.summary.clone()];
-                cells.extend(request_cells(&operation.calls));
-                cells.push(table::format_duration(operation.calls.total_ns));
-                table.row(cells);
+                println!();
+                let mut table = Table::new(&[
+                    "TARGET", "CALL", "CALLS", "ERRORS", "P50", "P95", "P99", "TOTAL",
+                ]);
+                let mut operations: Vec<_> = answer
+                    .targets
+                    .iter()
+                    .flat_map(|target| {
+                        target
+                            .operations
+                            .iter()
+                            .map(move |operation| (&target.key, operation))
+                    })
+                    .collect();
+                operations
+                    .sort_by_key(|(_, operation)| std::cmp::Reverse(operation.calls.total_ns));
+                for (key, operation) in operations {
+                    let mut cells = vec![format_target_label(key), operation.summary.clone()];
+                    cells.extend(format_request_cells(&operation.calls));
+                    cells.push(table::format_duration(operation.calls.total_ns));
+                    table.add_row(cells);
+                }
+                table.print()?;
             }
-            table.print()?;
+            if args.buckets {
+                println!();
+                println!("every {}", table::format_duration(answer.step_ns));
+                print_call_steps(&answer.buckets)?;
+            }
         }
-        if args.buckets {
-            println!();
-            println!("every {}", table::format_duration(answer.step_ns));
-            print_call_steps(&answer.buckets)?;
-        }
-    } else if args.buckets {
-        print_json(&answer)?;
-    } else {
-        print_json(&CallsWithoutBuckets::of(&answer))?;
+        OutputFormat::Json if args.buckets => print_json(&answer)?,
+        OutputFormat::Json => print_json(&CallsWithoutBuckets::from(&answer))?,
     }
-    note_cut(
+    note_truncation(
         answer.truncated,
         "The service makes more kinds of calls; raise --limit.",
     );
     Ok(())
 }
 
-fn target_label(key: &TargetKey) -> String {
-    let kind = key.system.clone().unwrap_or_else(|| {
+fn format_target_label(key: &TargetKey) -> String {
+    let system_or_type = key.system.clone().unwrap_or_else(|| {
         match key.target_type {
             TargetType::Database => "database",
             TargetType::Http => "http",
@@ -247,8 +253,8 @@ fn target_label(key: &TargetKey) -> String {
         .to_owned()
     });
     match &key.name {
-        Some(name) => format!("{kind} {name}"),
-        None => kind,
+        Some(name) => format!("{system_or_type} {name}"),
+        None => system_or_type,
     }
 }
 
@@ -256,14 +262,14 @@ fn print_call_steps(buckets: &[RequestBucket]) -> io::Result<()> {
     let mut table = Table::new(&["TIME (UTC)", "CALLS", "ERRORS", "P50", "P95", "P99"]);
     for bucket in buckets {
         let mut cells = vec![table::format_utc_time(bucket.start_at)];
-        cells.extend(request_cells(&bucket.requests));
-        table.row(cells);
+        cells.extend(format_request_cells(&bucket.requests));
+        table.add_row(cells);
     }
     table.print()
 }
 
-fn request_cells(requests: &Requests) -> [String; 5] {
-    let percentile = |pick: fn(&otelo_storage::query::Latency) -> i64| {
+fn format_request_cells(requests: &Requests) -> [String; 5] {
+    let format_percentile = |pick: fn(&otelo_storage::query::Latency) -> i64| {
         requests.latency.as_ref().map_or_else(
             || "-".into(),
             |latency| table::format_duration(pick(latency)),
@@ -272,13 +278,13 @@ fn request_cells(requests: &Requests) -> [String; 5] {
     [
         requests.count.to_string(),
         requests.errors.to_string(),
-        percentile(|l| l.p50),
-        percentile(|l| l.p95),
-        percentile(|l| l.p99),
+        format_percentile(|latency| latency.p50),
+        format_percentile(|latency| latency.p95),
+        format_percentile(|latency| latency.p99),
     ]
 }
 
-fn print_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
+fn print_service_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
     let mut table = Table::new(&[
         "TIME (UTC)",
         "REQUESTS",
@@ -291,9 +297,9 @@ fn print_steps(buckets: &[ServiceBucket]) -> io::Result<()> {
     ]);
     for bucket in buckets {
         let mut cells = vec![table::format_utc_time(bucket.start_at)];
-        cells.extend(request_cells(&bucket.requests));
+        cells.extend(format_request_cells(&bucket.requests));
         cells.extend([bucket.logs.to_string(), bucket.error_logs.to_string()]);
-        table.row(cells);
+        table.add_row(cells);
     }
     table.print()
 }
@@ -313,12 +319,12 @@ struct ServiceSummaryWithoutBuckets<'a> {
     stats: &'a ServiceStats,
 }
 
-impl<'a> ServicesWithoutBuckets<'a> {
-    fn of(list: &'a Services) -> Self {
+impl<'a> From<&'a Services> for ServicesWithoutBuckets<'a> {
+    fn from(answer: &'a Services) -> Self {
         Self {
-            start_at: list.start_at,
-            end_at: list.end_at,
-            services: list
+            start_at: answer.start_at,
+            end_at: answer.end_at,
+            services: answer
                 .services
                 .iter()
                 .map(|service| ServiceSummaryWithoutBuckets {
@@ -327,7 +333,7 @@ impl<'a> ServicesWithoutBuckets<'a> {
                     stats: &service.stats,
                 })
                 .collect(),
-            truncated: list.truncated,
+            truncated: answer.truncated,
         }
     }
 }
@@ -343,8 +349,8 @@ struct ServiceWithoutBuckets<'a> {
     truncated: bool,
 }
 
-impl<'a> ServiceWithoutBuckets<'a> {
-    fn of(service: &'a Service) -> Self {
+impl<'a> From<&'a Service> for ServiceWithoutBuckets<'a> {
+    fn from(service: &'a Service) -> Self {
         Self {
             service: &service.service,
             resource: &service.resource,
@@ -376,14 +382,14 @@ struct TargetWithoutBuckets<'a> {
     operations: &'a [CallOperation],
 }
 
-impl<'a> CallsWithoutBuckets<'a> {
-    fn of(calls: &'a Calls) -> Self {
+impl<'a> From<&'a Calls> for CallsWithoutBuckets<'a> {
+    fn from(answer: &'a Calls) -> Self {
         Self {
-            service: &calls.service,
-            start_at: calls.start_at,
-            end_at: calls.end_at,
-            calls: &calls.calls,
-            targets: calls
+            service: &answer.service,
+            start_at: answer.start_at,
+            end_at: answer.end_at,
+            calls: &answer.calls,
+            targets: answer
                 .targets
                 .iter()
                 .map(|target: &'a Target| TargetWithoutBuckets {
@@ -393,7 +399,7 @@ impl<'a> CallsWithoutBuckets<'a> {
                     operations: &target.operations,
                 })
                 .collect(),
-            truncated: calls.truncated,
+            truncated: answer.truncated,
         }
     }
 }

@@ -21,7 +21,9 @@ export default function QueryBarFieldCard(props: QueryBarFieldCardProps) {
         </div>
         <div class="text-muted">{formatTypeLine(props.field, props.signal)}</div>
       </div>
-      <Show when={props.field.description}>{(description) => <p>{description()}</p>}</Show>
+      <Show when={props.field.source === "builtin" && props.field}>
+        {(builtinField) => <p>{builtinField().description}</p>}
+      </Show>
       <Show when={props.field.values.length > 0}>
         <div>
           <div class="text-2xs text-muted">{formatValuesTitle(props.field)}</div>

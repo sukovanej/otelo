@@ -33,7 +33,7 @@ SwapTotal:             0 kB
 SwapFree:              0 kB
 ";
 
-const CPU_STAT: &str = "usage_usec 93211250
+const UNIT_CPU_STAT: &str = "usage_usec 93211250
 user_usec 61200400
 system_usec 32010850
 nr_periods 0
@@ -41,7 +41,7 @@ nr_throttled 0
 throttled_usec 0
 ";
 
-const MEMORY_STAT: &str = "anon 45211648
+const UNIT_MEMORY_STAT: &str = "anon 45211648
 file 120397824
 kernel 5742592
 shmem 0
@@ -54,13 +54,13 @@ fn write_file(path: &Path, text: &str) {
 }
 
 struct Machine {
-    dir: tempfile::TempDir,
+    directory: tempfile::TempDir,
 }
 
 impl Machine {
     fn with_cgroup_v2() -> Self {
         let machine = Self {
-            dir: tempfile::tempdir().unwrap(),
+            directory: tempfile::tempdir().unwrap(),
         };
         machine.write_file("proc/stat", PROC_STAT);
         machine.write_file("proc/meminfo", PROC_MEMINFO);
@@ -70,22 +70,31 @@ impl Machine {
     }
 
     fn write_file(&self, path: &str, text: &str) {
-        write_file(&self.dir.path().join(path), text);
+        write_file(&self.directory.path().join(path), text);
     }
 
-    fn write_unit(&self, path: &str, populated: u8) {
-        let cgroup = format!("cgroup/system.slice/{path}");
+    fn write_unit(&self, path: &str, is_populated: bool) {
+        let unit_cgroup_directory = format!("cgroup/system.slice/{path}");
         self.write_file(
-            &format!("{cgroup}/cgroup.events"),
-            &format!("populated {populated}\nfrozen 0\n"),
+            &format!("{unit_cgroup_directory}/cgroup.events"),
+            &format!("populated {}\nfrozen 0\n", u8::from(is_populated)),
         );
-        self.write_file(&format!("{cgroup}/cpu.stat"), CPU_STAT);
-        self.write_file(&format!("{cgroup}/memory.stat"), MEMORY_STAT);
-        self.write_file(&format!("{cgroup}/memory.current"), "171352064\n");
+        self.write_file(&format!("{unit_cgroup_directory}/cpu.stat"), UNIT_CPU_STAT);
+        self.write_file(
+            &format!("{unit_cgroup_directory}/memory.stat"),
+            UNIT_MEMORY_STAT,
+        );
+        self.write_file(
+            &format!("{unit_cgroup_directory}/memory.current"),
+            "171352064\n",
+        );
     }
 
-    fn files(&self) -> LinuxFiles {
-        LinuxFiles::rooted_at(self.dir.path().join("proc"), self.dir.path().join("cgroup"))
+    fn linux_files(&self) -> LinuxFiles {
+        LinuxFiles::rooted_at(
+            self.directory.path().join("proc"),
+            self.directory.path().join("cgroup"),
+        )
     }
 }
 
@@ -104,7 +113,7 @@ const fn running_unit(name: String) -> Unit {
 fn reads_the_ticks_of_all_cpus_by_mode() {
     let machine = Machine::with_cgroup_v2();
     assert_eq!(
-        machine.files().read_cpu_ticks().unwrap(),
+        machine.linux_files().read_cpu_ticks().unwrap(),
         CpuTicks {
             user: 10_132_153,
             nice: 290_696,
@@ -117,14 +126,14 @@ fn reads_the_ticks_of_all_cpus_by_mode() {
         }
     );
     machine.write_file("proc/stat", "cpu  1 2 3\n");
-    assert!(machine.files().read_cpu_ticks().is_err());
+    assert!(machine.linux_files().read_cpu_ticks().is_err());
 }
 
 #[test]
 fn reads_the_memory_in_bytes() {
     let machine = Machine::with_cgroup_v2();
     assert_eq!(
-        machine.files().read_memory().unwrap(),
+        machine.linux_files().read_memory().unwrap(),
         Memory::Meminfo {
             total_bytes: 980_204 * 1024,
             free_bytes: 85_332 * 1024,
@@ -138,22 +147,22 @@ fn reads_the_memory_in_bytes() {
 #[test]
 fn lists_the_units_that_have_processes() {
     let machine = Machine::with_cgroup_v2();
-    machine.write_unit("mudro.service", 1);
-    machine.write_unit("otelo.service", 1);
-    machine.write_unit("fstrim.service", 0);
+    machine.write_unit("mudro.service", true);
+    machine.write_unit("otelo.service", true);
+    machine.write_unit("fstrim.service", false);
     // A template unit has a slice of its own.
-    machine.write_unit("system-getty.slice/getty@tty1.service", 1);
+    machine.write_unit("system-getty.slice/getty@tty1.service", true);
     // A container is a scope, not a service.
-    machine.write_unit("docker-4f2a.scope", 1);
+    machine.write_unit("docker-4f2a.scope", true);
     // This unit has no memory controller.
-    machine.write_unit("caddy.service", 1);
+    machine.write_unit("caddy.service", true);
     for file in ["memory.stat", "memory.current"] {
         let path = format!("cgroup/system.slice/caddy.service/{file}");
-        fs::remove_file(machine.dir.path().join(path)).unwrap();
+        fs::remove_file(machine.directory.path().join(path)).unwrap();
     }
 
     assert_eq!(
-        machine.files().read_services().unwrap(),
+        machine.linux_files().read_services().unwrap(),
         Services::Cgroups {
             units: vec![
                 Unit {
@@ -164,7 +173,7 @@ fn lists_the_units_that_have_processes() {
                 running_unit("mudro".into()),
                 running_unit("otelo".into()),
             ],
-            otelo_unit: Some("otelo".into()),
+            otelo_unit_name: Some("otelo".into()),
         }
     );
 }
@@ -176,12 +185,12 @@ fn a_process_outside_a_unit_has_no_unit_of_its_own() {
         "proc/self/cgroup",
         "0::/user.slice/user-1000.slice/session-3.scope\n",
     );
-    machine.write_unit("mudro.service", 1);
+    machine.write_unit("mudro.service", true);
     assert_eq!(
-        machine.files().read_services().unwrap(),
+        machine.linux_files().read_services().unwrap(),
         Services::Cgroups {
             units: vec![running_unit("mudro".into())],
-            otelo_unit: None,
+            otelo_unit_name: None,
         }
     );
 }
@@ -189,10 +198,10 @@ fn a_process_outside_a_unit_has_no_unit_of_its_own() {
 #[test]
 fn a_machine_without_cgroup_v2_has_no_services() {
     let machine = Machine::with_cgroup_v2();
-    machine.write_unit("mudro.service", 1);
-    fs::remove_file(machine.dir.path().join("cgroup/cgroup.controllers")).unwrap();
+    machine.write_unit("mudro.service", true);
+    fs::remove_file(machine.directory.path().join("cgroup/cgroup.controllers")).unwrap();
     assert_eq!(
-        machine.files().read_services().unwrap(),
+        machine.linux_files().read_services().unwrap(),
         Services::Unavailable
     );
 }

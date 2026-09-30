@@ -1,5 +1,6 @@
 #![allow(dead_code, reason = "each test file uses a part")]
 
+use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, ChildStderr, Command, Stdio};
@@ -8,9 +9,9 @@ use std::time::{Duration, Instant};
 pub struct Daemon {
     child: Child,
     stderr: BufReader<ChildStderr>,
-    pub addr: String,
-    pub otlp_http: String,
-    pub otlp_grpc: String,
+    pub api_addr: String,
+    pub otlp_http_addr: String,
+    pub otlp_grpc_addr: String,
 }
 
 impl Drop for Daemon {
@@ -21,12 +22,12 @@ impl Drop for Daemon {
     }
 }
 
-pub fn start_daemon(data: &std::path::Path) -> Daemon {
+pub fn start_daemon(data_dir: &std::path::Path) -> Daemon {
     // So a test finds only the telemetry it wrote.
-    start_daemon_with(data, &["--own-telemetry", "off"])
+    start_daemon_with_args(data_dir, &["--own-telemetry", "off"])
 }
 
-pub fn start_daemon_with(data: &std::path::Path, args: &[&str]) -> Daemon {
+pub fn start_daemon_with_args(data_dir: &std::path::Path, args: &[&str]) -> Daemon {
     let mut child = Command::new(env!("CARGO_BIN_EXE_otelo"))
         .args([
             "serve",
@@ -36,7 +37,7 @@ pub fn start_daemon_with(data: &std::path::Path, args: &[&str]) -> Daemon {
             "127.0.0.1:0",
         ])
         .args(["--otlp-grpc", "127.0.0.1:0", "--data"])
-        .arg(data)
+        .arg(data_dir)
         .args(args)
         .stderr(Stdio::piped())
         .spawn()
@@ -54,22 +55,22 @@ pub fn start_daemon_with(data: &std::path::Path, args: &[&str]) -> Daemon {
             break;
         }
     }
-    let field = |name: &str| {
+    let read_log_field = |name: &str| {
         line.split_whitespace()
             .find_map(|field| field.strip_prefix(name)?.strip_prefix('='))
             .unwrap()
             .to_owned()
     };
     Daemon {
-        addr: field("addr"),
-        otlp_http: field("otlp_http"),
-        otlp_grpc: field("otlp_grpc"),
+        api_addr: read_log_field("addr"),
+        otlp_http_addr: read_log_field("otlp_http"),
+        otlp_grpc_addr: read_log_field("otlp_grpc"),
         child,
         stderr,
     }
 }
 
-pub fn get(addr: &str, path: &str) -> String {
+pub fn send_get_request(addr: &str, path: &str) -> String {
     let mut stream = TcpStream::connect(addr).unwrap();
     write!(
         stream,
@@ -81,11 +82,26 @@ pub fn get(addr: &str, path: &str) -> String {
     response
 }
 
-pub fn stop_daemon(mut daemon: Daemon, signal: &str) -> String {
+#[derive(Clone, Copy)]
+pub enum StopSignal {
+    Term,
+    Int,
+}
+
+impl fmt::Display for StopSignal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Term => "TERM",
+            Self::Int => "INT",
+        })
+    }
+}
+
+pub fn stop_daemon(mut daemon: Daemon, signal: StopSignal) -> String {
     let pid = daemon.child.id().to_string();
     assert!(
         Command::new("kill")
-            .args(["-s", signal, &pid])
+            .args(["-s", &signal.to_string(), &pid])
             .status()
             .unwrap()
             .success()
@@ -102,7 +118,7 @@ pub fn stop_daemon(mut daemon: Daemon, signal: &str) -> String {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(status.success(), "exited with {status}");
-    let mut rest = String::new();
-    daemon.stderr.read_to_string(&mut rest).unwrap();
-    rest
+    let mut remaining_stderr = String::new();
+    daemon.stderr.read_to_string(&mut remaining_stderr).unwrap();
+    remaining_stderr
 }

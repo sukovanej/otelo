@@ -6,9 +6,9 @@ use otelo_storage::query::{
 use serde::Deserialize;
 use utoipa::IntoParams;
 
-use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{parse_step_ns, resolve_step};
+use crate::{Api, DefaultSince};
 
 /// The range, the limit, and the step of the services.
 #[derive(Deserialize, IntoParams)]
@@ -39,18 +39,20 @@ pub struct ServiceParams {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn services(
+pub async fn list_services(
     State(api): State<Api>,
     Query(params): Query<ServiceParams>,
 ) -> ApiResult<Services> {
-    let step = parse_step_ns(params.step.as_deref())?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 100),
-        move |r| {
-            let step_ns = resolve_step(&r, step, 60)?;
-            Ok(r.queries.services(step_ns, r.limit)?)
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        100,
+        move |opened, limit| {
+            let step_ns = resolve_step(opened.range, requested_step_ns, 60)?;
+            Ok(opened.queries.list_services(step_ns, limit)?)
         },
     )
     .await
@@ -71,19 +73,21 @@ pub async fn services(
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn service(
+pub async fn get_service(
     State(api): State<Api>,
     Path(name): Path<String>,
     Query(params): Query<ServiceParams>,
 ) -> ApiResult<Service> {
-    let step = parse_step_ns(params.step.as_deref())?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 50),
-        move |r| {
-            let step_ns = resolve_step(&r, step, 120)?;
-            Ok(r.queries.service(&name, step_ns, r.limit)?)
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        50,
+        move |opened, limit| {
+            let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
+            Ok(opened.queries.get_service(&name, step_ns, limit)?)
         },
     )
     .await
@@ -96,7 +100,8 @@ pub struct OperationParams {
     /// The span name of the operation, such as `GET /users/{id}`.
     operation: String,
     /// The OpenTelemetry span kind of the operation, such as 2 for server.
-    kind: i32,
+    #[param(value_type = i32)]
+    kind: SpanKind,
     /// The start of the range: a duration before now, such as `1h`, or an
     /// RFC 3339 timestamp. One hour before `until` when missing.
     since: Option<String>,
@@ -122,18 +127,24 @@ pub struct OperationParams {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn operation(
+pub async fn get_operation(
     State(api): State<Api>,
     Path(name): Path<String>,
     Query(params): Query<OperationParams>,
 ) -> ApiResult<OperationDetail> {
-    let step = parse_step_ns(params.step.as_deref())?;
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     let (operation, kind) = (params.operation, params.kind);
-    api.run_range_query([params.since, params.until], None, (None, 1), move |r| {
-        let step_ns = resolve_step(&r, step, 120)?;
-        Ok(r.queries
-            .operation(&name, &operation, SpanKind::from_number(kind), step_ns)?)
-    })
+    api.run_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        move |opened| {
+            let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
+            Ok(opened
+                .queries
+                .get_operation(&name, &operation, kind, step_ns)?)
+        },
+    )
     .await
 }
 
@@ -157,19 +168,21 @@ pub async fn operation(
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn calls(
+pub async fn list_calls(
     State(api): State<Api>,
     Path(name): Path<String>,
     Query(params): Query<ServiceParams>,
 ) -> ApiResult<Calls> {
-    let step = parse_step_ns(params.step.as_deref())?;
-    api.run_range_query(
-        [params.since, params.until],
-        None,
-        (params.limit, 50),
-        move |r| {
-            let step_ns = resolve_step(&r, step, 120)?;
-            Ok(r.queries.calls(&name, step_ns, r.limit)?)
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
+    api.run_limited_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        params.limit,
+        50,
+        move |opened, limit| {
+            let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
+            Ok(opened.queries.list_calls(&name, step_ns, limit)?)
         },
     )
     .await
@@ -193,7 +206,8 @@ pub struct CallParams {
     /// `/api/services/{name}/calls` names it.
     summary: String,
     /// The OpenTelemetry span kind of the call, such as 3 for client.
-    kind: i32,
+    #[param(value_type = i32)]
+    kind: SpanKind,
     /// The start of the range: a duration before now, such as `1h`, or an
     /// RFC 3339 timestamp. One hour before `until` when missing.
     since: Option<String>,
@@ -219,27 +233,28 @@ pub struct CallParams {
         (status = 400, body = ErrorBody),
     ),
 )]
-pub async fn call(
+pub async fn get_call(
     State(api): State<Api>,
     Path(name): Path<String>,
     Query(params): Query<CallParams>,
 ) -> ApiResult<CallDetail> {
-    let step = parse_step_ns(params.step.as_deref())?;
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     let target = TargetKey {
         target_type: params.target_type,
         system: params.system,
         name: params.target,
     };
     let (summary, kind) = (params.summary, params.kind);
-    api.run_range_query([params.since, params.until], None, (None, 1), move |r| {
-        let step_ns = resolve_step(&r, step, 120)?;
-        Ok(r.queries.call(
-            &name,
-            &target,
-            &summary,
-            SpanKind::from_number(kind),
-            step_ns,
-        )?)
-    })
+    api.run_range_query(
+        params.since,
+        params.until,
+        DefaultSince::HourBeforeNow,
+        move |opened| {
+            let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
+            Ok(opened
+                .queries
+                .get_call(&name, &target, &summary, kind, step_ns)?)
+        },
+    )
     .await
 }

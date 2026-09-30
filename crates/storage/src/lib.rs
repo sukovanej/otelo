@@ -11,20 +11,23 @@ mod range;
 mod storage;
 mod summary;
 
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
 pub use attributes::{AttributeValue, Attributes, SpanEvent};
-pub use channel::{Inbox, Sender, batch_channel};
+pub use channel::{BatchInbox, BatchSender, open_batch_channel};
 pub use error::{Error, Result};
 pub use histogram::{
     Buckets, Distribution, ExplicitBuckets, ExponentialBuckets, Histogram, IndexedCounts,
-    StepHistograms,
+    Percentiles, StepHistograms,
 };
 pub use increase::{Increase, StepIncreases};
 pub use indexes::{IndexedAttribute, IndexedSignal};
 pub use metric::{HistogramPoint, Metric, MetricKind, NumberPoint, Points, Temporality};
-pub use otel::{Severity, SpanId, SpanKind, SpanStatus, TraceId};
+pub use otel::{Severity, SpanId, SpanKind, SpanStatus, TraceContext, TraceId};
 pub use range::TimeRange;
 pub use storage::{MetricRetention, RangeQueries, Storage, StorageSize};
-pub use summary::{Change, Level, SeriesSteps, StepSummary};
+pub use summary::{Change, Level, SeriesPoint, SeriesSteps, StepSummary};
 
 #[must_use]
 pub fn now_unix_nanos() -> i64 {
@@ -52,10 +55,32 @@ pub struct Log {
     pub logged_at: i64,
     pub severity: Severity,
     pub body: String,
-    pub trace_id: Option<TraceId>,
-    pub span_id: Option<SpanId>,
+    pub trace_context: TraceContext,
     pub attributes: Attributes,
-    pub source: &'static str,
+    pub source: LogSource,
+}
+
+/// How a log line arrived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LogSource {
+    Otlp,
+}
+
+impl LogSource {
+    const ALL: [Self; 1] = [Self::Otlp];
+
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|source| source.name() == name)
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Otlp => "otlp",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

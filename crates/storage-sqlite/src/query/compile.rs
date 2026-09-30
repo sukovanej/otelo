@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use otelo_query::{Builtin, Expr, Field, Op, Query, Signal, Value};
-use rusqlite::types::Value as Sql;
+use otelo_query::{BuiltinField, Expression, Field, Operator, Query, Signal, Value};
+use rusqlite::types::Value as SqliteValue;
 
-use otelo_storage::{IndexedAttribute, IndexedSignal, Severity, SpanId, SpanStatus, TraceId};
+use otelo_storage::{
+    IndexedAttribute, IndexedSignal, Severity, SpanId, SpanKind, SpanStatus, TraceId,
+};
 
 use super::WhereClause;
 use crate::indexes::attribute_json_path;
@@ -13,8 +15,8 @@ use crate::indexes::attribute_json_path;
 pub struct InvalidQuery(pub String);
 
 impl fmt::Display for InvalidQuery {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
     }
 }
 
@@ -22,7 +24,7 @@ impl std::error::Error for InvalidQuery {}
 
 type Result<T> = std::result::Result<T, InvalidQuery>;
 
-const fn invalid<T>(message: String) -> Result<T> {
+const fn invalid_query<T>(message: String) -> Result<T> {
     Err(InvalidQuery(message))
 }
 
@@ -37,27 +39,27 @@ pub fn compile_query(
     aliases: TableAliases,
     indexed_attributes: &BTreeSet<IndexedAttribute>,
     param_prefix: &str,
-    filter: &mut WhereClause,
+    where_clause: &mut WhereClause,
 ) -> Result<Vec<String>> {
-    let Some(expr) = &query.expr else {
+    let Some(expression) = &query.expression else {
         return Ok(Vec::new());
     };
     let mut compiler = Compiler {
         signal: query.signal,
         aliases,
         param_prefix,
-        filter,
+        where_clause,
         next_param: 0,
     };
-    let sql = compiler.expr(expr)?;
-    compiler.filter.push_clause(sql);
+    let sql = compiler.compile_expression(expression)?;
+    compiler.where_clause.push_condition(sql);
     let mut unindexed = Vec::new();
     if let Ok(signal) = IndexedSignal::try_from(query.signal) {
         for field in query.fields() {
             if let Field::Attribute(key) = field {
-                let indexed = IndexedAttribute::new(signal, key)
+                let is_indexed = IndexedAttribute::new(signal, key)
                     .is_ok_and(|attribute| indexed_attributes.contains(&attribute));
-                if !indexed && !unindexed.contains(key) {
+                if !is_indexed && !unindexed.contains(key) {
                     unindexed.push(key.clone());
                 }
             }
@@ -70,42 +72,51 @@ struct Compiler<'a> {
     signal: Signal,
     aliases: TableAliases,
     param_prefix: &'a str,
-    filter: &'a mut WhereClause,
+    where_clause: &'a mut WhereClause,
     next_param: usize,
 }
 
 impl Compiler<'_> {
-    fn bind_param(&mut self, value: impl Into<Sql>) -> String {
+    fn bind_param(&mut self, value: impl Into<SqliteValue>) -> String {
         let name = format!(":{}{}", self.param_prefix, self.next_param);
         self.next_param += 1;
-        self.filter.push_param(&name, value);
+        self.where_clause.push_param(&name, value);
         name
     }
 
-    fn expr(&mut self, expr: &Expr) -> Result<String> {
-        Ok(match expr {
-            Expr::And(terms) => self.join(terms, " AND ")?,
-            Expr::Or(terms) => self.join(terms, " OR ")?,
+    fn compile_expression(&mut self, expression: &Expression) -> Result<String> {
+        Ok(match expression {
+            Expression::And(terms) => self.compile_joined_terms(terms, " AND ")?,
+            Expression::Or(terms) => self.compile_joined_terms(terms, " OR ")?,
             // A comparison of a missing attribute is NULL, and NOT has to keep that record.
-            Expr::Not(term) => format!("NOT coalesce({}, FALSE)", self.expr(term)?),
-            Expr::Compare { field, op, value } => self.compare(field, *op, value)?,
-            Expr::In { field, values } => self.within(field, values)?,
-            Expr::Contains { field, text } => self.contains(field, text)?,
-            Expr::Has(field) => match field {
-                Field::Builtin(builtin) => {
-                    return invalid(format!("has() takes an attribute, not {}", builtin.name()));
+            Expression::Not(term) => {
+                format!("NOT coalesce({}, FALSE)", self.compile_expression(term)?)
+            }
+            Expression::Compare {
+                field,
+                operator,
+                value,
+            } => self.compile_comparison(field, *operator, value)?,
+            Expression::In { field, values } => self.compile_in_list(field, values)?,
+            Expression::Contains { field, text } => self.compile_contains(field, text)?,
+            Expression::Has(field) => match field {
+                Field::Builtin(builtin_field) => {
+                    return invalid_query(format!(
+                        "has() takes an attribute, not {}",
+                        builtin_field.name()
+                    ));
                 }
                 _ => format!("json_type({}) IS NOT NULL", self.json_extract_args(field)?),
             },
         })
     }
 
-    fn join(&mut self, terms: &[Expr], join: &str) -> Result<String> {
+    fn compile_joined_terms(&mut self, terms: &[Expression], separator: &str) -> Result<String> {
         let terms = terms
             .iter()
-            .map(|term| Ok(format!("({})", self.expr(term)?)))
+            .map(|term| Ok(format!("({})", self.compile_expression(term)?)))
             .collect::<Result<Vec<_>>>()?;
-        Ok(terms.join(join))
+        Ok(terms.join(separator))
     }
 
     fn json_extract_args(&self, field: &Field) -> Result<String> {
@@ -123,7 +134,7 @@ impl Compiler<'_> {
             Field::Builtin(_) => unreachable!("a built-in field is a column"),
         };
         if key.contains('"') {
-            return invalid(format!(
+            return invalid_query(format!(
                 "the key {key:?} has a double quote, which a query cannot read"
             ));
         }
@@ -131,49 +142,62 @@ impl Compiler<'_> {
         Ok(format!("{alias}.{column}, {}", attribute_json_path(key)))
     }
 
-    fn compare(&mut self, field: &Field, op: Op, value: &Value) -> Result<String> {
-        if let Field::Builtin(builtin) = field {
-            return self.builtin(*builtin, op, value);
+    fn compile_comparison(
+        &mut self,
+        field: &Field,
+        operator: Operator,
+        value: &Value,
+    ) -> Result<String> {
+        if let Field::Builtin(builtin_field) = field {
+            return self.compile_builtin_comparison(*builtin_field, operator, value);
         }
-        let expr = format!("json_extract({})", self.json_extract_args(field)?);
-        Ok(match op {
-            Op::Eq => self.equals_any(&expr, &equal_sql_values(value)),
-            Op::Ne => format!(
-                "({expr} IS NULL OR NOT {})",
-                self.equals_any(&expr, &equal_sql_values(value))
+        let extracted_sql = format!("json_extract({})", self.json_extract_args(field)?);
+        Ok(match operator {
+            Operator::Eq => self.compile_equals_any(&extracted_sql, &equal_sql_values(value)),
+            Operator::Ne => format!(
+                "({extracted_sql} IS NULL OR NOT {})",
+                self.compile_equals_any(&extracted_sql, &equal_sql_values(value))
             ),
             _ => {
                 let param = self.bind_param(value_as_scalar(value));
-                format!("{expr} {} {param}", op.as_str())
+                format!("{extracted_sql} {} {param}", operator.symbol())
             }
         })
     }
 
-    fn equals_any(&mut self, expr: &str, values: &[Sql]) -> String {
-        let params: Vec<String> = values.iter().map(|v| self.bind_param(v.clone())).collect();
+    fn compile_equals_any(&mut self, extracted_sql: &str, values: &[SqliteValue]) -> String {
+        let params: Vec<String> = values
+            .iter()
+            .map(|value| self.bind_param(value.clone()))
+            .collect();
         if let [param] = params.as_slice() {
-            format!("{expr} = {param}")
+            format!("{extracted_sql} = {param}")
         } else {
-            format!("{expr} IN ({})", params.join(", "))
+            format!("{extracted_sql} IN ({})", params.join(", "))
         }
     }
 
-    fn within(&mut self, field: &Field, values: &[Value]) -> Result<String> {
+    fn compile_in_list(&mut self, field: &Field, values: &[Value]) -> Result<String> {
         if let Field::Builtin(_) = field {
             let terms = values
                 .iter()
-                .map(|value| Ok(format!("({})", self.compare(field, Op::Eq, value)?)))
+                .map(|value| {
+                    Ok(format!(
+                        "({})",
+                        self.compile_comparison(field, Operator::Eq, value)?
+                    ))
+                })
                 .collect::<Result<Vec<_>>>()?;
             return Ok(terms.join(" OR "));
         }
-        let expr = format!("json_extract({})", self.json_extract_args(field)?);
-        let all: Vec<Sql> = values.iter().flat_map(equal_sql_values).collect();
-        Ok(self.equals_any(&expr, &all))
+        let extracted_sql = format!("json_extract({})", self.json_extract_args(field)?);
+        let sql_values: Vec<SqliteValue> = values.iter().flat_map(equal_sql_values).collect();
+        Ok(self.compile_equals_any(&extracted_sql, &sql_values))
     }
 
-    fn contains(&mut self, field: &Field, text: &str) -> Result<String> {
+    fn compile_contains(&mut self, field: &Field, text: &str) -> Result<String> {
         let column = match field {
-            Field::Builtin(Builtin::Body) => {
+            Field::Builtin(BuiltinField::Body) => {
                 let Some(words) = super::logs::quote_fts_words(text) else {
                     return Ok("TRUE".into());
                 };
@@ -183,11 +207,13 @@ impl Compiler<'_> {
                     self.aliases.record
                 ));
             }
-            Field::Builtin(builtin) if builtin.text() => self.builtin_column(*builtin),
-            Field::Builtin(builtin) => {
-                return invalid(format!(
+            Field::Builtin(builtin_field) if builtin_field.is_text() => {
+                self.builtin_column(*builtin_field)
+            }
+            Field::Builtin(builtin_field) => {
+                return invalid_query(format!(
                     "~ takes a text field, and {} is not one",
-                    builtin.name()
+                    builtin_field.name()
                 ));
             }
             _ => format!("json_extract({})", self.json_extract_args(field)?),
@@ -196,144 +222,158 @@ impl Compiler<'_> {
         Ok(format!("instr({column}, {param}) > 0"))
     }
 
-    fn builtin_column(&self, builtin: Builtin) -> String {
-        let (r, res) = (self.aliases.record, self.aliases.resource);
-        match builtin {
-            Builtin::Service => format!("{res}.service"),
-            Builtin::Level => format!("{r}.severity"),
-            Builtin::Body => format!("{r}.body"),
-            Builtin::TraceId => format!("{r}.trace_id"),
-            Builtin::SpanId => format!("{r}.span_id"),
-            Builtin::Source => format!("{r}.source"),
-            Builtin::Name => format!("{r}.name"),
-            Builtin::Kind => format!("{r}.kind"),
-            Builtin::Status | Builtin::Error => format!("{r}.status"),
-            Builtin::Duration => format!("{r}.duration_ns"),
-            Builtin::Root => format!("{r}.parent_span_id"),
-            Builtin::Unit => format!("{r}.unit"),
+    fn builtin_column(&self, builtin_field: BuiltinField) -> String {
+        let (record, resource) = (self.aliases.record, self.aliases.resource);
+        match builtin_field {
+            BuiltinField::Service => format!("{resource}.service"),
+            BuiltinField::Level => format!("{record}.severity"),
+            BuiltinField::Body => format!("{record}.body"),
+            BuiltinField::TraceId => format!("{record}.trace_id"),
+            BuiltinField::SpanId => format!("{record}.span_id"),
+            BuiltinField::Source => format!("{record}.source"),
+            BuiltinField::Name => format!("{record}.name"),
+            BuiltinField::Kind => format!("{record}.kind"),
+            BuiltinField::Status | BuiltinField::Error => format!("{record}.status"),
+            BuiltinField::Duration => format!("{record}.duration_ns"),
+            BuiltinField::Root => format!("{record}.parent_span_id"),
+            BuiltinField::Unit => format!("{record}.unit"),
         }
     }
 
-    fn builtin(&mut self, builtin: Builtin, op: Op, value: &Value) -> Result<String> {
-        let column = self.builtin_column(builtin);
-        let name = builtin.name();
-        let ordered = |op: Op| -> Result<()> {
-            if matches!(op, Op::Eq | Op::Ne) {
+    fn compile_builtin_comparison(
+        &mut self,
+        builtin_field: BuiltinField,
+        operator: Operator,
+        value: &Value,
+    ) -> Result<String> {
+        let column = self.builtin_column(builtin_field);
+        let name = builtin_field.name();
+        let ensure_equality_operator = |operator: Operator| -> Result<()> {
+            if matches!(operator, Operator::Eq | Operator::Ne) {
                 Ok(())
             } else {
-                invalid(format!("{name} takes = or !=, not {}", op.as_str()))
+                invalid_query(format!("{name} takes = or !=, not {}", operator.symbol()))
             }
         };
-        match builtin {
-            Builtin::Service | Builtin::Body | Builtin::Source | Builtin::Name | Builtin::Unit => {
-                ordered(op)?;
+        match builtin_field {
+            BuiltinField::Service
+            | BuiltinField::Body
+            | BuiltinField::Source
+            | BuiltinField::Name
+            | BuiltinField::Unit => {
+                ensure_equality_operator(operator)?;
                 let param = self.bind_param(value_as_text(value));
-                Ok(format!("{column} {} {param}", op.as_str()))
+                Ok(format!("{column} {} {param}", operator.symbol()))
             }
-            Builtin::Kind if self.signal == Signal::Metrics => {
-                ordered(op)?;
+            BuiltinField::Kind if self.signal == Signal::Metrics => {
+                ensure_equality_operator(operator)?;
                 let param = self.bind_param(value_as_text(value));
-                Ok(format!("{column} {} {param}", op.as_str()))
+                Ok(format!("{column} {} {param}", operator.symbol()))
             }
-            Builtin::Level => level_clause(&column, op, value),
-            Builtin::TraceId | Builtin::SpanId => {
-                ordered(op)?;
+            BuiltinField::Level => compile_level_comparison(&column, operator, value),
+            BuiltinField::TraceId | BuiltinField::SpanId => {
+                ensure_equality_operator(operator)?;
                 let id = match value {
-                    Value::String(hex) if builtin == Builtin::TraceId => TraceId::parse_hex(hex)
-                        .map(|id| id.0.to_vec())
-                        .map_err(|e| InvalidQuery(e.to_string()))?,
+                    Value::String(hex) if builtin_field == BuiltinField::TraceId => {
+                        TraceId::parse_hex(hex)
+                            .map(|id| id.0.to_vec())
+                            .map_err(|error| InvalidQuery(error.to_string()))?
+                    }
                     Value::String(hex) => SpanId::parse_hex(hex)
                         .map(|id| id.0.to_vec())
-                        .map_err(|e| InvalidQuery(e.to_string()))?,
-                    _ => return invalid(format!("{name} takes hex digits, not {value}")),
+                        .map_err(|error| InvalidQuery(error.to_string()))?,
+                    _ => return invalid_query(format!("{name} takes hex digits, not {value}")),
                 };
                 let param = self.bind_param(id);
-                Ok(format!("{column} {} {param}", op.as_str()))
+                Ok(format!("{column} {} {param}", operator.symbol()))
             }
-            Builtin::Kind | Builtin::Status => {
-                ordered(op)?;
-                let names = builtin.values(self.signal);
+            BuiltinField::Kind | BuiltinField::Status => {
+                ensure_equality_operator(operator)?;
+                let fixed_values = builtin_field.fixed_values(self.signal);
+                let not_a_fixed_value = |written: &dyn fmt::Display| {
+                    InvalidQuery(format!(
+                        "{name} is one of {}, not {written}",
+                        fixed_values.join(", ")
+                    ))
+                };
                 let number = match value {
-                    Value::Int(n) => *n,
-                    Value::String(word) => names
-                        .iter()
-                        .position(|n| n.eq_ignore_ascii_case(word))
-                        .map(|i| {
-                            // Span kinds count from 1, after unspecified.
-                            let i = i64::try_from(i).unwrap_or(0);
-                            if builtin == Builtin::Kind { i + 1 } else { i }
-                        })
-                        .ok_or_else(|| {
-                            InvalidQuery(format!(
-                                "{name} is one of {}, not {word}",
-                                names.join(", ")
-                            ))
-                        })?,
-                    _ => {
-                        return invalid(format!(
-                            "{name} is one of {}, not {value}",
-                            names.join(", ")
-                        ));
+                    Value::Int(number) => *number,
+                    Value::String(word) => {
+                        find_kind_or_status_number(builtin_field, fixed_values, word)
+                            .ok_or_else(|| not_a_fixed_value(word))?
                     }
+                    _ => return Err(not_a_fixed_value(value)),
                 };
-                Ok(format!("{column} {} {number}", op.as_str()))
+                Ok(format!("{column} {} {number}", operator.symbol()))
             }
-            Builtin::Error | Builtin::Root => {
-                ordered(op)?;
+            BuiltinField::Error | BuiltinField::Root => {
+                ensure_equality_operator(operator)?;
                 let &Value::Bool(wanted) = value else {
-                    return invalid(format!("{name} is true or false, not {value}"));
+                    return invalid_query(format!("{name} is true or false, not {value}"));
                 };
-                let wanted = wanted != (op == Op::Ne);
-                Ok(match (builtin, wanted) {
-                    (Builtin::Error, true) => {
+                let wanted = wanted != (operator == Operator::Ne);
+                Ok(match (builtin_field, wanted) {
+                    (BuiltinField::Error, true) => {
                         format!("{column} = {}", SpanStatus::Error.number())
                     }
-                    (Builtin::Error, false) => {
+                    (BuiltinField::Error, false) => {
                         format!("{column} != {}", SpanStatus::Error.number())
                     }
                     (_, true) => format!("{column} IS NULL"),
                     (_, false) => format!("{column} IS NOT NULL"),
                 })
             }
-            Builtin::Duration => {
-                let ns = match value {
-                    Value::Duration(ns) | Value::Int(ns) => *ns,
+            BuiltinField::Duration => {
+                let duration_ns = match value {
+                    Value::Duration(duration_ns) | Value::Int(duration_ns) => *duration_ns,
                     _ => {
-                        return invalid(format!(
+                        return invalid_query(format!(
                             "duration takes a duration such as 500ms, not {value}"
                         ));
                     }
                 };
-                let param = self.bind_param(ns);
-                Ok(format!("{column} {} {param}", op.as_str()))
+                let param = self.bind_param(duration_ns);
+                Ok(format!("{column} {} {param}", operator.symbol()))
             }
         }
     }
 }
 
-fn level_clause(column: &str, op: Op, value: &Value) -> Result<String> {
-    let (low, high) = match value {
-        Value::Int(n) => {
-            let n =
-                i32::try_from(*n).map_err(|_| InvalidQuery(format!("{n} is not a severity")))?;
-            (n, n)
-        }
-        Value::String(level) => {
-            let low = Severity::parse(level)
-                .map_err(|e| InvalidQuery(e.to_string()))?
-                .number();
-            // A level name covers its four severity numbers.
-            (low, low + 3)
-        }
-        _ => return invalid(format!("level takes a level such as warn, not {value}")),
+fn find_kind_or_status_number(
+    builtin_field: BuiltinField,
+    fixed_values: &[&str],
+    word: &str,
+) -> Option<i64> {
+    let name = fixed_values
+        .iter()
+        .find(|fixed_value| fixed_value.eq_ignore_ascii_case(word))?;
+    let number = match builtin_field {
+        BuiltinField::Kind => SpanKind::from_name(name)?.number(),
+        _ => SpanStatus::from_name(name)?.number(),
     };
-    Ok(match op {
-        Op::Eq => format!("{column} BETWEEN {low} AND {high}"),
-        Op::Ne => format!("{column} NOT BETWEEN {low} AND {high}"),
-        Op::Lt => format!("{column} < {low}"),
-        Op::Le => format!("{column} <= {high}"),
-        Op::Gt => format!("{column} > {high}"),
-        Op::Ge => format!("{column} >= {low}"),
+    Some(i64::from(number))
+}
+
+fn compile_level_comparison(column: &str, operator: Operator, value: &Value) -> Result<String> {
+    let (low, high) = match value {
+        Value::Int(number) => {
+            let number = i32::try_from(*number)
+                .map_err(|_| InvalidQuery(format!("{number} is not a severity")))?;
+            (number, number)
+        }
+        Value::String(level) => Severity::parse_level_or_number(level)
+            .map_err(|error| InvalidQuery(error.to_string()))?
+            .level_number_range()
+            .into_inner(),
+        _ => return invalid_query(format!("level takes a level such as warn, not {value}")),
+    };
+    Ok(match operator {
+        Operator::Eq => format!("{column} BETWEEN {low} AND {high}"),
+        Operator::Ne => format!("{column} NOT BETWEEN {low} AND {high}"),
+        Operator::Lt => format!("{column} < {low}"),
+        Operator::Le => format!("{column} <= {high}"),
+        Operator::Gt => format!("{column} > {high}"),
+        Operator::Ge => format!("{column} >= {low}"),
     })
 }
 
@@ -344,29 +384,35 @@ fn value_as_text(value: &Value) -> String {
     }
 }
 
-fn value_as_scalar(value: &Value) -> Sql {
+fn value_as_scalar(value: &Value) -> SqliteValue {
     match value {
-        Value::String(text) => Sql::Text(text.clone()),
-        Value::Int(n) | Value::Duration(n) => Sql::Integer(*n),
-        Value::Float(x) => Sql::Real(*x),
-        Value::Bool(b) => Sql::Integer(i64::from(*b)),
+        Value::String(text) => SqliteValue::Text(text.clone()),
+        Value::Int(integer) | Value::Duration(integer) => SqliteValue::Integer(*integer),
+        Value::Float(real) => SqliteValue::Real(*real),
+        Value::Bool(flag) => SqliteValue::Integer(i64::from(*flag)),
     }
 }
 
-fn equal_sql_values(value: &Value) -> Vec<Sql> {
+fn equal_sql_values(value: &Value) -> Vec<SqliteValue> {
     // Apps send a number both as a number and as a string.
     match value {
         Value::String(text) => {
-            let mut values = vec![Sql::Text(text.clone())];
-            if let Ok(n) = text.parse::<i64>() {
-                values.push(Sql::Integer(n));
-            } else if let Ok(x) = text.parse::<f64>() {
-                values.push(Sql::Real(x));
+            let mut values = vec![SqliteValue::Text(text.clone())];
+            if let Ok(integer) = text.parse::<i64>() {
+                values.push(SqliteValue::Integer(integer));
+            } else if let Ok(real) = text.parse::<f64>() {
+                values.push(SqliteValue::Real(real));
             }
             values
         }
-        Value::Int(n) | Value::Duration(n) => vec![Sql::Integer(*n), Sql::Text(n.to_string())],
-        Value::Float(x) => vec![Sql::Real(*x), Sql::Text(x.to_string())],
-        Value::Bool(b) => vec![Sql::Integer(i64::from(*b))],
+        Value::Int(integer) | Value::Duration(integer) => vec![
+            SqliteValue::Integer(*integer),
+            SqliteValue::Text(integer.to_string()),
+        ],
+        Value::Float(real) => vec![
+            SqliteValue::Real(*real),
+            SqliteValue::Text(real.to_string()),
+        ],
+        Value::Bool(flag) => vec![SqliteValue::Integer(i64::from(*flag))],
     }
 }

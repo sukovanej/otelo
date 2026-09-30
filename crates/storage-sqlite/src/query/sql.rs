@@ -19,22 +19,26 @@ const SCHEMA_PRAGMAS: [&str; 6] = [
 ];
 
 fn run_select(reader: &Reader, sql: &str, limit: usize) -> anyhow::Result<SqlResult> {
-    let span = new_statement_span(sql);
-    let _entered = span.enter();
-    let mut stmt = reader.conn().prepare(sql)?;
-    let columns: Vec<String> = stmt.column_names().into_iter().map(Into::into).collect();
+    let statement_span = new_statement_span(sql);
+    let _entered = statement_span.enter();
+    let mut statement = reader.connection().prepare(sql)?;
+    let columns: Vec<String> = statement
+        .column_names()
+        .into_iter()
+        .map(Into::into)
+        .collect();
     let mut rows = Vec::new();
-    let mut query = stmt.query([])?;
-    while let Some(row) = query.next()? {
+    let mut result_rows = statement.query([])?;
+    while let Some(row) = result_rows.next()? {
         if rows.len() > limit {
             break;
         }
         let values = (0..columns.len())
-            .map(|i| {
-                Ok(match row.get_ref(i)? {
+            .map(|column_index| {
+                Ok(match row.get_ref(column_index)? {
                     ValueRef::Null => SqlValue::Null,
-                    ValueRef::Integer(n) => SqlValue::Integer(n),
-                    ValueRef::Real(x) => SqlValue::Real(x),
+                    ValueRef::Integer(integer) => SqlValue::Integer(integer),
+                    ValueRef::Real(real) => SqlValue::Real(real),
                     ValueRef::Text(text) => SqlValue::Text(String::from_utf8_lossy(text).into()),
                     ValueRef::Blob(blob) => SqlValue::Text(hex_digits(blob)),
                 })
@@ -42,7 +46,7 @@ fn run_select(reader: &Reader, sql: &str, limit: usize) -> anyhow::Result<SqlRes
             .collect::<anyhow::Result<_>>()?;
         rows.push(values);
     }
-    span.record(
+    statement_span.record(
         "db.response.returned_rows",
         i64::try_from(rows.len()).unwrap_or(i64::MAX),
     );
@@ -66,10 +70,10 @@ fn authorize_read_only(context: AuthContext<'_>) -> Authorization {
 }
 
 pub(super) fn run_user_sql(reader: &Reader, sql: &str, limit: usize) -> anyhow::Result<SqlResult> {
-    let conn = reader.conn();
-    conn.set_limit(Limit::SQLITE_LIMIT_LENGTH, MAX_VALUE_BYTES)?;
-    conn.authorizer(Some(authorize_read_only))?;
+    let connection = reader.connection();
+    connection.set_limit(Limit::SQLITE_LIMIT_LENGTH, MAX_VALUE_BYTES)?;
+    connection.authorizer(Some(authorize_read_only))?;
     let result = run_select(reader, sql, limit);
-    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+    connection.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
     result
 }

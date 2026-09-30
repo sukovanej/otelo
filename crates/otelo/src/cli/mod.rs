@@ -9,12 +9,17 @@ mod traces;
 
 use otelo_query::Signal;
 
-pub use catalog::{AttributesArgs, CompleteArgs, IndexArgs, attributes, complete, index};
-pub use logs::{LogsArgs, logs};
-pub use metrics::{MetricArgs, MetricsArgs, metric, metrics};
-pub use services::{CallsArgs, ServiceArgs, ServicesArgs, calls, service, services};
-pub use sql::{SqlArgs, sql};
-pub use traces::{SpansArgs, TraceArgs, TracesArgs, spans, trace, traces};
+pub use catalog::{
+    AttributesArgs, CompleteArgs, IndexArgs, change_and_print_indexes, print_attributes,
+    print_completions,
+};
+pub use logs::{LogsArgs, print_logs};
+pub use metrics::{MetricArgs, MetricsArgs, print_metric_series, print_metrics};
+pub use services::{
+    CallsArgs, ServiceArgs, ServicesArgs, print_calls, print_service, print_services,
+};
+pub use sql::{SqlArgs, run_sql};
+pub use traces::{SpansArgs, TraceArgs, TracesArgs, print_spans, print_trace, print_traces};
 
 const QUERY_HELP: &str = "The records to keep, such as 'http.route = \"/matches\" OR user.id = 7'. \
     Built-in fields come first; resource.<key> reads a resource attribute, and attr.<key> an \
@@ -22,7 +27,7 @@ const QUERY_HELP: &str = "The records to keep, such as 'http.route = \"/matches\
 
 /// The time range and the row limit of every query.
 #[derive(clap::Args)]
-pub struct Range {
+pub struct RangeArgs {
     /// Start of the range: a duration before now, such as 1h, 30m, or 2d, or an
     /// RFC 3339 timestamp [default: 1h]
     #[arg(long)]
@@ -37,12 +42,12 @@ pub struct Range {
     limit: Option<usize>,
 }
 
-impl Range {
-    fn params(&self) -> Vec<(&'static str, Option<String>)> {
+impl RangeArgs {
+    fn to_query_params(&self) -> Vec<(&'static str, Option<String>)> {
         vec![
             ("since", self.since.clone()),
             ("until", self.until.clone()),
-            ("limit", self.limit.map(|n| n.to_string())),
+            ("limit", self.limit.map(|limit| limit.to_string())),
         ]
     }
 }
@@ -51,12 +56,12 @@ fn join_query_words(words: &[String]) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-fn note_unindexed(signal: Signal, keys: &[String]) {
-    if let Some(first) = keys.first() {
+fn note_unindexed_keys(signal: Signal, keys: &[String]) {
+    if let Some(first_key) = keys.first() {
         let verb = if keys.len() == 1 { "has" } else { "have" };
         eprintln!(
             "{} {verb} no index, so the query read every record in the range; \
-             `otelo index add {signal} {first}` adds one.",
+             `otelo index add {signal} {first_key}` adds one.",
             keys.join(", ")
         );
     }

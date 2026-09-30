@@ -17,7 +17,7 @@ pub struct HostIdentity {
 
 impl HostIdentity {
     #[must_use]
-    pub fn of_this_machine() -> Self {
+    pub fn read_from_this_machine() -> Self {
         Self {
             name: sysinfo::System::host_name(),
             id: if cfg!(target_os = "macos") {
@@ -69,8 +69,8 @@ fn read_machine_id() -> Option<String> {
     MACHINE_ID_PATHS
         .iter()
         .filter_map(|path| fs::read_to_string(path).ok())
-        .map(|id| id.trim().to_owned())
-        .find(|id| !id.is_empty())
+        .map(|machine_id| machine_id.trim().to_owned())
+        .find(|machine_id| !machine_id.is_empty())
 }
 
 fn read_platform_uuid() -> Option<String> {

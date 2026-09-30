@@ -37,7 +37,7 @@ export async function describeFieldOfToken(
 }
 
 export function formatTypeLine(field: FieldBody, signal: Signal): string {
-  if (field.count === null) return field.type;
+  if (field.source === "builtin") return field.type;
   const noun = field.source === "resource" ? RESOURCE_NOUN : RECORD_NOUNS[signal];
   return `${field.type} · ${formatCount(field.count, noun)}`;
 }

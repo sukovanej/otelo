@@ -1,10 +1,10 @@
 import { createSignal, For, Show } from "solid-js";
 
-import { addIndex, type Signal } from "@otelo/api";
+import { addIndex, type IndexedSignal } from "@otelo/api";
 import { Button, Callout } from "@otelo/ui";
 
 interface ListContentIndexHintProps {
-  readonly signal: Signal;
+  readonly signal: IndexedSignal;
   readonly singularNoun: string;
   readonly unindexedKeys: ReadonlyArray<string>;
 }

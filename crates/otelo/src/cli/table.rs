@@ -19,12 +19,12 @@ impl Table {
     #[must_use]
     pub fn new(header: &[&str]) -> Self {
         Self {
-            header: header.iter().map(|&h| h.to_owned()).collect(),
+            header: header.iter().map(|&title| title.to_owned()).collect(),
             rows: Vec::new(),
         }
     }
 
-    pub fn row(&mut self, cells: impl IntoIterator<Item = String>) {
+    pub fn add_row(&mut self, cells: impl IntoIterator<Item = String>) {
         let cells = cells
             .into_iter()
             .map(|cell| flatten_to_one_line(&cell))
@@ -43,26 +43,30 @@ impl Table {
 
     pub fn print(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
-        let mut widths: Vec<usize> = self.header.iter().map(|h| h.chars().count()).collect();
+        let mut widths: Vec<usize> = self
+            .header
+            .iter()
+            .map(|title| title.chars().count())
+            .collect();
         for row in &self.rows {
             for (width, cell) in widths.iter_mut().zip(&row.cells) {
                 *width = (*width).max(cell.chars().count());
             }
         }
-        let line = |out: &mut io::StdoutLock, cells: &[String]| -> io::Result<()> {
+        let write_aligned_line = |out: &mut io::StdoutLock, cells: &[String]| -> io::Result<()> {
             let mut text = String::new();
-            for (i, cell) in cells.iter().enumerate() {
-                if i + 1 == cells.len() {
+            for (column, cell) in cells.iter().enumerate() {
+                if column + 1 == cells.len() {
                     text.push_str(cell);
                 } else {
-                    let _ = write!(text, "{cell:<0$}  ", widths[i]);
+                    let _ = write!(text, "{cell:<0$}  ", widths[column]);
                 }
             }
             writeln!(out, "{}", text.trim_end())
         };
-        line(&mut out, &self.header)?;
+        write_aligned_line(&mut out, &self.header)?;
         for row in &self.rows {
-            line(&mut out, &row.cells)?;
+            write_aligned_line(&mut out, &row.cells)?;
             for text in &row.unaligned_lines_under {
                 writeln!(out, "    {text}")?;
             }
@@ -78,8 +82,9 @@ fn flatten_to_one_line(text: &str) -> String {
 }
 
 #[must_use]
-pub fn format_utc_time(ts: Timestamp) -> String {
-    ts.to_zoned(TimeZone::UTC)
+pub fn format_utc_time(timestamp: Timestamp) -> String {
+    timestamp
+        .to_zoned(TimeZone::UTC)
         .strftime("%Y-%m-%d %H:%M:%S%.3f")
         .to_string()
 }
@@ -87,25 +92,27 @@ pub fn format_utc_time(ts: Timestamp) -> String {
 #[must_use]
 pub fn format_duration(nanos: i64) -> String {
     #[expect(clippy::cast_precision_loss, reason = "a display rounds anyway")]
-    let n = nanos as f64;
+    let nanos_as_float = nanos as f64;
     match nanos.unsigned_abs() {
         0 => "0s".into(),
         1..1_000 => format!("{nanos}ns"),
-        1_000..1_000_000 => format!("{}µs", round_to_three_decimals(n / 1e3)),
-        1_000_000..1_000_000_000 => format!("{}ms", round_to_three_decimals(n / 1e6)),
-        1_000_000_000..60_000_000_000 => format!("{}s", round_to_three_decimals(n / 1e9)),
+        1_000..1_000_000 => format!("{}µs", round_to_three_decimals(nanos_as_float / 1e3)),
+        1_000_000..1_000_000_000 => format!("{}ms", round_to_three_decimals(nanos_as_float / 1e6)),
+        1_000_000_000..60_000_000_000 => {
+            format!("{}s", round_to_three_decimals(nanos_as_float / 1e9))
+        }
         60_000_000_000..3_600_000_000_000 => {
             let seconds = nanos / 1_000_000_000;
             match seconds % 60 {
                 0 => format!("{}m", seconds / 60),
-                rest => format!("{}m{rest:02}s", seconds / 60),
+                remaining_seconds => format!("{}m{remaining_seconds:02}s", seconds / 60),
             }
         }
         _ => {
             let minutes = nanos / 60_000_000_000;
             match minutes % 60 {
                 0 => format!("{}h", minutes / 60),
-                rest => format!("{}h{rest:02}m", minutes / 60),
+                remaining_minutes => format!("{}h{remaining_minutes:02}m", minutes / 60),
             }
         }
     }

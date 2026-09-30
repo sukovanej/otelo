@@ -1,3 +1,4 @@
+use otelo_query::ValueType;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -17,7 +18,7 @@ pub struct Attribute {
     /// The JSON type of the values: `string`, `int`, `float`, `bool`,
     /// `array`, `object`, or `mixed`.
     #[serde(rename = "type")]
-    pub kind: String,
+    pub value_type: ValueType,
     /// How many records have the key. For resources and series, how many
     /// resources and series.
     pub count: u64,

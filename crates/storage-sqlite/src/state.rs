@@ -6,7 +6,7 @@ use otelo_query::Signal;
 use otelo_storage::{IndexedAttribute, IndexedSignal};
 use rusqlite::Connection;
 
-const SCHEMA: &str = "
+const STATE_SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS telemetry_indexes (
   signal TEXT NOT NULL,
@@ -20,13 +20,13 @@ pub struct StateFile {
 }
 
 impl StateFile {
-    pub fn open(data: &Path) -> anyhow::Result<Self> {
+    pub fn open(data_directory: &Path) -> anyhow::Result<Self> {
         let state = Self {
-            path: data.join("state.sqlite"),
+            path: data_directory.join("state.sqlite"),
         };
         state
-            .connect()?
-            .execute_batch(SCHEMA)
+            .open_connection()?
+            .execute_batch(STATE_SCHEMA)
             .with_context(|| format!("create the schema in {}", state.path.display()))?;
         Ok(state)
     }
@@ -49,14 +49,14 @@ impl StateFile {
             .sum()
     }
 
-    fn connect(&self) -> anyhow::Result<Connection> {
+    fn open_connection(&self) -> anyhow::Result<Connection> {
         Connection::open(&self.path).with_context(|| format!("open {}", self.path.display()))
     }
 
     pub fn indexed_attributes(&self) -> anyhow::Result<BTreeSet<IndexedAttribute>> {
-        let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT signal, key FROM telemetry_indexes")?;
-        let rows = stmt.query_map([], |row| {
+        let connection = self.open_connection()?;
+        let mut statement = connection.prepare("SELECT signal, key FROM telemetry_indexes")?;
+        let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         let mut attributes = BTreeSet::new();
@@ -72,17 +72,17 @@ impl StateFile {
     }
 
     pub fn add_indexed_attribute(&self, attribute: &IndexedAttribute) -> anyhow::Result<()> {
-        self.connect()?.execute(
+        self.open_connection()?.execute(
             "INSERT INTO telemetry_indexes (signal, key) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
-            (attribute.signal().signal().as_str(), attribute.key()),
+            (Signal::from(attribute.signal()).name(), attribute.key()),
         )?;
         Ok(())
     }
 
     pub fn remove_indexed_attribute(&self, attribute: &IndexedAttribute) -> anyhow::Result<bool> {
-        let removed = self.connect()?.execute(
+        let removed = self.open_connection()?.execute(
             "DELETE FROM telemetry_indexes WHERE signal = ?1 AND key = ?2",
-            (attribute.signal().signal().as_str(), attribute.key()),
+            (Signal::from(attribute.signal()).name(), attribute.key()),
         )?;
         Ok(removed > 0)
     }

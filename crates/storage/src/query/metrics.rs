@@ -9,39 +9,39 @@ use crate::{
     Attributes, Change, Distribution, MetricKind, MetricRetention, StepSummary, TimeRange,
 };
 
-pub const MAX_BUCKETS: i64 = 10_000;
+pub const MAX_BUCKETS_IN_RANGE: i64 = 10_000;
 
-const SECOND: i64 = 1_000_000_000;
+const NANOS_PER_SECOND: i64 = 1_000_000_000;
 
-const ROUND_STEPS: [i64; 15] = [
-    SECOND,
-    5 * SECOND,
-    10 * SECOND,
-    15 * SECOND,
-    30 * SECOND,
-    60 * SECOND,
-    5 * 60 * SECOND,
-    10 * 60 * SECOND,
-    15 * 60 * SECOND,
-    30 * 60 * SECOND,
-    3600 * SECOND,
-    3 * 3600 * SECOND,
-    6 * 3600 * SECOND,
-    12 * 3600 * SECOND,
-    86_400 * SECOND,
+const ROUND_STEPS_NS: [i64; 15] = [
+    NANOS_PER_SECOND,
+    5 * NANOS_PER_SECOND,
+    10 * NANOS_PER_SECOND,
+    15 * NANOS_PER_SECOND,
+    30 * NANOS_PER_SECOND,
+    60 * NANOS_PER_SECOND,
+    5 * 60 * NANOS_PER_SECOND,
+    10 * 60 * NANOS_PER_SECOND,
+    15 * 60 * NANOS_PER_SECOND,
+    30 * 60 * NANOS_PER_SECOND,
+    3600 * NANOS_PER_SECOND,
+    3 * 3600 * NANOS_PER_SECOND,
+    6 * 3600 * NANOS_PER_SECOND,
+    12 * 3600 * NANOS_PER_SECOND,
+    86_400 * NANOS_PER_SECOND,
 ];
 
 #[must_use]
-pub fn default_step(range: TimeRange) -> i64 {
-    step_for(range, 120)
+pub fn choose_default_step_ns(range: TimeRange) -> i64 {
+    choose_round_step_ns(range, 120)
 }
 
 #[must_use]
-pub fn step_for(range: TimeRange, buckets: i64) -> i64 {
-    ROUND_STEPS
+pub fn choose_round_step_ns(range: TimeRange, max_buckets: i64) -> i64 {
+    ROUND_STEPS_NS
         .into_iter()
-        .find(|step| range.length() / step <= buckets)
-        .unwrap_or(ROUND_STEPS[ROUND_STEPS.len() - 1])
+        .find(|step_ns| range.length_ns() / step_ns <= max_buckets)
+        .unwrap_or(ROUND_STEPS_NS[ROUND_STEPS_NS.len() - 1])
 }
 
 /// The series in a range, by name.
@@ -65,8 +65,8 @@ pub struct SeriesInfo {
 }
 
 // A longer range would read more raw points than a chart has pixels.
-const MAX_RAW_RANGE_NS: i64 = 6 * 3600 * SECOND;
-const MAX_MINUTE_RANGE_NS: i64 = 14 * 86_400 * SECOND;
+const MAX_RAW_RANGE_NS: i64 = 6 * 3600 * NANOS_PER_SECOND;
+const MAX_MINUTE_RANGE_NS: i64 = 14 * 86_400 * NANOS_PER_SECOND;
 
 /// Which points a metric query reads.
 ///
@@ -84,10 +84,10 @@ pub enum Resolution {
 
 impl Resolution {
     #[must_use]
-    pub const fn finest_kept_for(range: TimeRange, retention: MetricRetention) -> Self {
-        if range.length() <= MAX_RAW_RANGE_NS && range.start_at() >= retention.oldest_raw_at {
+    pub const fn choose_finest_kept_for(range: TimeRange, retention: MetricRetention) -> Self {
+        if range.length_ns() <= MAX_RAW_RANGE_NS && range.start_at() >= retention.oldest_raw_at {
             Self::Raw
-        } else if range.length() <= MAX_MINUTE_RANGE_NS
+        } else if range.length_ns() <= MAX_MINUTE_RANGE_NS
             && range.start_at() >= retention.oldest_minute_at
         {
             Self::Minute
@@ -183,7 +183,7 @@ pub enum BucketChange {
 
 impl Bucket {
     #[must_use]
-    pub fn of_step(start_at: Timestamp, summary: StepSummary) -> Self {
+    pub fn from_step_summary(start_at: Timestamp, summary: StepSummary) -> Self {
         let change = match summary.change {
             Change::Nothing => BucketChange::None,
             Change::Increase(increase) => increase

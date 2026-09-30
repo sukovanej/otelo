@@ -40,25 +40,30 @@ pub trait Storage: Send + Sync {
 }
 
 pub trait RangeQueries: Catalog {
-    fn logs(&self, query: &Query, limit: usize) -> Result<Logs>;
+    fn list_logs(&self, query: &Query, limit: usize) -> Result<Logs>;
 
-    fn log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups>;
+    fn list_log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups>;
 
-    fn spans(&self, query: &Query, limit: usize) -> Result<Spans>;
+    fn list_spans(&self, query: &Query, limit: usize) -> Result<Spans>;
 
-    fn traces(&self, query: &Query, limit: usize) -> Result<Traces>;
+    fn list_traces(&self, query: &Query, limit: usize) -> Result<Traces>;
 
-    fn trace(&self, id: TraceId, limit: usize) -> Result<Option<Trace>>;
+    fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>>;
 
-    fn metrics(&self, query: &Query, resolution: Resolution, limit: usize) -> Result<MetricList>;
+    fn list_metrics(
+        &self,
+        query: &Query,
+        resolution: Resolution,
+        limit: usize,
+    ) -> Result<MetricList>;
 
-    fn metric(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries>;
+    fn get_metric_series(&self, filter: &MetricFilter, limit: usize) -> Result<MetricSeries>;
 
-    fn services(&self, step_ns: i64, limit: usize) -> Result<Services>;
+    fn list_services(&self, step_ns: i64, limit: usize) -> Result<Services>;
 
-    fn service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service>;
+    fn get_service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service>;
 
-    fn operation(
+    fn get_operation(
         &self,
         service: &str,
         name: &str,
@@ -66,9 +71,9 @@ pub trait RangeQueries: Catalog {
         step_ns: i64,
     ) -> Result<OperationDetail>;
 
-    fn calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls>;
+    fn list_calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls>;
 
-    fn call(
+    fn get_call(
         &self,
         service: &str,
         target: &TargetKey,
@@ -77,9 +82,9 @@ pub trait RangeQueries: Catalog {
         step_ns: i64,
     ) -> Result<CallDetail>;
 
-    fn attributes(&self, signal: Signal) -> Result<AttributeKeys>;
+    fn list_attribute_keys(&self, signal: Signal) -> Result<AttributeKeys>;
 
-    fn sql(&self, sql: &str, limit: usize) -> Result<SqlResult>;
+    fn run_sql(&self, sql: &str, limit: usize) -> Result<SqlResult>;
 
-    fn explain(&self, query: &Query) -> Result<Vec<String>>;
+    fn explain_query(&self, query: &Query) -> Result<Vec<String>>;
 }

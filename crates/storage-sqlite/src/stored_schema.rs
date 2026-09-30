@@ -5,15 +5,16 @@ pub enum StoredSchema {
     Version(i32),
 }
 
-pub fn read_stored_schema(conn: &Connection) -> rusqlite::Result<StoredSchema> {
-    let tables: i64 = conn.query_row(
+pub fn read_stored_schema(connection: &Connection) -> rusqlite::Result<StoredSchema> {
+    let table_count: i64 = connection.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
         [],
         |row| row.get(0),
     )?;
-    if tables == 0 {
+    if table_count == 0 {
         return Ok(StoredSchema::NotWritten);
     }
-    conn.pragma_query_value(None, "user_version", |row| row.get(0))
+    connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
         .map(StoredSchema::Version)
 }

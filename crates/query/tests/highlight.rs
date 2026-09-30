@@ -20,10 +20,10 @@ fn mark_each_char(query: &str) -> String {
     let highlights = highlight_tokens(query);
     query
         .char_indices()
-        .map(|(byte, _)| {
+        .map(|(byte_offset, _)| {
             highlights
                 .iter()
-                .find(|highlight| highlight.byte_range.contains(&byte))
+                .find(|highlight| highlight.byte_range.contains(&byte_offset))
                 .map_or(' ', |highlight| mark_of_kind(highlight.kind))
         })
         .collect()

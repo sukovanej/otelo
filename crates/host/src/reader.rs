@@ -16,7 +16,7 @@ pub struct MachineReader {
     system: System,
     disks: Disks,
     networks: Networks,
-    linux: LinuxFiles,
+    linux_files: LinuxFiles,
     otelo_pid: sysinfo::Pid,
     has_warned_about_services: bool,
 }
@@ -30,7 +30,7 @@ impl MachineReader {
             system,
             disks: Disks::new(),
             networks: Networks::new(),
-            linux: LinuxFiles::at_system_paths(),
+            linux_files: LinuxFiles::at_system_paths(),
             otelo_pid: sysinfo::get_current_pid()
                 .map_err(|error| anyhow::anyhow!("find the PID of this process: {error}"))?,
             has_warned_about_services: false,
@@ -41,8 +41,8 @@ impl MachineReader {
         self.system.refresh_memory();
         let (cpu, memory) = if cfg!(target_os = "linux") {
             (
-                Cpu::TicksByMode(self.linux.read_cpu_ticks()?),
-                self.linux.read_memory()?,
+                Cpu::TicksByMode(self.linux_files.read_cpu_ticks()?),
+                self.linux_files.read_memory()?,
             )
         } else {
             self.system.refresh_cpu_usage();
@@ -59,13 +59,13 @@ impl MachineReader {
         let otelo_process = self
             .read_usage_of_this_process()
             .context("read the CPU time and the memory of this process")?;
-        let load = System::load_average();
+        let load_average = System::load_average();
         Ok(Snapshot {
             cpu,
             load_average: LoadAverage {
-                one_minute: load.one,
-                five_minutes: load.five,
-                fifteen_minutes: load.fifteen,
+                one_minute: load_average.one,
+                five_minutes: load_average.five,
+                fifteen_minutes: load_average.fifteen,
             },
             memory,
             swap: Swap {
@@ -82,7 +82,7 @@ impl MachineReader {
     // A machine without a way to list its services still sends the rest.
     fn read_services(&mut self) -> Services {
         let services = if cfg!(target_os = "linux") {
-            self.linux.read_services()
+            self.linux_files.read_services()
         } else if cfg!(target_os = "macos") {
             self.read_process_trees()
         } else {
@@ -117,8 +117,8 @@ impl MachineReader {
             .values()
             .map(|process| Process {
                 pid: Pid(process.pid().as_u32()),
-                parent_pid: process.parent().map(|pid| Pid(pid.as_u32())),
-                usage: usage_of(process),
+                parent_pid: process.parent().map(|parent_pid| Pid(parent_pid.as_u32())),
+                usage: read_usage_of_process(process),
             })
             .collect();
         Ok(Services::ProcessTrees {
@@ -130,17 +130,19 @@ impl MachineReader {
 
     fn read_usage_of_this_process(&mut self) -> Option<ProcessUsage> {
         self.refresh_processes(ProcessesToUpdate::Some(&[self.otelo_pid]));
-        self.system.process(self.otelo_pid).map(usage_of)
+        self.system
+            .process(self.otelo_pid)
+            .map(read_usage_of_process)
     }
 
-    fn refresh_processes(&mut self, processes: ProcessesToUpdate) {
+    fn refresh_processes(&mut self, processes_to_update: ProcessesToUpdate) {
         // On Linux a thread is a process of its own, and its memory is the memory of its process.
-        let kind = ProcessRefreshKind::nothing()
+        let refresh_kind = ProcessRefreshKind::nothing()
             .with_cpu()
             .with_memory()
             .without_tasks();
         self.system
-            .refresh_processes_specifics(processes, true, kind);
+            .refresh_processes_specifics(processes_to_update, true, refresh_kind);
     }
 
     fn read_filesystems(&mut self) -> Vec<Filesystem> {
@@ -163,16 +165,16 @@ impl MachineReader {
         self.networks
             .list()
             .iter()
-            .map(|(name, data)| Interface {
+            .map(|(name, interface_data)| Interface {
                 name: name.clone(),
-                received_bytes: data.total_received(),
-                transmitted_bytes: data.total_transmitted(),
+                received_bytes: interface_data.total_received(),
+                transmitted_bytes: interface_data.total_transmitted(),
             })
             .collect()
     }
 }
 
-fn usage_of(process: &sysinfo::Process) -> ProcessUsage {
+fn read_usage_of_process(process: &sysinfo::Process) -> ProcessUsage {
     ProcessUsage {
         cpu_time: Duration::from_millis(process.accumulated_cpu_time()),
         resident_bytes: process.memory(),

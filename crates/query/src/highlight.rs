@@ -1,11 +1,10 @@
 use std::ops::Range;
 
-use crate::lexer::{Tok, is_keyword, lex_tokens};
+use crate::lexer::{TokenType, is_keyword, lex_tokens};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HighlightKind {
     Field,
-    // A word still being typed, which may become a field or a keyword, such as the `an` of `and`.
     UndecidedWord,
     Operator,
     Keyword,
@@ -34,7 +33,7 @@ enum Position {
 
 #[derive(Clone, Copy)]
 enum Following<'a> {
-    Token(&'a Tok),
+    Token(&'a TokenType),
     Whitespace,
     Nothing,
 }
@@ -48,35 +47,39 @@ pub fn highlight_tokens(input: &str) -> Vec<Highlight> {
     tokens
         .iter()
         .enumerate()
-        .map(|(i, token)| {
-            let (kind, position_after_token) = match &token.tok {
-                Tok::Word(word) => {
-                    let following = match tokens.get(i + 1) {
-                        Some(next) => Following::Token(&next.tok),
+        .map(|(index, token)| {
+            let (kind, position_after_token) = match &token.token_type {
+                TokenType::Word(word) => {
+                    let following = match tokens.get(index + 1) {
+                        Some(next) => Following::Token(&next.token_type),
                         None if token.byte_range.end < input.len() => Following::Whitespace,
                         None => Following::Nothing,
                     };
                     highlight_word(word, position, following)
                 }
-                Tok::Backticked { closed: true, .. } => {
+                TokenType::Backticked { closed: true, .. } => {
                     (HighlightKind::Field, Position::AfterField)
                 }
-                Tok::Quoted { closed: true, .. } => (HighlightKind::String, Position::Term),
-                Tok::Quoted { closed: false, .. }
-                | Tok::Backticked { closed: false, .. }
-                | Tok::Unreadable(_) => (HighlightKind::Invalid, Position::Term),
-                Tok::Int(_) | Tok::Float(_) | Tok::DurationNanos(_) => {
+                TokenType::Quoted { closed: true, .. } => (HighlightKind::String, Position::Term),
+                TokenType::Quoted { closed: false, .. }
+                | TokenType::Backticked { closed: false, .. }
+                | TokenType::Unreadable(_) => (HighlightKind::Invalid, Position::Term),
+                TokenType::Int(_) | TokenType::Float(_) | TokenType::DurationNanos(_) => {
                     (HighlightKind::Number, Position::Term)
                 }
-                Tok::Op(_) | Tok::Tilde => (HighlightKind::Operator, Position::Value),
-                Tok::Comma => (HighlightKind::Punctuation, Position::Value),
-                Tok::LParen if position == Position::AfterIn => {
+                TokenType::Operator(_) | TokenType::Tilde => {
+                    (HighlightKind::Operator, Position::Value)
+                }
+                TokenType::Comma => (HighlightKind::Punctuation, Position::Value),
+                TokenType::OpenParen if position == Position::AfterIn => {
                     (HighlightKind::Punctuation, Position::Value)
                 }
-                Tok::LParen if position == Position::AfterHas => {
+                TokenType::OpenParen if position == Position::AfterHas => {
                     (HighlightKind::Punctuation, Position::HasField)
                 }
-                Tok::LParen | Tok::RParen => (HighlightKind::Punctuation, Position::Term),
+                TokenType::OpenParen | TokenType::CloseParen => {
+                    (HighlightKind::Punctuation, Position::Term)
+                }
             };
             position = position_after_token;
             Highlight {
@@ -105,7 +108,7 @@ fn highlight_word(
         }
         Position::HasField => (HighlightKind::Field, Position::AfterField),
         _ if word.eq_ignore_ascii_case("has")
-            && matches!(following, Following::Token(Tok::LParen)) =>
+            && matches!(following, Following::Token(TokenType::OpenParen)) =>
         {
             (HighlightKind::Keyword, Position::AfterHas)
         }
@@ -116,8 +119,8 @@ fn highlight_word(
 
 fn ends_a_field_name(following: Following) -> bool {
     match following {
-        Following::Token(Tok::Op(_) | Tok::Tilde) | Following::Whitespace => true,
-        Following::Token(Tok::Word(word)) => word.eq_ignore_ascii_case("in"),
+        Following::Token(TokenType::Operator(_) | TokenType::Tilde) | Following::Whitespace => true,
+        Following::Token(TokenType::Word(word)) => word.eq_ignore_ascii_case("in"),
         Following::Token(_) | Following::Nothing => false,
     }
 }

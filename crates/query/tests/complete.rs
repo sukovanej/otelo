@@ -2,21 +2,21 @@ use std::fmt::Write;
 use std::path::Path;
 
 use otelo_query::{
-    Builtin, Catalog, Field, FieldHelp, FieldOrigin, FieldValues, KeyInfo, Signal, Value,
-    ValueInfo, complete,
+    BuiltinField, Catalog, Field, FieldHelp, FieldOrigin, FieldValues, KeyInfo, Signal, Value,
+    ValueInfo, ValueType, complete_query,
 };
 
 struct SmallAppCatalog;
 
-fn key(key: &str, kind: &str, count: u64) -> KeyInfo {
+fn key_info(key: &str, value_type: ValueType, count: u64) -> KeyInfo {
     KeyInfo {
         key: key.into(),
-        kind: kind.into(),
+        value_type,
         count,
     }
 }
 
-const fn value(value: Value, count: u64) -> ValueInfo {
+const fn value_info(value: Value, count: u64) -> ValueInfo {
     ValueInfo { value, count }
 }
 
@@ -24,53 +24,69 @@ impl Catalog for SmallAppCatalog {
     fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo> {
         if resource {
             return vec![
-                key("service.name", "string", 4),
-                key("host.name", "string", 3),
-                key("odd key", "string", 1),
+                key_info("service.name", ValueType::String, 4),
+                key_info("host.name", ValueType::String, 3),
+                key_info("odd key", ValueType::String, 1),
             ];
         }
         match signal {
             Signal::Logs | Signal::Spans => vec![
-                key("http.route", "string", 90),
-                key("http.response.status_code", "int", 80),
-                key("user.id", "mixed", 40),
-                key("level", "string", 2),
-                key("odd key", "string", 1),
+                key_info("http.route", ValueType::String, 90),
+                key_info("http.response.status_code", ValueType::Int, 80),
+                key_info("user.id", ValueType::Mixed, 40),
+                key_info("level", ValueType::String, 2),
+                key_info("odd key", ValueType::String, 1),
             ],
-            Signal::Metrics => vec![key("state", "string", 6), key("http.route", "string", 3)],
+            Signal::Metrics => vec![
+                key_info("state", ValueType::String, 6),
+                key_info("http.route", ValueType::String, 3),
+            ],
         }
     }
 
     fn values(&self, signal: Signal, field: &Field) -> FieldValues {
-        let text = |text: &str| Value::String(text.into());
+        let string_value = |text: &str| Value::String(text.into());
         let listed = match field {
             Field::Attribute(key) if key == "http.route" => vec![
-                value(text("/matches"), 50),
-                value(text("/languages"), 40),
-                value(text("/login"), 1),
+                value_info(string_value("/matches"), 50),
+                value_info(string_value("/languages"), 40),
+                value_info(string_value("/login"), 1),
             ],
             Field::Attribute(key) if key == "http.response.status_code" => {
-                vec![value(Value::Int(200), 70), value(Value::Int(500), 10)]
-            }
-            Field::Attribute(key) if key == "user.id" => {
-                vec![value(Value::Int(7), 30), value(text("8"), 10)]
-            }
-            Field::Resource(key) if key == "host.name" => vec![value(text("droplet"), 3)],
-            Field::Builtin(Builtin::Service) => {
-                vec![value(text("mudro"), 9), value(text("caddy"), 2)]
-            }
-            Field::Builtin(Builtin::Name) if signal == Signal::Spans => {
                 vec![
-                    value(text("GET /languages"), 20),
-                    value(text("POST /matches"), 5),
+                    value_info(Value::Int(200), 70),
+                    value_info(Value::Int(500), 10),
                 ]
             }
-            Field::Builtin(Builtin::Name) => vec![value(text("http.server.request.duration"), 4)],
+            Field::Attribute(key) if key == "user.id" => {
+                vec![
+                    value_info(Value::Int(7), 30),
+                    value_info(string_value("8"), 10),
+                ]
+            }
+            Field::Resource(key) if key == "host.name" => {
+                vec![value_info(string_value("droplet"), 3)]
+            }
+            Field::Builtin(BuiltinField::Service) => {
+                vec![
+                    value_info(string_value("mudro"), 9),
+                    value_info(string_value("caddy"), 2),
+                ]
+            }
+            Field::Builtin(BuiltinField::Name) if signal == Signal::Spans => {
+                vec![
+                    value_info(string_value("GET /languages"), 20),
+                    value_info(string_value("POST /matches"), 5),
+                ]
+            }
+            Field::Builtin(BuiltinField::Name) => {
+                vec![value_info(string_value("http.server.request.duration"), 4)]
+            }
             _ => Vec::new(),
         };
         FieldValues {
             listed,
-            many_values: matches!(field, Field::Attribute(key) if key == "user.id"),
+            has_more_values_than_listed: matches!(field, Field::Attribute(key) if key == "user.id"),
         }
     }
 }
@@ -96,16 +112,20 @@ fn describe_field_help(help: &FieldHelp) -> String {
     format!(
         "field {}: {}, {origin}\n  {}{} values: {}",
         help.name,
-        help.type_name,
+        help.value_type,
         help.distinct_value_count,
-        if help.many_values { "+" } else { "" },
+        if help.has_more_values_than_listed {
+            "+"
+        } else {
+            ""
+        },
         values.join(", ")
     )
 }
 
 fn signal_of_case_file(path: &Path) -> Signal {
-    let dir = path.parent().and_then(Path::file_name).unwrap();
-    dir.to_str().unwrap().parse().unwrap()
+    let directory = path.parent().and_then(Path::file_name).unwrap();
+    directory.to_str().unwrap().parse().unwrap()
 }
 
 #[test]
@@ -119,25 +139,25 @@ fn suggestions() {
                 .unwrap_or_else(|| panic!("{}: {line:?} has no |", path.display()));
             let input = line.replacen('|', "", 1);
             writeln!(out, "> {line}").unwrap();
-            let completion = complete(&input, cursor, signal, &SmallAppCatalog);
+            let completion = complete_query(&input, cursor, signal, &SmallAppCatalog);
             if completion.suggestions.is_empty() {
                 writeln!(out, "(none)").unwrap();
             }
-            for s in completion.suggestions {
-                let replaced = &input[s.replace.clone()];
+            for suggestion in completion.suggestions {
+                let replaced = &input[suggestion.replaced_byte_range.clone()];
                 writeln!(
                     out,
                     "{:<30} {:<8} {:<18} replaces {:?} at {}..{}",
-                    s.text,
-                    s.kind.as_str(),
-                    s.detail.unwrap_or_default(),
+                    suggestion.text,
+                    suggestion.kind.name(),
+                    suggestion.detail.unwrap_or_default(),
                     replaced,
-                    s.replace.start,
-                    s.replace.end
+                    suggestion.replaced_byte_range.start,
+                    suggestion.replaced_byte_range.end
                 )
                 .unwrap();
             }
-            if let Some(help) = &completion.field_at_cursor {
+            if let Some(help) = &completion.help_for_field_at_cursor {
                 writeln!(out, "{}", describe_field_help(help)).unwrap();
             }
             writeln!(out).unwrap();

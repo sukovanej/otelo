@@ -1,9 +1,9 @@
 use otelo_query::Signal;
-use otelo_storage::query::{GROUP_SCAN_LIMIT, LogGroups, Logs};
+use otelo_storage::query::{LogGroups, Logs, MAX_GROUPED_LOG_LINES};
 
-use super::client::{Client, note_cut, print_json};
+use super::client::{Client, OutputFormat, note_truncation, print_json};
 use super::table::{self, Table};
-use super::{QUERY_HELP, Range, join_query_words, note_unindexed};
+use super::{QUERY_HELP, RangeArgs, join_query_words, note_unindexed_keys};
 
 #[derive(clap::Args)]
 pub struct LogsArgs {
@@ -15,64 +15,76 @@ pub struct LogsArgs {
     raw: bool,
 
     #[command(flatten)]
-    range: Range,
+    range: RangeArgs,
 
     #[command(flatten)]
     client: Client,
 }
 
-pub fn logs(args: &LogsArgs) -> anyhow::Result<()> {
-    let mut params = args.range.params();
+pub fn print_logs(args: &LogsArgs) -> anyhow::Result<()> {
+    let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
-    let narrow = "narrow them with the query or --since, or raise --limit";
+    let narrowing_advice = "narrow them with the query or --since, or raise --limit";
     if args.raw {
-        let logs: Logs = args.client.get("/api/logs", &params)?;
-        if args.client.wants_table() {
-            let mut table = Table::new(&["TIME (UTC)", "SERVICE", "LEVEL", "TRACE", "BODY"]);
-            for line in &logs.logs {
-                table.row(vec![
-                    table::format_utc_time(line.logged_at),
-                    line.service.clone(),
-                    line.severity.level().into(),
-                    line.trace_id
-                        .map_or_else(|| "-".into(), |id| id.to_string()),
-                    line.body.clone(),
-                ]);
+        let answer: Logs = args.client.get("/api/logs", &params)?;
+        match args.client.choose_output_format() {
+            OutputFormat::Table => {
+                let mut table = Table::new(&["TIME (UTC)", "SERVICE", "LEVEL", "TRACE", "BODY"]);
+                for line in &answer.logs {
+                    table.add_row(vec![
+                        table::format_utc_time(line.logged_at),
+                        line.service.clone(),
+                        line.severity.level().into(),
+                        line.trace_id
+                            .map_or_else(|| "-".into(), |id| id.to_string()),
+                        line.body.clone(),
+                    ]);
+                }
+                table.print()?;
             }
-            table.print()?;
-        } else {
-            print_json(&logs)?;
+            OutputFormat::Json => print_json(&answer)?,
         }
-        note_cut(logs.truncated, &format!("More lines match; {narrow}."));
-        note_unindexed(Signal::Logs, &logs.unindexed);
+        note_truncation(
+            answer.truncated,
+            &format!("More lines match; {narrowing_advice}."),
+        );
+        note_unindexed_keys(Signal::Logs, &answer.unindexed);
         return Ok(());
     }
-    let groups: LogGroups = args.client.get("/api/logs/groups", &params)?;
-    if args.client.wants_table() {
-        let mut table = Table::new(&["COUNT", "LEVEL", "SERVICE", "LAST (UTC)", "TEMPLATE"]);
-        for group in &groups.groups {
-            table.row(vec![
-                group.count.to_string(),
-                group.severity.level().into(),
-                group.services.join(","),
-                table::format_utc_time(group.last_at),
-                group.template.clone(),
-            ]);
-            if let Some(sample) = group.samples.first().filter(|s| **s != group.template) {
-                table.add_line_under_last_row(&format!("e.g. {sample}"));
+    let answer: LogGroups = args.client.get("/api/logs/groups", &params)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let mut table = Table::new(&["COUNT", "LEVEL", "SERVICE", "LAST (UTC)", "TEMPLATE"]);
+            for group in &answer.groups {
+                table.add_row(vec![
+                    group.count.to_string(),
+                    group.severity.level().into(),
+                    group.services.join(","),
+                    table::format_utc_time(group.last_at),
+                    group.template.clone(),
+                ]);
+                if let Some(sample) = group
+                    .samples
+                    .first()
+                    .filter(|sample| **sample != group.template)
+                {
+                    table.add_line_under_last_row(&format!("e.g. {sample}"));
+                }
             }
+            table.print()?;
         }
-        table.print()?;
-    } else {
-        print_json(&groups)?;
+        OutputFormat::Json => print_json(&answer)?,
     }
-    note_cut(groups.truncated, &format!("More groups exist; {narrow}."));
-    note_cut(
-        groups.partial,
+    note_truncation(
+        answer.truncated,
+        &format!("More groups exist; {narrowing_advice}."),
+    );
+    note_truncation(
+        answer.partial,
         &format!(
-            "The groups count only the newest {GROUP_SCAN_LIMIT} lines; narrow the query or --since."
+            "The groups count only the newest {MAX_GROUPED_LOG_LINES} lines; narrow the query or --since."
         ),
     );
-    note_unindexed(Signal::Logs, &groups.unindexed);
+    note_unindexed_keys(Signal::Logs, &answer.unindexed);
     Ok(())
 }

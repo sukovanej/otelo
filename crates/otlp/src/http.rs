@@ -12,7 +12,7 @@ use flate2::read::GzDecoder;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use otelo_storage::Sender;
+use otelo_storage::BatchSender;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -22,46 +22,52 @@ use crate::{ExportRequest, MAX_REQUEST_BYTES};
 
 pub async fn serve_http(
     listener: TcpListener,
-    sender: Sender,
+    sender: BatchSender,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
-    axum::serve(listener, router(sender))
+    axum::serve(listener, build_router(sender))
         .with_graceful_shutdown(shutdown.cancelled_owned())
         .await
         .context("serve OTLP over HTTP")
 }
 
-fn router(sender: Sender) -> Router {
+fn build_router(sender: BatchSender) -> Router {
     Router::new()
-        .route("/v1/logs", post(export::<ExportLogsServiceRequest>))
-        .route("/v1/traces", post(export::<ExportTraceServiceRequest>))
-        .route("/v1/metrics", post(export::<ExportMetricsServiceRequest>))
+        .route("/v1/logs", post(receive_export::<ExportLogsServiceRequest>))
+        .route(
+            "/v1/traces",
+            post(receive_export::<ExportTraceServiceRequest>),
+        )
+        .route(
+            "/v1/metrics",
+            post(receive_export::<ExportMetricsServiceRequest>),
+        )
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
         .with_state(sender)
 }
 
-async fn export<R: ExportRequest>(
-    State(sender): State<Sender>,
+async fn receive_export<R: ExportRequest>(
+    State(sender): State<BatchSender>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let format = match Format::of(&headers) {
+    let format = match BodyFormat::from_content_type(&headers) {
         Ok(format) => format,
-        Err(refusal) => return refusal.respond(Format::Protobuf),
+        Err(refusal) => return refusal.into_response(BodyFormat::Protobuf),
     };
-    match decompress_body(&headers, body).and_then(|body| format.decode::<R>(&body)) {
-        Ok(request) => format.encode(StatusCode::OK, &request.store_and_respond(&sender)),
-        Err(refusal) => refusal.respond(format),
+    match decompress_body(&headers, body).and_then(|body| format.decode_request::<R>(&body)) {
+        Ok(request) => format.encode_response(StatusCode::OK, &request.store_and_respond(&sender)),
+        Err(refusal) => refusal.into_response(format),
     }
 }
 
 #[derive(Clone, Copy)]
-enum Format {
+enum BodyFormat {
     Protobuf,
     Json,
 }
 
-impl Format {
+impl BodyFormat {
     const fn content_type(self) -> &'static str {
         match self {
             Self::Protobuf => "application/x-protobuf",
@@ -69,7 +75,7 @@ impl Format {
         }
     }
 
-    fn of(headers: &HeaderMap) -> Result<Self, Refusal> {
+    fn from_content_type(headers: &HeaderMap) -> Result<Self, Refusal> {
         let media_type = headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
@@ -80,31 +86,37 @@ impl Format {
             .into_iter()
             .find(|format| media_type.eq_ignore_ascii_case(format.content_type()))
             .ok_or_else(|| {
-                Refusal::unsupported(format!(
+                Refusal::UnsupportedMediaType(format!(
                     "the content type has to be application/x-protobuf or application/json, not {media_type:?}"
                 ))
             })
     }
 
-    fn decode<R: ExportRequest>(self, body: &[u8]) -> Result<R, Refusal> {
+    fn decode_request<R: ExportRequest>(self, body: &[u8]) -> Result<R, Refusal> {
         match self {
-            Self::Protobuf => R::decode(body).map_err(|error| Refusal::bad(error.to_string())),
+            Self::Protobuf => {
+                R::decode(body).map_err(|error| Refusal::BadRequest(error.to_string()))
+            }
             Self::Json => {
                 let mut value = serde_json::from_slice(body)
-                    .map_err(|error| Refusal::bad(error.to_string()))?;
+                    .map_err(|error| Refusal::BadRequest(error.to_string()))?;
                 fit_json_to_decoder(&mut value);
-                R::deserialize(value).map_err(|error| Refusal::bad(error.to_string()))
+                R::deserialize(value).map_err(|error| Refusal::BadRequest(error.to_string()))
             }
         }
     }
 
-    fn encode<M: prost::Message + Serialize>(self, status: StatusCode, message: &M) -> Response {
+    fn encode_response<M: prost::Message + Serialize>(
+        self,
+        http_status: StatusCode,
+        message: &M,
+    ) -> Response {
         let body = match self {
             Self::Protobuf => message.encode_to_vec(),
             Self::Json => serde_json::to_vec(message).expect("an OTLP message serializes"),
         };
         (
-            status,
+            http_status,
             [(CONTENT_TYPE, HeaderValue::from_static(self.content_type()))],
             body,
         )
@@ -123,8 +135,8 @@ fn fit_json_to_decoder(value: &mut Value) {
                 }
                 match value {
                     Value::String(text) if key == "asInt" => {
-                        if let Ok(int) = text.parse::<i64>() {
-                            *value = int.into();
+                        if let Ok(integer) = text.parse::<i64>() {
+                            *value = integer.into();
                         }
                     }
                     _ => fit_json_to_decoder(value),
@@ -181,52 +193,50 @@ fn decompress_body(headers: &HeaderMap, body: Bytes) -> Result<Bytes, Refusal> {
             GzDecoder::new(&body[..])
                 .take(MAX_REQUEST_BYTES as u64 + 1)
                 .read_to_end(&mut inflated)
-                .map_err(|error| Refusal::bad(format!("inflate the gzip body: {error}")))?;
+                .map_err(|error| Refusal::BadRequest(format!("inflate the gzip body: {error}")))?;
             if inflated.len() > MAX_REQUEST_BYTES {
-                return Err(Refusal {
-                    status: StatusCode::PAYLOAD_TOO_LARGE,
-                    code: tonic::Code::ResourceExhausted,
-                    message: format!("the request is over {MAX_REQUEST_BYTES} bytes after gzip"),
-                });
+                return Err(Refusal::RequestTooLarge(format!(
+                    "the request is over {MAX_REQUEST_BYTES} bytes after gzip"
+                )));
             }
             Ok(inflated.into())
         }
-        Some(encoding) => Err(Refusal::unsupported(format!(
+        Some(encoding) => Err(Refusal::UnsupportedMediaType(format!(
             "the content encoding has to be gzip or none, not {encoding:?}"
         ))),
     }
 }
 
-struct Refusal {
-    status: StatusCode,
-    code: tonic::Code,
-    message: String,
+enum Refusal {
+    BadRequest(String),
+    UnsupportedMediaType(String),
+    RequestTooLarge(String),
 }
 
 impl Refusal {
-    const fn bad(message: String) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            code: tonic::Code::InvalidArgument,
-            message,
+    const fn http_status(&self) -> StatusCode {
+        match self {
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Self::RequestTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
         }
     }
 
-    const fn unsupported(message: String) -> Self {
-        Self {
-            status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            code: tonic::Code::InvalidArgument,
-            message,
+    const fn grpc_code(&self) -> tonic::Code {
+        match self {
+            Self::BadRequest(_) | Self::UnsupportedMediaType(_) => tonic::Code::InvalidArgument,
+            Self::RequestTooLarge(_) => tonic::Code::ResourceExhausted,
         }
     }
 
     // OTLP/HTTP answers a refused request with a google.rpc.Status.
-    fn respond(self, format: Format) -> Response {
-        let status = RpcStatus {
-            code: self.code as i32,
-            message: self.message,
-        };
-        format.encode(self.status, &status)
+    fn into_response(self, format: BodyFormat) -> Response {
+        let http_status = self.http_status();
+        let code = self.grpc_code() as i32;
+        let (Self::BadRequest(message)
+        | Self::UnsupportedMediaType(message)
+        | Self::RequestTooLarge(message)) = self;
+        format.encode_response(http_status, &RpcStatus { code, message })
     }
 }
 

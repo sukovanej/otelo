@@ -8,13 +8,14 @@ use otelo_storage::{IndexedAttribute, TimeRange};
 use rusqlite::Connection;
 
 use crate::day::Day;
+use crate::query::ROLLUP_SCHEMA_NAME;
 use crate::rollup::ROLLUP_FILE_NAME;
-use crate::writer::create_schema;
+use crate::writer::create_day_file_schema;
 
 // SQLite attaches 10 files at most, and the rollups are one of them.
 const MAX_ATTACHED_DAYS: usize = 9;
 
-const TABLES: [&str; 7] = [
+const DAY_FILE_TABLES: [&str; 7] = [
     "resources",
     "logs",
     "spans",
@@ -25,7 +26,7 @@ const TABLES: [&str; 7] = [
 ];
 
 pub struct Reader {
-    conn: Connection,
+    connection: Connection,
     days: Vec<Day>,
     has_rollups: bool,
     range: TimeRange,
@@ -33,19 +34,19 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn open(dir: &Path, range: TimeRange) -> anyhow::Result<Self> {
+    pub fn open(directory: &Path, range: TimeRange) -> anyhow::Result<Self> {
         let span = tracing::info_span!("open reader", days = tracing::field::Empty);
         let _entered = span.enter();
-        let conn = Connection::open_in_memory()?;
+        let connection = Connection::open_in_memory()?;
         // The empty main tables give the views their columns when no day file is attached.
-        create_schema(&conn)?;
+        create_day_file_schema(&connection)?;
         let mut days = Vec::new();
-        let mut day = Day::of(range.start_at());
-        while day <= Day::of(range.end_at() - 1) {
-            if dir.join(day.file_name()).is_file() {
+        let mut day = Day::from_unix_nanos(range.start_at());
+        while day <= Day::from_unix_nanos(range.end_at() - 1) {
+            if directory.join(day.file_name()).is_file() {
                 days.push(day);
             }
-            day = day.plus(1);
+            day = day.add_days(1);
         }
         ensure!(
             days.len() <= MAX_ATTACHED_DAYS,
@@ -54,30 +55,35 @@ impl Reader {
         );
         span.record("days", i64::try_from(days.len())?);
         for day in &days {
-            let path = dir.join(day.file_name());
-            conn.execute(
-                "ATTACH DATABASE ?1 AS ?2",
-                (path.to_string_lossy(), day.to_string()),
-            )
-            .with_context(|| format!("attach {}", path.display()))?;
+            let path = directory.join(day.file_name());
+            connection
+                .execute(
+                    "ATTACH DATABASE ?1 AS ?2",
+                    (path.to_string_lossy(), day.to_string()),
+                )
+                .with_context(|| format!("attach {}", path.display()))?;
         }
-        let rollups = dir.join(ROLLUP_FILE_NAME);
-        let has_rollups = rollups.is_file();
+        let rollup_path = directory.join(ROLLUP_FILE_NAME);
+        let has_rollups = rollup_path.is_file();
         if has_rollups {
-            conn.execute("ATTACH DATABASE ?1 AS rollup", [rollups.to_string_lossy()])
-                .with_context(|| format!("attach {}", rollups.display()))?;
+            connection
+                .execute(
+                    &format!("ATTACH DATABASE ?1 AS {ROLLUP_SCHEMA_NAME}"),
+                    [rollup_path.to_string_lossy()],
+                )
+                .with_context(|| format!("attach {}", rollup_path.display()))?;
         }
-        for table in TABLES {
+        for table in DAY_FILE_TABLES {
             let mut view =
                 format!("CREATE TEMP VIEW {table} AS SELECT NULL AS day, * FROM main.{table}");
             for day in &days {
                 write!(view, " UNION ALL SELECT '{day}', * FROM \"{day}\".{table}")?;
             }
-            conn.execute_batch(&view)?;
+            connection.execute_batch(&view)?;
         }
-        conn.pragma_update(None, "query_only", true)?;
+        connection.pragma_update(None, "query_only", true)?;
         Ok(Self {
-            conn,
+            connection,
             days,
             has_rollups,
             range,
@@ -87,7 +93,7 @@ impl Reader {
 
     pub fn set_time_limit(&self, limit: Duration) -> anyhow::Result<()> {
         let deadline = Instant::now() + limit;
-        self.conn
+        self.connection
             .progress_handler(1000, Some(move || Instant::now() > deadline))?;
         Ok(())
     }
@@ -117,8 +123,8 @@ impl Reader {
     }
 
     #[must_use]
-    pub const fn conn(&self) -> &Connection {
-        &self.conn
+    pub const fn connection(&self) -> &Connection {
+        &self.connection
     }
 }
 

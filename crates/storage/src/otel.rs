@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::RangeInclusive;
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -9,30 +10,83 @@ pub struct TraceId(pub [u8; 16]);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SpanId(pub [u8; 8]);
 
-fn parse_hex_bytes<const N: usize>(text: &str, what: &str) -> anyhow::Result<[u8; N]> {
-    if text.len() != 2 * N || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("{text:?} is not a {what} of {} hex digits", 2 * N);
+fn parse_hex_bytes<const N: usize>(text: &str, id_name: &str) -> anyhow::Result<[u8; N]> {
+    if text.len() != 2 * N || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("{text:?} is not a {id_name} of {} hex digits", 2 * N);
     }
     let mut bytes = [0; N];
-    for (i, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[2 * i..2 * i + 2], 16)?;
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[2 * index..2 * index + 2], 16)?;
     }
     Ok(bytes)
 }
 
 fn write_hex(bytes: &[u8], f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    bytes.iter().try_for_each(|b| write!(f, "{b:02x}"))
+    bytes.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
+}
+
+// OTLP counts an all-zero trace or span ID as invalid.
+fn nonzero_id_bytes<const N: usize>(bytes: &[u8]) -> Option<[u8; N]> {
+    let id: [u8; N] = bytes.try_into().ok()?;
+    id.iter().any(|&byte| byte != 0).then_some(id)
 }
 
 impl TraceId {
     pub fn parse_hex(text: &str) -> anyhow::Result<Self> {
         parse_hex_bytes(text, "trace ID").map(Self)
     }
+
+    #[must_use]
+    pub fn from_otlp_bytes(bytes: &[u8]) -> Option<Self> {
+        nonzero_id_bytes(bytes).map(Self)
+    }
 }
 
 impl SpanId {
     pub fn parse_hex(text: &str) -> anyhow::Result<Self> {
         parse_hex_bytes(text, "span ID").map(Self)
+    }
+
+    #[must_use]
+    pub fn from_otlp_bytes(bytes: &[u8]) -> Option<Self> {
+        nonzero_id_bytes(bytes).map(Self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceContext {
+    None,
+    Trace(TraceId),
+    Span { trace_id: TraceId, span_id: SpanId },
+}
+
+impl TraceContext {
+    #[must_use]
+    pub fn from_otlp_bytes(trace_id: &[u8], span_id: &[u8]) -> Self {
+        match (
+            TraceId::from_otlp_bytes(trace_id),
+            SpanId::from_otlp_bytes(span_id),
+        ) {
+            (Some(trace_id), Some(span_id)) => Self::Span { trace_id, span_id },
+            (Some(trace_id), None) => Self::Trace(trace_id),
+            (None, _) => Self::None,
+        }
+    }
+
+    #[must_use]
+    pub const fn trace_id(self) -> Option<TraceId> {
+        match self {
+            Self::None => None,
+            Self::Trace(trace_id) | Self::Span { trace_id, .. } => Some(trace_id),
+        }
+    }
+
+    #[must_use]
+    pub const fn span_id(self) -> Option<SpanId> {
+        match self {
+            Self::None | Self::Trace(_) => None,
+            Self::Span { span_id, .. } => Some(span_id),
+        }
     }
 }
 
@@ -89,6 +143,20 @@ pub enum SpanKind {
 }
 
 impl SpanKind {
+    const ALL: [Self; 6] = [
+        Self::Unspecified,
+        Self::Internal,
+        Self::Server,
+        Self::Client,
+        Self::Producer,
+        Self::Consumer,
+    ];
+
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+
     #[must_use]
     pub const fn from_number(number: i32) -> Self {
         match number {
@@ -148,6 +216,13 @@ pub enum SpanStatus {
 }
 
 impl SpanStatus {
+    const ALL: [Self; 3] = [Self::Unset, Self::Ok, Self::Error];
+
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|status| status.name() == name)
+    }
+
     #[must_use]
     pub const fn from_number(number: i32) -> Self {
         match number {
@@ -163,6 +238,15 @@ impl SpanStatus {
             Self::Unset => 0,
             Self::Ok => 1,
             Self::Error => 2,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Unset => "unset",
+            Self::Ok => "ok",
+            Self::Error => "error",
         }
     }
 
@@ -198,11 +282,11 @@ impl Severity {
     pub const WARN: Self = Self(13);
     pub const ERROR: Self = Self(17);
     pub const FATAL: Self = Self(21);
-    const HIGHEST: u8 = 24;
+    const HIGHEST_NUMBER: u8 = 24;
 
     #[must_use]
     pub const fn from_number(number: i32) -> Self {
-        if number >= 0 && number <= Self::HIGHEST as i32 {
+        if number >= 0 && number <= Self::HIGHEST_NUMBER as i32 {
             #[expect(
                 clippy::cast_possible_truncation,
                 clippy::cast_sign_loss,
@@ -232,7 +316,20 @@ impl Severity {
         }
     }
 
-    pub fn parse(text: &str) -> anyhow::Result<Self> {
+    #[must_use]
+    pub const fn level_number_range(self) -> RangeInclusive<i32> {
+        match self.0 {
+            1..=4 => 1..=4,
+            5..=8 => 5..=8,
+            9..=12 => 9..=12,
+            13..=16 => 13..=16,
+            17..=20 => 17..=20,
+            21..=24 => 21..=24,
+            _ => 0..=0,
+        }
+    }
+
+    pub fn parse_level_or_number(text: &str) -> anyhow::Result<Self> {
         Ok(match text.to_ascii_lowercase().as_str() {
             "trace" => Self::TRACE,
             "debug" => Self::DEBUG,

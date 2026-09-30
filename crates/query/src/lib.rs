@@ -5,12 +5,15 @@ mod parser;
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
 pub use complete::{
     Catalog, Completion, FieldHelp, FieldOrigin, FieldValues, HelpValue, KeyInfo, MAX_HELP_VALUES,
-    NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete,
+    NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete_query,
 };
 pub use highlight::{Highlight, HighlightKind, highlight_tokens};
-pub use parser::{ParseError, parse};
+pub use parser::{ParseError, parse_query};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Signal {
@@ -23,7 +26,7 @@ impl Signal {
     pub const ALL: [Self; 3] = [Self::Logs, Self::Spans, Self::Metrics];
 
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Logs => "logs",
             Self::Spans => "spans",
@@ -32,8 +35,8 @@ impl Signal {
     }
 
     #[must_use]
-    pub const fn builtins(self) -> &'static [Builtin] {
-        use Builtin::{
+    pub const fn builtin_fields(self) -> &'static [BuiltinField] {
+        use BuiltinField::{
             Body, Duration, Error, Kind, Level, Name, Root, Service, Source, SpanId, Status,
             TraceId, Unit,
         };
@@ -53,19 +56,19 @@ impl std::str::FromStr for Signal {
     fn from_str(text: &str) -> Result<Self, String> {
         Self::ALL
             .into_iter()
-            .find(|signal| signal.as_str() == text)
+            .find(|signal| signal.name() == text)
             .ok_or_else(|| format!("{text:?} is not a signal: logs, spans, or metrics"))
     }
 }
 
 impl fmt::Display for Signal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(self.name())
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Builtin {
+pub enum BuiltinField {
     Service,
     Level,
     Body,
@@ -81,7 +84,7 @@ pub enum Builtin {
     Unit,
 }
 
-impl Builtin {
+impl BuiltinField {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -102,16 +105,16 @@ impl Builtin {
     }
 
     #[must_use]
-    pub fn find(signal: Signal, name: &str) -> Option<Self> {
+    pub fn find_by_name(signal: Signal, name: &str) -> Option<Self> {
         signal
-            .builtins()
+            .builtin_fields()
             .iter()
             .copied()
-            .find(|builtin| builtin.name() == name)
+            .find(|builtin_field| builtin_field.name() == name)
     }
 
     #[must_use]
-    pub const fn values(self, signal: Signal) -> &'static [&'static str] {
+    pub const fn fixed_values(self, signal: Signal) -> &'static [&'static str] {
         match (self, signal) {
             (Self::Level, _) => &["trace", "debug", "info", "warn", "error", "fatal"],
             (Self::Kind, Signal::Spans) => {
@@ -125,11 +128,11 @@ impl Builtin {
     }
 
     #[must_use]
-    pub const fn type_name(self) -> &'static str {
+    pub const fn value_type(self) -> ValueType {
         match self {
-            Self::Error | Self::Root => "bool",
-            Self::Duration => "duration",
-            _ => "string",
+            Self::Error | Self::Root => ValueType::Bool,
+            Self::Duration => ValueType::Duration,
+            _ => ValueType::String,
         }
     }
 
@@ -169,19 +172,78 @@ impl Builtin {
     }
 
     #[must_use]
-    pub const fn ordered(self) -> bool {
+    pub const fn is_ordered(self) -> bool {
         matches!(self, Self::Level | Self::Duration)
     }
 
     #[must_use]
-    pub const fn text(self) -> bool {
+    pub const fn is_text(self) -> bool {
         matches!(self, Self::Body | Self::Name | Self::Service | Self::Source)
+    }
+}
+
+/// The type of the values of a field. `mixed` when the values of an
+/// attribute have more than one type, and `duration` only for a built-in
+/// field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ValueType {
+    Null,
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+    Mixed,
+    Duration,
+}
+
+impl ValueType {
+    pub const ALL: [Self; 9] = [
+        Self::Null,
+        Self::Bool,
+        Self::Int,
+        Self::Float,
+        Self::String,
+        Self::Array,
+        Self::Object,
+        Self::Mixed,
+        Self::Duration,
+    ];
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Null => "null",
+            Self::Bool => "bool",
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::String => "string",
+            Self::Array => "array",
+            Self::Object => "object",
+            Self::Mixed => "mixed",
+            Self::Duration => "duration",
+        }
+    }
+
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|value_type| value_type.name() == name)
+    }
+}
+
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Field {
-    Builtin(Builtin),
+    Builtin(BuiltinField),
     Attribute(String),
     Resource(String),
 }
@@ -189,12 +251,14 @@ pub enum Field {
 impl fmt::Display for Field {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Builtin(builtin) => f.write_str(builtin.name()),
+            Self::Builtin(builtin_field) => f.write_str(builtin_field.name()),
             Self::Attribute(key) if lexer::needs_no_backticks(key) => {
                 if key.starts_with("resource.")
                     || key.starts_with("attr.")
                     || lexer::is_keyword(key)
-                    || Signal::ALL.iter().any(|&s| Builtin::find(s, key).is_some())
+                    || Signal::ALL
+                        .iter()
+                        .any(|&signal| BuiltinField::find_by_name(signal, key).is_some())
                 {
                     write!(f, "attr.{key}")
                 } else {
@@ -208,7 +272,7 @@ impl fmt::Display for Field {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Op {
+pub enum Operator {
     Eq,
     Ne,
     Lt,
@@ -217,9 +281,9 @@ pub enum Op {
     Ge,
 }
 
-impl Op {
+impl Operator {
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub const fn symbol(self) -> &'static str {
         match self {
             Self::Eq => "=",
             Self::Ne => "!=",
@@ -243,119 +307,144 @@ pub enum Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::String(text) => write!(f, "{}", quote(text)),
-            Self::Int(n) => write!(f, "{n}"),
-            Self::Float(x) => write!(f, "{x:?}"),
-            Self::Bool(b) => write!(f, "{b}"),
-            Self::Duration(ns) => write!(f, "{ns}ns"),
+            Self::String(text) => write!(f, "{}", quote_string(text)),
+            Self::Int(integer) => write!(f, "{integer}"),
+            Self::Float(float) => write!(f, "{float:?}"),
+            Self::Bool(flag) => write!(f, "{flag}"),
+            Self::Duration(nanos) => write!(f, "{nanos}ns"),
         }
     }
 }
 
 #[must_use]
-pub fn quote(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for c in text.chars() {
-        match c {
+pub fn quote_string(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for character in text.chars() {
+        match character {
             '"' | '\\' => {
-                out.push('\\');
-                out.push(c);
+                quoted.push('\\');
+                quoted.push(character);
             }
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(c),
+            '\n' => quoted.push_str("\\n"),
+            '\t' => quoted.push_str("\\t"),
+            _ => quoted.push(character),
         }
     }
-    out.push('"');
-    out
+    quoted.push('"');
+    quoted
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Expr {
+pub enum Expression {
     And(Vec<Self>),
     Or(Vec<Self>),
     Not(Box<Self>),
-    Compare { field: Field, op: Op, value: Value },
-    In { field: Field, values: Vec<Value> },
-    Contains { field: Field, text: String },
+    Compare {
+        field: Field,
+        operator: Operator,
+        value: Value,
+    },
+    In {
+        field: Field,
+        values: Vec<Value>,
+    },
+    Contains {
+        field: Field,
+        text: String,
+    },
     Has(Field),
 }
 
-impl Expr {
-    pub fn visit_fields<'a>(&'a self, each: &mut impl FnMut(&'a Field)) {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Precedence {
+    TopLevel,
+    Or,
+    And,
+    Not,
+}
+
+impl Expression {
+    pub fn visit_fields<'a>(&'a self, visit_field: &mut impl FnMut(&'a Field)) {
         match self {
             Self::And(terms) | Self::Or(terms) => {
                 for term in terms {
-                    term.visit_fields(each);
+                    term.visit_fields(visit_field);
                 }
             }
-            Self::Not(term) => term.visit_fields(each),
+            Self::Not(term) => term.visit_fields(visit_field),
             Self::Compare { field, .. }
             | Self::In { field, .. }
             | Self::Contains { field, .. }
-            | Self::Has(field) => each(field),
+            | Self::Has(field) => visit_field(field),
         }
     }
 
-    fn fmt_in(&self, f: &mut fmt::Formatter<'_>, parent: u8) -> fmt::Result {
-        let (terms, join, level) = match self {
-            Self::Or(terms) => (terms, " OR ", 1),
-            Self::And(terms) => (terms, " AND ", 2),
+    fn fmt_inside(&self, f: &mut fmt::Formatter<'_>, parent_precedence: Precedence) -> fmt::Result {
+        let (terms, separator, precedence) = match self {
+            Self::Or(terms) => (terms, " OR ", Precedence::Or),
+            Self::And(terms) => (terms, " AND ", Precedence::And),
             Self::Not(term) => {
                 f.write_str("NOT ")?;
-                return term.fmt_in(f, 3);
+                return term.fmt_inside(f, Precedence::Not);
             }
-            Self::Compare { field, op, value } => {
-                return write!(f, "{field} {} {value}", op.as_str());
+            Self::Compare {
+                field,
+                operator,
+                value,
+            } => {
+                return write!(f, "{field} {} {value}", operator.symbol());
             }
             Self::In { field, values } => {
                 let values: Vec<String> = values.iter().map(ToString::to_string).collect();
                 return write!(f, "{field} in ({})", values.join(", "));
             }
-            Self::Contains { field, text } => return write!(f, "{field} ~ {}", quote(text)),
+            Self::Contains { field, text } => return write!(f, "{field} ~ {}", quote_string(text)),
             Self::Has(field) => return write!(f, "has({field})"),
         };
-        let grouped = level < parent;
-        if grouped {
+        let needs_parentheses = precedence < parent_precedence;
+        if needs_parentheses {
             f.write_str("(")?;
         }
-        for (i, term) in terms.iter().enumerate() {
-            if i > 0 {
-                f.write_str(join)?;
+        for (index, term) in terms.iter().enumerate() {
+            if index > 0 {
+                f.write_str(separator)?;
             }
-            term.fmt_in(f, level)?;
+            term.fmt_inside(f, precedence)?;
         }
-        if grouped {
+        if needs_parentheses {
             f.write_str(")")?;
         }
         Ok(())
     }
 }
 
-impl fmt::Display for Expr {
+impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_in(f, 0)
+        self.fmt_inside(f, Precedence::TopLevel)
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Query {
     pub signal: Signal,
-    pub expr: Option<Expr>,
+    pub expression: Option<Expression>,
 }
 
 impl Query {
     #[must_use]
     pub const fn all(signal: Signal) -> Self {
-        Self { signal, expr: None }
+        Self {
+            signal,
+            expression: None,
+        }
     }
 
     #[must_use]
     pub fn fields(&self) -> Vec<&Field> {
         let mut fields = Vec::new();
-        if let Some(expr) = &self.expr {
-            expr.visit_fields(&mut |field| {
+        if let Some(expression) = &self.expression {
+            expression.visit_fields(&mut |field| {
                 if !fields.contains(&field) {
                     fields.push(field);
                 }
@@ -367,6 +456,8 @@ impl Query {
 
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.expr.as_ref().map_or(Ok(()), |expr| expr.fmt(f))
+        self.expression
+            .as_ref()
+            .map_or(Ok(()), |expression| expression.fmt(f))
     }
 }

@@ -12,7 +12,7 @@
     "/api/attributes": {
       "get": {
         "summary": "The attribute keys of the records of a signal and of their resources over\nthe retention, the most common first, with their types.",
-        "operationId": "attributes",
+        "operationId": "list_attribute_keys",
         "parameters": [
           {
             "name": "signal",
@@ -50,7 +50,7 @@
     "/api/complete": {
       "get": {
         "summary": "Suggests the fields, operators, values, and keywords that can go at the\ncursor of a query, from the attributes and values of the retention, and\ndescribes the field of the term the cursor is in.",
-        "operationId": "complete",
+        "operationId": "complete_query",
         "parameters": [
           {
             "name": "signal",
@@ -133,7 +133,7 @@
             "description": "`logs` or `spans`",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Signal"
+              "$ref": "#/components/schemas/IndexedSignal"
             }
           },
           {
@@ -179,7 +179,7 @@
             "description": "`logs` or `spans`",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Signal"
+              "$ref": "#/components/schemas/IndexedSignal"
             }
           },
           {
@@ -229,7 +229,7 @@
     "/api/logs": {
       "get": {
         "summary": "Log lines, newest first.",
-        "operationId": "logs",
+        "operationId": "list_logs",
         "parameters": [
           {
             "name": "since",
@@ -296,7 +296,7 @@
     "/api/logs/groups": {
       "get": {
         "summary": "Log lines grouped by message template, the largest group first. The\ntemplate replaces numbers, UUIDs, hex IDs, and quoted strings with\nplaceholders.",
-        "operationId": "log_groups",
+        "operationId": "list_log_groups",
         "parameters": [
           {
             "name": "since",
@@ -363,7 +363,7 @@
     "/api/metrics": {
       "get": {
         "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the labels, and\nthe resource. A range of metrics can go back 90 days, further than the\nlogs and the spans.",
-        "operationId": "metrics",
+        "operationId": "list_metrics",
         "parameters": [
           {
             "name": "since",
@@ -430,7 +430,7 @@
     "/api/metrics/{name}": {
       "get": {
         "summary": "The series of one metric, each in buckets of one step with the count, the\nminimum, the average, the maximum, and the last value, the rate of a\ncounter, and the distribution of a histogram.",
-        "operationId": "metric",
+        "operationId": "get_metric_series",
         "parameters": [
           {
             "name": "name",
@@ -524,7 +524,7 @@
     "/api/services": {
       "get": {
         "summary": "The services that sent spans or logs in the range, the most requests\nfirst. A request is a span that enters the service: a root span, or a\nspan of the server or the consumer kind. Each service has its requests and\nits logs over the range and in buckets of one step.",
-        "operationId": "services",
+        "operationId": "list_services",
         "parameters": [
           {
             "name": "since",
@@ -591,7 +591,7 @@
     "/api/services/{name}": {
       "get": {
         "summary": "One service: its requests and logs over the range and in buckets of one\nstep, and its requests by span name, the most first. A service without\ntelemetry in the range has none of either.",
-        "operationId": "service",
+        "operationId": "get_service",
         "parameters": [
           {
             "name": "name",
@@ -667,7 +667,7 @@
     "/api/services/{name}/call": {
       "get": {
         "summary": "The calls of a service to one target that do one thing, of one kind:\nover the range and in buckets of one step, the attributes of the newest\none, and the newest 50. A call without spans in the range has none.",
-        "operationId": "call",
+        "operationId": "get_call",
         "parameters": [
           {
             "name": "name",
@@ -787,7 +787,7 @@
     "/api/services/{name}/calls": {
       "get": {
         "summary": "The calls a service makes, by what they go to: a span of the client or\nthe producer kind, or of a database system. A target is a database, a\nhost, an RPC service, or a message destination, read from the\nOpenTelemetry attributes of the call. Each target has its calls over the\nrange and in buckets of one step, and by span name and kind, the most time\nfirst. What a call does is its query with the values taken out, the\nmethod and the path of an HTTP request with its ids taken out, or else\nits span name.",
-        "operationId": "calls",
+        "operationId": "list_calls",
         "parameters": [
           {
             "name": "name",
@@ -863,7 +863,7 @@
     "/api/services/{name}/operation": {
       "get": {
         "summary": "One operation of a service: its requests over the range and in buckets of\none step, and the attributes of its newest request. An operation without\nrequests in the range has none.",
-        "operationId": "operation",
+        "operationId": "get_operation",
         "parameters": [
           {
             "name": "name",
@@ -948,7 +948,7 @@
     "/api/spans": {
       "get": {
         "summary": "Spans, newest first.",
-        "operationId": "spans",
+        "operationId": "list_spans",
         "parameters": [
           {
             "name": "since",
@@ -1015,7 +1015,7 @@
     "/api/sql": {
       "post": {
         "summary": "Runs a read-only SQL query over the day files of the range.",
-        "operationId": "sql",
+        "operationId": "run_sql",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1053,7 +1053,7 @@
     "/api/traces": {
       "get": {
         "summary": "Traces with a span that the query keeps, by their root span, newest first.",
-        "operationId": "traces",
+        "operationId": "list_traces",
         "parameters": [
           {
             "name": "since",
@@ -1120,7 +1120,7 @@
     "/api/traces/{trace_id}": {
       "get": {
         "summary": "One trace: its spans by start time, and the logs that carry its ID.",
-        "operationId": "trace",
+        "operationId": "get_trace",
         "parameters": [
           {
             "name": "trace_id",
@@ -1220,7 +1220,7 @@
             "type": "string"
           },
           "type": {
-            "type": "string",
+            "$ref": "#/components/schemas/ValueType",
             "description": "The JSON type of the values: `string`, `int`, `float`, `bool`,\n`array`, `object`, or `mixed`."
           }
         }
@@ -1566,9 +1566,7 @@
           "counts",
           "count",
           "sum",
-          "p50",
-          "p90",
-          "p99"
+          "percentiles"
         ],
         "properties": {
           "bounds": {
@@ -1592,27 +1590,16 @@
               "minimum": 0
             }
           },
-          "p50": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double",
-            "description": "Estimates of the median and the 90th and 99th percentiles, by linear\ninterpolation inside a bucket. `None` without values."
-          },
-          "p90": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "p99": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
+          "percentiles": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Percentiles",
+                "description": "Estimates of the median and the 90th and 99th percentiles, by linear\ninterpolation inside a bucket. `None` without values."
+              }
+            ]
           },
           "sum": {
             "type": [
@@ -1636,72 +1623,117 @@
         }
       },
       "FieldBody": {
-        "type": "object",
-        "description": "A field of a query: where it comes from, its type, and its values.",
-        "required": [
-          "name",
-          "source",
-          "type",
-          "count",
-          "description",
-          "values",
-          "distinct_values",
-          "many_values"
-        ],
-        "properties": {
-          "count": {
-            "type": [
-              "integer",
-              "null"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FieldOriginBody"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "type",
+              "values",
+              "distinct_values",
+              "many_values"
             ],
-            "format": "int64",
-            "description": "How many records have the attribute, or how many resources for an\nattribute of a resource. Missing for a built-in field, which every\nrecord has.",
-            "minimum": 0
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What a built-in field holds. Missing for an attribute."
-          },
-          "distinct_values": {
-            "type": "integer",
-            "description": "How many distinct values the daemon knows.",
-            "minimum": 0
-          },
-          "many_values": {
-            "type": "boolean",
-            "description": "Whether the field has more distinct values than the daemon keeps, so\n`distinct_values` counts only some of them."
-          },
-          "name": {
-            "type": "string",
-            "description": "The field as a query writes it."
-          },
-          "source": {
-            "$ref": "#/components/schemas/FieldSource"
-          },
-          "type": {
-            "type": "string",
-            "description": "The type of the values. Of an attribute: `string`, `int`, `float`,\n`bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,\n`bool`, or `duration`."
-          },
-          "values": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FieldValueBody"
-            },
-            "description": "The values, the most common first, and 10 at most. For a built-in\nfield with fixed values, those, in their order."
+            "properties": {
+              "distinct_values": {
+                "type": "integer",
+                "description": "How many distinct values the daemon knows.",
+                "minimum": 0
+              },
+              "many_values": {
+                "type": "boolean",
+                "description": "Whether the field has more distinct values than the daemon keeps, so\n`distinct_values` counts only some of them."
+              },
+              "name": {
+                "type": "string",
+                "description": "The field as a query writes it."
+              },
+              "type": {
+                "$ref": "#/components/schemas/ValueType",
+                "description": "The type of the values. Of an attribute: `string`, `int`, `float`,\n`bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,\n`bool`, or `duration`."
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FieldValueBody"
+                },
+                "description": "The values, the most common first, and 10 at most. For a built-in\nfield with fixed values, those, in their order."
+              }
+            }
           }
-        }
+        ],
+        "description": "A field of a query: where it comes from, its type, and its values."
       },
-      "FieldSource": {
-        "type": "string",
-        "description": "Where a field comes from: the query language, the attributes of the\nrecords, or the attributes of their resources.",
-        "enum": [
-          "builtin",
-          "attribute",
-          "resource"
-        ]
+      "FieldOriginBody": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A field of the query language, which every record has.",
+            "required": [
+              "description",
+              "source"
+            ],
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "What the field holds."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "builtin"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An attribute of the records.",
+            "required": [
+              "count",
+              "source"
+            ],
+            "properties": {
+              "count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "How many records have the attribute.",
+                "minimum": 0
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "attribute"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An attribute of the resources of the records.",
+            "required": [
+              "count",
+              "source"
+            ],
+            "properties": {
+              "count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "How many resources have the attribute.",
+                "minimum": 0
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "resource"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where a field comes from: the query language, the attributes of the\nrecords, or the attributes of their resources."
       },
       "FieldValueBody": {
         "type": "object",
@@ -1736,7 +1768,7 @@
             "type": "string"
           },
           "signal": {
-            "$ref": "#/components/schemas/Signal",
+            "$ref": "#/components/schemas/IndexedSignal",
             "description": "`logs` or `spans`."
           }
         }
@@ -1755,6 +1787,14 @@
             }
           }
         }
+      },
+      "IndexedSignal": {
+        "type": "string",
+        "description": "The kind of record whose attributes can have an index, as the API names\nit.",
+        "enum": [
+          "logs",
+          "spans"
+        ]
       },
       "Latency": {
         "type": "object",
@@ -1905,7 +1945,7 @@
             "description": "The OpenTelemetry severity number, from 1 (TRACE) to 24 (FATAL), or 0\nwhen the source set none."
           },
           "source": {
-            "type": "string",
+            "$ref": "#/components/schemas/LogSource",
             "description": "`otlp`, or the service log source that read the line."
           },
           "span_id": {
@@ -1921,6 +1961,13 @@
             ]
           }
         }
+      },
+      "LogSource": {
+        "type": "string",
+        "description": "How a log line arrived.",
+        "enum": [
+          "otlp"
+        ]
       },
       "Logs": {
         "type": "object",
@@ -2155,6 +2202,29 @@
             "type": "integer",
             "format": "int64",
             "description": "The length of a bucket in nanoseconds."
+          }
+        }
+      },
+      "Percentiles": {
+        "type": "object",
+        "description": "Percentiles of the values a histogram recorded.",
+        "required": [
+          "p50",
+          "p90",
+          "p99"
+        ],
+        "properties": {
+          "p50": {
+            "type": "number",
+            "format": "double"
+          },
+          "p90": {
+            "type": "number",
+            "format": "double"
+          },
+          "p99": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -2926,6 +2996,21 @@
             "description": "The attributes the query compares that have no index."
           }
         }
+      },
+      "ValueType": {
+        "type": "string",
+        "description": "The type of the values of a field. `mixed` when the values of an\nattribute have more than one type, and `duration` only for a built-in\nfield.",
+        "enum": [
+          "null",
+          "bool",
+          "int",
+          "float",
+          "string",
+          "array",
+          "object",
+          "mixed",
+          "duration"
+        ]
       }
     }
   }

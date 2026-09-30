@@ -1,3 +1,5 @@
+use std::fmt;
+
 use axum::Json;
 use axum::extract::{Path, State};
 use otelo_storage::{IndexedAttribute, IndexedSignal};
@@ -5,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::Api;
-use crate::catalog::SignalName;
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::parse_signal;
 
@@ -18,8 +19,37 @@ pub struct IndexList {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexBody {
     /// `logs` or `spans`.
-    pub signal: SignalName,
+    pub signal: IndexedSignalName,
     pub key: String,
+}
+
+/// The kind of record whose attributes can have an index, as the API names
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[schema(as = IndexedSignal)]
+pub enum IndexedSignalName {
+    Logs,
+    Spans,
+}
+
+impl From<IndexedSignal> for IndexedSignalName {
+    fn from(signal: IndexedSignal) -> Self {
+        match signal {
+            IndexedSignal::Logs => Self::Logs,
+            IndexedSignal::Spans => Self::Spans,
+        }
+    }
+}
+
+impl fmt::Display for IndexedSignalName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let signal = match self {
+            Self::Logs => IndexedSignal::Logs,
+            Self::Spans => IndexedSignal::Spans,
+        };
+        signal.fmt(f)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -29,14 +59,14 @@ enum IndexChange {
 }
 
 impl Api {
-    fn index_list(&self) -> IndexList {
+    fn list_indexed_attributes(&self) -> IndexList {
         IndexList {
             indexes: self
                 .storage
                 .indexed_attributes()
                 .into_iter()
                 .map(|attribute| IndexBody {
-                    signal: attribute.signal().signal().into(),
+                    signal: attribute.signal().into(),
                     key: attribute.key().to_owned(),
                 })
                 .collect(),
@@ -51,7 +81,7 @@ impl Api {
     ) -> ApiResult<IndexList> {
         let attribute = IndexedSignal::try_from(parse_signal(signal)?)
             .and_then(|signal| IndexedAttribute::new(signal, key))
-            .map_err(|e| ApiError::bad_request(&e))?;
+            .map_err(|error| ApiError::bad_request(&error))?;
         let api = self.clone();
         let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || -> Result<IndexList, ApiError> {
@@ -68,10 +98,10 @@ impl Api {
                     }
                 }
             }
-            Ok(api.index_list())
+            Ok(api.list_indexed_attributes())
         })
         .await
-        .map_err(|e| ApiError::from(anyhow::Error::from(e)))?
+        .map_err(|error| ApiError::from(anyhow::Error::from(error)))?
         .map(Json)
     }
 }
@@ -83,7 +113,7 @@ impl Api {
     responses((status = 200, body = IndexList)),
 )]
 pub async fn list_indexes(State(api): State<Api>) -> Json<IndexList> {
-    Json(api.index_list())
+    Json(api.list_indexed_attributes())
 }
 
 /// Indexes an attribute of the logs or of the spans in every day file, so a
@@ -93,7 +123,7 @@ pub async fn list_indexes(State(api): State<Api>) -> Json<IndexList> {
     put,
     path = "/api/indexes/{signal}/{key}",
     params(
-        ("signal" = SignalName, Path, description = "`logs` or `spans`"),
+        ("signal" = IndexedSignalName, Path, description = "`logs` or `spans`"),
         ("key" = String, Path, description = "The attribute key, such as `user.id`"),
     ),
     responses(
@@ -113,7 +143,7 @@ pub async fn add_index(
     delete,
     path = "/api/indexes/{signal}/{key}",
     params(
-        ("signal" = SignalName, Path, description = "`logs` or `spans`"),
+        ("signal" = IndexedSignalName, Path, description = "`logs` or `spans`"),
         ("key" = String, Path, description = "The attribute key, such as `user.id`"),
     ),
     responses(

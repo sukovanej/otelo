@@ -9,12 +9,11 @@ pub enum IndexedSignal {
     Spans,
 }
 
-impl IndexedSignal {
-    #[must_use]
-    pub const fn signal(self) -> Signal {
-        match self {
-            Self::Logs => Signal::Logs,
-            Self::Spans => Signal::Spans,
+impl From<IndexedSignal> for Signal {
+    fn from(signal: IndexedSignal) -> Self {
+        match signal {
+            IndexedSignal::Logs => Self::Logs,
+            IndexedSignal::Spans => Self::Spans,
         }
     }
 }
@@ -33,7 +32,7 @@ impl TryFrom<Signal> for IndexedSignal {
 
 impl fmt::Display for IndexedSignal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.signal().fmt(f)
+        Signal::from(*self).fmt(f)
     }
 }
 

@@ -1,30 +1,30 @@
 use std::ops::Range;
 
-use crate::Op;
+use crate::Operator;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Tok {
+pub enum TokenType {
     Word(String),
     Quoted { text: String, closed: bool },
     Backticked { text: String, closed: bool },
     Int(i64),
     Float(f64),
     DurationNanos(i64),
-    LParen,
-    RParen,
+    OpenParen,
+    CloseParen,
     Comma,
-    Op(Op),
+    Operator(Operator),
     Tilde,
     Unreadable(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
-    pub tok: Tok,
+    pub token_type: TokenType,
     pub byte_range: Range<usize>,
 }
 
-const UNITS: [(&str, f64); 8] = [
+const NANOS_PER_DURATION_UNIT: [(&str, f64); 8] = [
     ("ns", 1.0),
     ("us", 1e3),
     ("µs", 1e3),
@@ -35,15 +35,15 @@ const UNITS: [(&str, f64); 8] = [
     ("d", 86_400e9),
 ];
 
-pub fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || "_.-/:@".contains(c)
+pub fn is_word_char(character: char) -> bool {
+    character.is_alphanumeric() || "_.-/:@".contains(character)
 }
 
 pub fn needs_no_backticks(key: &str) -> bool {
     let mut chars = key.chars();
     chars
         .next()
-        .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '@')
+        .is_some_and(|first| first.is_alphabetic() || first == '_' || first == '@')
         && chars.all(is_word_char)
 }
 
@@ -56,64 +56,66 @@ pub fn is_keyword(word: &str) -> bool {
 pub fn lex_tokens(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = input.char_indices().peekable();
-    while let Some(&(start, c)) = chars.peek() {
-        if c.is_whitespace() {
+    while let Some(&(start, character)) = chars.peek() {
+        if character.is_whitespace() {
             chars.next();
             continue;
         }
         chars.next();
-        let next = chars.peek().map(|&(_, c)| c);
-        let tok = match c {
-            '(' => Tok::LParen,
-            ')' => Tok::RParen,
-            ',' => Tok::Comma,
-            '~' => Tok::Tilde,
+        let next_character = chars.peek().map(|&(_, character)| character);
+        let token_type = match character {
+            '(' => TokenType::OpenParen,
+            ')' => TokenType::CloseParen,
+            ',' => TokenType::Comma,
+            '~' => TokenType::Tilde,
             '=' => {
-                if next == Some('=') {
+                if next_character == Some('=') {
                     chars.next();
                 }
-                Tok::Op(Op::Eq)
+                TokenType::Operator(Operator::Eq)
             }
-            '!' if next == Some('=') => {
+            '!' if next_character == Some('=') => {
                 chars.next();
-                Tok::Op(Op::Ne)
+                TokenType::Operator(Operator::Ne)
             }
             '<' | '>' => {
-                let or_equal = next == Some('=');
+                let or_equal = next_character == Some('=');
                 if or_equal {
                     chars.next();
                 }
-                Tok::Op(match (c, or_equal) {
-                    ('<', false) => Op::Lt,
-                    ('<', true) => Op::Le,
-                    ('>', false) => Op::Gt,
-                    _ => Op::Ge,
+                TokenType::Operator(match (character, or_equal) {
+                    ('<', false) => Operator::Lt,
+                    ('<', true) => Operator::Le,
+                    ('>', false) => Operator::Gt,
+                    _ => Operator::Ge,
                 })
             }
             '"' | '\'' | '`' => {
-                let (text, closed) = read_quoted_text(&mut chars, c);
-                if c == '`' {
-                    Tok::Backticked { text, closed }
+                let (text, closed) = read_quoted_text(&mut chars, character);
+                if character == '`' {
+                    TokenType::Backticked { text, closed }
                 } else {
-                    Tok::Quoted { text, closed }
+                    TokenType::Quoted { text, closed }
                 }
             }
-            c if is_word_char(c) => {
-                let mut end = start + c.len_utf8();
-                while let Some(&(i, c)) = chars.peek() {
-                    if !is_word_char(c) {
+            _ if is_word_char(character) => {
+                let mut end = start + character.len_utf8();
+                while let Some(&(byte_offset, character)) = chars.peek() {
+                    if !is_word_char(character) {
                         break;
                     }
-                    end = i + c.len_utf8();
+                    end = byte_offset + character.len_utf8();
                     chars.next();
                 }
                 classify_word(&input[start..end])
             }
-            c => Tok::Unreadable(format!("unexpected {c:?}")),
+            _ => TokenType::Unreadable(format!("unexpected {character:?}")),
         };
-        let end = chars.peek().map_or(input.len(), |&(i, _)| i);
+        let end = chars
+            .peek()
+            .map_or(input.len(), |&(byte_offset, _)| byte_offset);
         tokens.push(Token {
-            tok,
+            token_type,
             byte_range: start..end,
         });
     }
@@ -125,51 +127,54 @@ fn read_quoted_text(
     closing_quote: char,
 ) -> (String, bool) {
     let mut text = String::new();
-    while let Some((_, c)) = chars.next() {
-        match c {
+    while let Some((_, character)) = chars.next() {
+        match character {
             '\\' => match chars.next() {
                 Some((_, 'n')) => text.push('\n'),
                 Some((_, 't')) => text.push('\t'),
-                Some((_, c)) => text.push(c),
+                Some((_, escaped)) => text.push(escaped),
                 None => return (text, false),
             },
-            c if c == closing_quote => return (text, true),
-            c => text.push(c),
+            _ if character == closing_quote => return (text, true),
+            _ => text.push(character),
         }
     }
     (text, false)
 }
 
-fn classify_word(text: &str) -> Tok {
+fn classify_word(text: &str) -> TokenType {
     let digits = text.strip_prefix('-').unwrap_or(text);
-    if !digits.starts_with(|c: char| c.is_ascii_digit()) {
-        return Tok::Word(text.to_owned());
+    if !digits.starts_with(|character: char| character.is_ascii_digit()) {
+        return TokenType::Word(text.to_owned());
     }
-    if digits.bytes().all(|b| b.is_ascii_digit()) {
+    if digits.bytes().all(|byte| byte.is_ascii_digit()) {
         return text.parse().map_or_else(
-            |_| Tok::Unreadable(format!("{text} is too large")),
-            Tok::Int,
+            |_| TokenType::Unreadable(format!("{text} is too large")),
+            TokenType::Int,
         );
     }
     let number_end = digits
-        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
         .unwrap_or(digits.len());
     let (number, unit) = digits.split_at(number_end);
     let Ok(value) = number.parse::<f64>() else {
-        return Tok::Word(text.to_owned());
+        return TokenType::Word(text.to_owned());
     };
     if unit.is_empty() {
-        return Tok::Float(if text.starts_with('-') { -value } else { value });
+        return TokenType::Float(if text.starts_with('-') { -value } else { value });
     }
-    match UNITS.iter().find(|(name, _)| *name == unit) {
-        Some((_, factor)) if !text.starts_with('-') => {
+    match NANOS_PER_DURATION_UNIT
+        .iter()
+        .find(|(unit_name, _)| *unit_name == unit)
+    {
+        Some((_, nanos_per_unit)) if !text.starts_with('-') => {
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "rounded to whole nanoseconds"
             )]
-            let ns = (value * factor).round() as i64;
-            Tok::DurationNanos(ns)
+            let nanos = (value * nanos_per_unit).round() as i64;
+            TokenType::DurationNanos(nanos)
         }
-        _ => Tok::Word(text.to_owned()),
+        _ => TokenType::Word(text.to_owned()),
     }
 }

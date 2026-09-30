@@ -1,23 +1,29 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
+use std::ops::ControlFlow;
 
-use otelo_query::quote;
+use otelo_query::quote_string;
 use otelo_storage::query::{
     CallDetail, CallOperation, Calls, OperationDetail, RequestBucket, Target, TargetKey,
-    TargetType, path_template, query_template,
+    TargetType, replace_ids_in_path, replace_values_in_query,
 };
 use otelo_storage::{SpanKind, SpanStatus};
 use rusqlite::types::Value;
 
-use super::services::{OperationTally, RequestTally, SpanLocation};
+use super::services::{NewestRequest, OperationTally, RequestTally, SpanLocation};
 use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
 
-// An in-process database such as SQLite may put its spans on the internal
-// kind, so a database system marks a call too.
-const CALL_SPAN_CLAUSE: &str = "(s.kind IN (3, 4)
+// An in-process database such as SQLite may put its spans on the internal kind, so a database system marks a call too.
+fn call_span_condition() -> String {
+    format!(
+        "(s.kind IN ({}, {})
     OR json_extract(s.attributes, '$.\"db.system.name\"') IS NOT NULL
-    OR json_extract(s.attributes, '$.\"db.system\"') IS NOT NULL)";
+    OR json_extract(s.attributes, '$.\"db.system\"') IS NOT NULL)",
+        SpanKind::Client.number(),
+        SpanKind::Producer.number()
+    )
+}
 
 const CALL_ATTRIBUTE_KEYS: [&str; 25] = [
     "db.system.name",
@@ -53,29 +59,31 @@ struct CallAttributes([Option<String>; CALL_ATTRIBUTE_KEYS.len()]);
 
 impl CallAttributes {
     fn value_of(&self, key: &str) -> Option<&str> {
-        let at = CALL_ATTRIBUTE_KEYS.iter().position(|k| *k == key)?;
-        self.0[at].as_deref()
+        let index = CALL_ATTRIBUTE_KEYS
+            .iter()
+            .position(|candidate| *candidate == key)?;
+        self.0[index].as_deref()
     }
 
-    fn first_present<'a>(&'a self, keys: &[&'static str]) -> Option<(&'static str, &'a str)> {
+    fn find_first_present<'a>(&'a self, keys: &[&'static str]) -> Option<(&'static str, &'a str)> {
         keys.iter()
             .find_map(|&key| Some((key, self.value_of(key)?)))
     }
 
     fn is_http(&self) -> bool {
-        self.first_present(&["url.full", "http.url", "http.request.method", "http.method"])
+        self.find_first_present(&["url.full", "http.url", "http.request.method", "http.method"])
             .is_some()
     }
 }
 
 fn equals_term(key: &str, value: &str) -> String {
-    format!("{key} = {}", quote(value))
+    format!("{key} = {}", quote_string(value))
 }
 
 fn join_terms(terms: &[&str]) -> String {
     terms
         .iter()
-        .filter(|t| !t.is_empty())
+        .filter(|term| !term.is_empty())
         .copied()
         .collect::<Vec<_>>()
         .join(" ")
@@ -91,19 +99,19 @@ fn url_host_with_port(url: &str) -> Option<&str> {
 }
 
 fn url_path_without_query(url: &str) -> &str {
-    let rest = url
-        .split_once("://")
-        .map_or(url, |(_, rest)| rest.find('/').map_or("", |at| &rest[at..]));
+    let rest = url.split_once("://").map_or(url, |(_, rest)| {
+        rest.find('/').map_or("", |path_start| &rest[path_start..])
+    });
     rest.split(['?', '#']).next().unwrap_or_default()
 }
 
 fn classify_target(attributes: &CallAttributes) -> (TargetKey, String) {
-    let target = |target_type, system: Option<&str>, name: Option<&str>| TargetKey {
+    let target_key = |target_type, system: Option<&str>, name: Option<&str>| TargetKey {
         target_type,
         system: system.map(str::to_owned),
         name: name.map(str::to_owned),
     };
-    for (target_type, systems, names) in [
+    for (target_type, system_keys, name_keys) in [
         (
             TargetType::Database,
             &["db.system.name", "db.system"][..],
@@ -116,11 +124,11 @@ fn classify_target(attributes: &CallAttributes) -> (TargetKey, String) {
             &["messaging.destination.name", "messaging.destination"],
         ),
     ] {
-        if let Some((system_key, system)) = attributes.first_present(systems) {
-            let name = attributes.first_present(names);
+        if let Some((system_key, system)) = attributes.find_first_present(system_keys) {
+            let name = attributes.find_first_present(name_keys);
             let name_term = name.map_or_else(String::new, |(key, value)| equals_term(key, value));
             return (
-                target(target_type, Some(system), name.map(|(_, value)| value)),
+                target_key(target_type, Some(system), name.map(|(_, value)| value)),
                 join_terms(&[&equals_term(system_key, system), &name_term]),
             );
         }
@@ -128,69 +136,73 @@ fn classify_target(attributes: &CallAttributes) -> (TargetKey, String) {
 
     if attributes.is_http() {
         if let Some((key, host)) =
-            attributes.first_present(&["server.address", "net.peer.name", "http.host"])
+            attributes.find_first_present(&["server.address", "net.peer.name", "http.host"])
         {
             let port = attributes
-                .first_present(&["server.port", "net.peer.port"])
+                .find_first_present(&["server.port", "net.peer.port"])
                 .map(|(_, port)| port)
                 .filter(|port| !matches!(*port, "80" | "443") && !host.contains(':'));
             let name = port.map_or_else(|| host.to_owned(), |port| format!("{host}:{port}"));
             return (
-                target(TargetType::Http, None, Some(&name)),
+                target_key(TargetType::Http, None, Some(&name)),
                 equals_term(key, host),
             );
         }
-        let url = attributes.first_present(&["url.full", "http.url"]);
+        let url = attributes.find_first_present(&["url.full", "http.url"]);
         if let Some((key, host)) = url.and_then(|(key, url)| Some((key, url_host_with_port(url)?)))
         {
-            let query = format!("{key} ~ {}", quote(&format!("://{host}")));
-            return (target(TargetType::Http, None, Some(host)), query);
+            let query = format!("{key} ~ {}", quote_string(&format!("://{host}")));
+            return (target_key(TargetType::Http, None, Some(host)), query);
         }
-        return (target(TargetType::Http, None, None), String::new());
+        return (target_key(TargetType::Http, None, None), String::new());
     }
 
     attributes
-        .first_present(&["peer.service", "server.address"])
+        .find_first_present(&["peer.service", "server.address"])
         .map_or_else(
-            || (target(TargetType::Other, None, None), String::new()),
+            || (target_key(TargetType::Other, None, None), String::new()),
             |(key, peer)| {
                 (
-                    target(TargetType::Other, None, Some(peer)),
+                    target_key(TargetType::Other, None, Some(peer)),
                     equals_term(key, peer),
                 )
             },
         )
 }
 
-fn summarize_call(attributes: &CallAttributes, target: TargetType, name: &str) -> (String, String) {
+fn summarize_call(
+    attributes: &CallAttributes,
+    target_type: TargetType,
+    name: &str,
+) -> (String, String) {
     let by_name = || (name.to_owned(), equals_term("name", name));
-    match target {
+    match target_type {
         TargetType::Database => {
-            if let Some((key, summary)) = attributes.first_present(&["db.query.summary"]) {
+            if let Some((key, summary)) = attributes.find_first_present(&["db.query.summary"]) {
                 return (summary.to_owned(), equals_term(key, summary));
             }
             attributes
-                .first_present(&["db.query.text", "db.statement"])
+                .find_first_present(&["db.query.text", "db.statement"])
                 .map_or_else(by_name, |(_, query)| {
-                    (query_template(query), equals_term("name", name))
+                    (replace_values_in_query(query), equals_term("name", name))
                 })
         }
         TargetType::Http => {
             let method = attributes
-                .first_present(&["http.request.method", "http.method"])
+                .find_first_present(&["http.request.method", "http.method"])
                 .map_or_else(
                     || name.split(' ').next().unwrap_or_default().to_owned(),
                     |(_, method)| method.to_ascii_uppercase(),
                 );
-            if let Some((key, template)) = attributes.first_present(&["url.template"]) {
+            if let Some((key, template)) = attributes.find_first_present(&["url.template"]) {
                 return (
                     join_terms(&[&method, template]),
                     join_terms(&[&equals_term("name", name), &equals_term(key, template)]),
                 );
             }
             let path = attributes
-                .first_present(&["url.path", "http.target", "url.full", "http.url"])
-                .map(|(_, url)| path_template(url_path_without_query(url)))
+                .find_first_present(&["url.path", "http.target", "url.full", "http.url"])
+                .map(|(_, url)| replace_ids_in_path(url_path_without_query(url)))
                 .filter(|path| !path.is_empty());
             path.map_or_else(by_name, |path| {
                 (join_terms(&[&method, &path]), equals_term("name", name))
@@ -213,21 +225,22 @@ struct CallSpan {
     location: SpanLocation,
 }
 
+type SpanName = String;
+
 #[derive(Default)]
 struct TargetTally {
     query: String,
     calls: RequestTally,
     steps: HashMap<i64, RequestTally>,
-    operations: HashMap<(String, SpanKind), NamedOperationTally>,
+    operations: HashMap<(String, SpanKind), OperationTally<SpanName>>,
 }
 
-#[derive(Default)]
-struct NamedOperationTally {
-    tally: OperationTally,
-    newest_name: String,
+struct CallNameAndQuery {
+    name: SpanName,
+    query: String,
 }
 
-fn request_buckets(
+fn fill_request_buckets(
     steps: &HashMap<i64, RequestTally>,
     first_step_at: i64,
     end_at: i64,
@@ -250,37 +263,41 @@ impl Reader {
         only_kind: Option<SpanKind>,
         mut on_call: impl FnMut(CallSpan),
     ) -> anyhow::Result<()> {
-        let mut where_ = WhereClause::within_reader_range(self, "s.start_ts");
-        where_.push_clause(CALL_SPAN_CLAUSE.into());
-        where_.push_clause_with_param("r.service = :service", ":service", service.to_owned());
+        let mut where_clause = WhereClause::within_reader_range(self, "s.start_ts");
+        where_clause.push_condition(call_span_condition());
+        where_clause.push_condition_with_param(
+            "r.service = :service",
+            ":service",
+            service.to_owned(),
+        );
         if let Some(kind) = only_kind {
-            where_.push_clause_with_param("s.kind = :kind", ":kind", kind.number());
+            where_clause.push_condition_with_param("s.kind = :kind", ":kind", kind.number());
         }
-        let columns = CALL_ATTRIBUTE_KEYS
+        let attribute_columns = CALL_ATTRIBUTE_KEYS
             .iter()
             .map(|key| format!("json_extract(s.attributes, '$.\"{key}\"')"))
             .collect::<Vec<_>>()
             .join(", ");
         self.scan_rows(
             ["", ""],
-            |day| {
+            |day_schema| {
                 format!(
                     "SELECT s.name, s.kind, s.start_ts, s.duration_ns, s.status, '{}', s.rowid,
-                            {columns}
-                     FROM {day}.spans s JOIN {day}.resources r ON r.id = s.resource_id
+                            {attribute_columns}
+                     FROM {day_schema}.spans s JOIN {day_schema}.resources r ON r.id = s.resource_id
                      WHERE {}",
-                    day.trim_matches('"'),
-                    where_.sql_for_day(day)
+                    day_schema.day,
+                    where_clause.sql_for_day(day_schema)
                 )
             },
-            &where_,
+            &where_clause,
             |row| {
                 let mut attributes = CallAttributes(Default::default());
-                for (i, value) in attributes.0.iter_mut().enumerate() {
-                    *value = match row.get::<_, Value>(7 + i)? {
+                for (index, value) in attributes.0.iter_mut().enumerate() {
+                    *value = match row.get::<_, Value>(7 + index)? {
                         Value::Text(text) if !text.is_empty() => Some(text),
-                        Value::Integer(n) => Some(n.to_string()),
-                        Value::Real(n) => Some(n.to_string()),
+                        Value::Integer(number) => Some(number.to_string()),
+                        Value::Real(number) => Some(number.to_string()),
                         _ => None,
                     };
                 }
@@ -298,9 +315,12 @@ impl Reader {
                     started_at: row.get(2)?,
                     duration_ns: row.get(3)?,
                     failed: SpanStatus::from_number(row.get(4)?).is_error(),
-                    location: (row.get(5)?, row.get(6)?),
+                    location: SpanLocation {
+                        day: row.get(5)?,
+                        rowid: row.get(6)?,
+                    },
                 });
-                Ok(true)
+                Ok(ControlFlow::Continue(()))
             },
         )
     }
@@ -311,7 +331,6 @@ fn keep_busiest_operations(
     targets: &mut HashMap<TargetKey, TargetTally>,
     limit: usize,
 ) -> anyhow::Result<(HashMap<TargetKey, Vec<CallOperation>>, bool)> {
-    // The limit keeps the operations with the most time across all targets.
     let mut operations: Vec<_> = targets
         .iter_mut()
         .flat_map(|(key, target)| {
@@ -321,35 +340,41 @@ fn keep_busiest_operations(
                 .map(move |(operation_key, operation)| (key.clone(), operation_key, operation))
         })
         .collect();
-    operations.sort_by(|(a_key, a_op, a), (b_key, b_op, b)| {
-        b.tally
-            .requests
+    operations.sort_by(|(a_key, a_operation_key, a), (b_key, b_operation_key, b)| {
+        b.requests
             .total_ns
-            .cmp(&a.tally.requests.total_ns)
+            .cmp(&a.requests.total_ns)
             .then_with(|| a_key.cmp(b_key))
-            .then_with(|| a_op.cmp(b_op))
+            .then_with(|| a_operation_key.cmp(b_operation_key))
     });
     let truncated = truncate_to_limit(&mut operations, limit);
-    let mut attributes = reader.read_span_attributes(
-        operations
-            .iter()
-            .filter_map(|(_, _, operation)| Some(&operation.tally.newest_request.as_ref()?.1)),
-    )?;
+    let mut attributes_by_location =
+        reader.read_span_attributes(operations.iter().filter_map(|(_, _, operation)| {
+            operation
+                .newest_request
+                .as_ref()
+                .map(|newest_request| newest_request.location)
+        }))?;
     let mut operations_by_target: HashMap<TargetKey, Vec<CallOperation>> = HashMap::new();
     for (key, (summary, kind), operation) in operations {
+        let (name, attributes) = operation
+            .newest_request
+            .map(|newest_request| {
+                (
+                    newest_request.detail,
+                    attributes_by_location.remove(&newest_request.location),
+                )
+            })
+            .unwrap_or_default();
         operations_by_target
             .entry(key)
             .or_default()
             .push(CallOperation {
                 summary,
-                name: operation.newest_name,
+                name,
                 kind,
-                attributes: operation
-                    .tally
-                    .newest_request
-                    .and_then(|(_, location)| attributes.remove(&location))
-                    .unwrap_or_default(),
-                calls: operation.tally.requests.to_requests(),
+                attributes: attributes.unwrap_or_default(),
+                calls: operation.requests.to_requests(),
             });
     }
     Ok((operations_by_target, truncated))
@@ -382,19 +407,17 @@ pub(super) fn summarize_calls(
             .entry(step_at)
             .or_default()
             .add_request(call.duration_ns, call.failed);
-        let operation = target
+        target
             .operations
             .entry((call.summary, call.kind))
-            .or_default();
-        operation.tally.add_request_at(
-            call.started_at,
-            call.duration_ns,
-            call.failed,
-            &call.location,
-        );
-        if operation.tally.is_newest_request_at(call.started_at) {
-            operation.newest_name = call.name;
-        }
+            .or_default()
+            .add_request_at(
+                call.started_at,
+                call.duration_ns,
+                call.failed,
+                call.location,
+                || call.name,
+            );
     })?;
 
     let (mut operations_by_target, truncated) =
@@ -407,7 +430,7 @@ pub(super) fn summarize_calls(
         .map(|(key, target)| Target {
             query: target.query,
             calls: target.calls.to_requests(),
-            buckets: request_buckets(&target.steps, first_step_at, range.end_at(), step_ns),
+            buckets: fill_request_buckets(&target.steps, first_step_at, range.end_at(), step_ns),
             operations: operations_by_target.remove(&key).unwrap_or_default(),
             key,
         })
@@ -424,7 +447,7 @@ pub(super) fn summarize_calls(
         end_at: timestamp_from_nanos(range.end_at()),
         step_ns,
         calls: calls.to_requests(),
-        buckets: request_buckets(&steps, first_step_at, range.end_at(), step_ns),
+        buckets: fill_request_buckets(&steps, first_step_at, range.end_at(), step_ns),
         targets,
         truncated,
     })
@@ -439,10 +462,9 @@ pub(super) fn summarize_call_operation(
     step_ns: i64,
 ) -> anyhow::Result<CallDetail> {
     reader.check_step(step_ns)?;
-    let mut operation = OperationTally::default();
+    let mut operation: OperationTally<CallNameAndQuery> = OperationTally::default();
     let mut steps: HashMap<i64, RequestTally> = HashMap::new();
-    let mut newest_calls: BinaryHeap<Reverse<(i64, SpanLocation)>> = BinaryHeap::new();
-    let (mut name, mut query) = (String::new(), String::new());
+    let mut newest_calls: BinaryHeap<Reverse<NewestRequest>> = BinaryHeap::new();
     reader.scan_call_spans(service, Some(kind), |call| {
         if call.target != *target || call.summary != summary {
             return;
@@ -451,35 +473,45 @@ pub(super) fn summarize_call_operation(
             call.started_at,
             call.duration_ns,
             call.failed,
-            &call.location,
+            call.location,
+            || CallNameAndQuery {
+                query: join_terms(&[&call.target_query, &call.summary_query]),
+                name: call.name,
+            },
         );
-        if operation.is_newest_request_at(call.started_at) {
-            query = join_terms(&[&call.target_query, &call.summary_query]);
-            name = call.name;
-        }
         steps
             .entry(call.started_at.div_euclid(step_ns) * step_ns)
             .or_default()
             .add_request(call.duration_ns, call.failed);
-        newest_calls.push(Reverse((call.started_at, call.location)));
+        newest_calls.push(Reverse(NewestRequest {
+            started_at: call.started_at,
+            location: call.location,
+            detail: (),
+        }));
         if newest_calls.len() > MAX_NEWEST_CALL_SPANS {
             newest_calls.pop();
         }
     })?;
-    let attributes = match operation.newest_request {
-        Some((_, location)) => reader
-            .read_span_attributes(std::iter::once(&location))?
-            .remove(&location),
-        None => None,
+    let (name, query, attributes) = match operation.newest_request {
+        Some(NewestRequest {
+            location, detail, ..
+        }) => (
+            detail.name,
+            detail.query,
+            reader
+                .read_span_attributes(std::iter::once(location))?
+                .remove(&location),
+        ),
+        None => (String::new(), String::new(), None),
     };
     let locations: Vec<_> = newest_calls
         .into_iter()
-        .map(|Reverse((_, location))| location)
+        .map(|Reverse(newest_request)| newest_request.location)
         .collect();
     let range = reader.range();
     let first_step_at = range.start_at().div_euclid(step_ns) * step_ns;
     Ok(CallDetail {
-        detail: OperationDetail {
+        operation: OperationDetail {
             service: service.to_owned(),
             name,
             kind,
@@ -488,7 +520,7 @@ pub(super) fn summarize_call_operation(
             end_at: timestamp_from_nanos(range.end_at()),
             step_ns,
             requests: operation.requests.to_requests(),
-            buckets: request_buckets(&steps, first_step_at, range.end_at(), step_ns),
+            buckets: fill_request_buckets(&steps, first_step_at, range.end_at(), step_ns),
         },
         target: target.clone(),
         summary: summary.to_owned(),

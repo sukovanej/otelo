@@ -2,7 +2,7 @@ mod common;
 
 use std::time::SystemTime;
 
-use common::{Receiver, open_todays_day_file, rows};
+use common::{Receiver, open_todays_day_file, query_first_column};
 use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
@@ -25,36 +25,37 @@ enum Transport {
 
 #[test]
 fn grpc_with_gzip_takes_each_signal() {
-    round_trip(Transport::Grpc);
+    send_each_signal_and_check_the_day_file(Transport::Grpc);
 }
 
 #[test]
 fn http_protobuf_takes_each_signal() {
-    round_trip(Transport::HttpProtobuf);
+    send_each_signal_and_check_the_day_file(Transport::HttpProtobuf);
 }
 
 #[test]
 fn http_json_takes_each_signal() {
-    round_trip(Transport::HttpJson);
+    send_each_signal_and_check_the_day_file(Transport::HttpJson);
 }
 
-fn round_trip(transport: Transport) {
-    let dir = tempfile::tempdir().unwrap();
-    let receiver = Receiver::start_writing_into(dir.path());
+fn send_each_signal_and_check_the_day_file(transport: Transport) {
+    let directory = tempfile::tempdir().unwrap();
+    let receiver = Receiver::start_writing_into(directory.path());
     send_each_signal(&receiver, transport);
     receiver.stop_and_wait_for_writer();
-    let conn = open_todays_day_file(dir.path());
+    let connection = open_todays_day_file(directory.path());
 
-    let services: Vec<String> = rows(&conn, "SELECT service FROM resources ORDER BY id");
+    let services: Vec<String> =
+        query_first_column(&connection, "SELECT service FROM resources ORDER BY id");
     assert_eq!(services, ["shop", "otelo"]);
-    let host: Vec<String> = rows(
-        &conn,
+    let host_names: Vec<String> = query_first_column(
+        &connection,
         "SELECT attributes ->> '$.\"host.name\"' FROM resources WHERE service = 'shop'",
     );
-    assert_eq!(host, ["droplet"]);
+    assert_eq!(host_names, ["droplet"]);
 
-    let spans: Vec<String> = rows(
-        &conn,
+    let spans: Vec<String> = query_first_column(
+        &connection,
         "SELECT json_object(
              'name', name, 'kind', kind, 'status', status, 'root', parent_span_id IS NULL,
              'route', attributes ->> '$.\"http.route\"',
@@ -69,21 +70,21 @@ fn round_trip(transport: Transport) {
             r#"{"name":"SELECT cart","kind":1,"status":2,"root":0,"route":null,"scope":"shop-test","description":"timeout"}"#,
         ]
     );
-    let events: Vec<String> = rows(
-        &conn,
+    let events: Vec<String> = query_first_column(
+        &connection,
         "SELECT json_object('name', e.value ->> 'name', 'attempt', e.value ->> '$.attributes.attempt')
          FROM spans, json_each(spans.events) e",
     );
     assert_eq!(events, [r#"{"name":"retry","attempt":2}"#]);
-    let children: Vec<i64> = rows(
-        &conn,
+    let child_span_counts: Vec<i64> = query_first_column(
+        &connection,
         "SELECT count(*) FROM spans c
          JOIN spans p ON p.trace_id = c.trace_id AND p.span_id = c.parent_span_id",
     );
-    assert_eq!(children, [1]);
+    assert_eq!(child_span_counts, [1]);
 
-    let logs: Vec<String> = rows(
-        &conn,
+    let logs: Vec<String> = query_first_column(
+        &connection,
         "SELECT json_object('body', body, 'severity', severity, 'source', source,
                             'user', attributes ->> '$.\"user.id\"',
                             'scope', attributes ->> '$.\"otel.scope.name\"')
@@ -93,14 +94,14 @@ fn round_trip(transport: Transport) {
         logs,
         [r#"{"body":"cart is empty","severity":13,"source":"otlp","user":7,"scope":"shop-test"}"#]
     );
-    let in_span: Vec<String> = rows(
-        &conn,
+    let spans_of_the_log: Vec<String> = query_first_column(
+        &connection,
         "SELECT s.name FROM logs l JOIN spans s ON s.trace_id = l.trace_id AND s.span_id = l.span_id",
     );
-    assert_eq!(in_span, ["GET /cart"]);
+    assert_eq!(spans_of_the_log, ["GET /cart"]);
 
-    let points: Vec<String> = rows(
-        &conn,
+    let points: Vec<String> = query_first_column(
+        &connection,
         "SELECT json_object('name', s.name, 'kind', s.kind, 'temporality', s.temporality,
                             'unit', s.unit, 'plan', s.labels ->> 'plan', 'value', p.value,
                             'counts', p.histogram -> 'counts', 'bounds', p.histogram -> 'bounds')
@@ -120,21 +121,21 @@ fn round_trip(transport: Transport) {
 }
 
 fn send_each_signal(receiver: &Receiver, transport: Transport) {
-    let (spans, logs, metrics) = exporters(receiver, transport);
+    let (span_exporter, log_exporter, metric_exporter) = build_exporters(receiver, transport);
     let resource = Resource::builder()
         .with_service_name("shop")
         .with_attribute(KeyValue::new("host.name", "droplet"))
         .build();
     let tracer_provider = SdkTracerProvider::builder()
-        .with_batch_exporter(spans)
+        .with_batch_exporter(span_exporter)
         .with_resource(resource.clone())
         .build();
     let logger_provider = SdkLoggerProvider::builder()
-        .with_batch_exporter(logs)
+        .with_batch_exporter(log_exporter)
         .with_resource(resource.clone())
         .build();
     let meter_provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(metrics)
+        .with_periodic_exporter(metric_exporter)
         .with_resource(resource)
         .build();
 
@@ -144,8 +145,8 @@ fn send_each_signal(receiver: &Receiver, transport: Transport) {
         .with_kind(SpanKind::Server)
         .with_attributes([KeyValue::new("http.route", "/cart")])
         .start(&tracer);
-    let cx = Context::current_with_span(root);
-    let mut child = tracer.start_with_context("SELECT cart", &cx);
+    let context = Context::current_with_span(root);
+    let mut child = tracer.start_with_context("SELECT cart", &context);
     child.add_event("retry", vec![KeyValue::new("attempt", 2)]);
     child.set_status(Status::error("timeout"));
     child.end();
@@ -156,28 +157,28 @@ fn send_each_signal(receiver: &Receiver, transport: Transport) {
     record.set_severity_number(Severity::Warn);
     record.set_timestamp(SystemTime::now());
     record.add_attribute("user.id", 7);
-    let context = cx.span().span_context().clone();
-    record.set_trace_context(context.trace_id(), context.span_id(), None);
+    let span_context = context.span().span_context().clone();
+    record.set_trace_context(span_context.trace_id(), span_context.span_id(), None);
     logger.emit(record);
-    cx.span().end();
+    context.span().end();
 
     let meter = meter_provider.meter("shop-test");
-    let plan = [KeyValue::new("plan", "free")];
-    let adds = meter.u64_counter("cart.adds").with_unit("{item}").build();
-    adds.add(3, &plan);
-    let duration = meter
+    let plan_labels = [KeyValue::new("plan", "free")];
+    let adds_counter = meter.u64_counter("cart.adds").with_unit("{item}").build();
+    adds_counter.add(3, &plan_labels);
+    let duration_histogram = meter
         .f64_histogram("cart.duration")
         .with_unit("ms")
         .with_boundaries(vec![10.0, 100.0])
         .build();
-    duration.record(5.0, &plan);
-    duration.record(50.0, &plan);
-    let items = meter
+    duration_histogram.record(5.0, &plan_labels);
+    duration_histogram.record(50.0, &plan_labels);
+    let item_counter = meter
         .i64_up_down_counter("cart.items")
         .with_unit("{item}")
         .build();
-    items.add(3, &plan);
-    items.add(-1, &plan);
+    item_counter.add(3, &plan_labels);
+    item_counter.add(-1, &plan_labels);
 
     // Shutting a provider down exports what it holds.
     tracer_provider.shutdown().unwrap();
@@ -185,7 +186,7 @@ fn send_each_signal(receiver: &Receiver, transport: Transport) {
     meter_provider.shutdown().unwrap();
 }
 
-fn exporters(
+fn build_exporters(
     receiver: &Receiver,
     transport: Transport,
 ) -> (SpanExporter, LogExporter, MetricExporter) {
@@ -193,7 +194,7 @@ fn exporters(
         Transport::Grpc => {
             // The tonic client starts its connection on the runtime.
             let _runtime = receiver.runtime.enter();
-            let endpoint = format!("http://{}", receiver.grpc);
+            let endpoint = format!("http://{}", receiver.grpc_address);
             (
                 SpanExporter::builder()
                     .with_tonic()
@@ -224,19 +225,19 @@ fn exporters(
                 SpanExporter::builder()
                     .with_http()
                     .with_protocol(protocol)
-                    .with_endpoint(receiver.url("/v1/traces"))
+                    .with_endpoint(receiver.http_url("/v1/traces"))
                     .build()
                     .unwrap(),
                 LogExporter::builder()
                     .with_http()
                     .with_protocol(protocol)
-                    .with_endpoint(receiver.url("/v1/logs"))
+                    .with_endpoint(receiver.http_url("/v1/logs"))
                     .build()
                     .unwrap(),
                 MetricExporter::builder()
                     .with_http()
                     .with_protocol(protocol)
-                    .with_endpoint(receiver.url("/v1/metrics"))
+                    .with_endpoint(receiver.http_url("/v1/metrics"))
                     .build()
                     .unwrap(),
             )

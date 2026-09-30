@@ -80,7 +80,7 @@ pub struct Interface {
 pub enum Services {
     Cgroups {
         units: Vec<Unit>,
-        otelo_unit: Option<String>,
+        otelo_unit_name: Option<String>,
     },
     ProcessTrees {
         jobs: Vec<LaunchdJob>,
