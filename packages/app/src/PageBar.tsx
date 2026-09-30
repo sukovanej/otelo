@@ -1,10 +1,17 @@
-import { type JSX, Show } from "solid-js";
+import { children, type JSX, Show } from "solid-js";
 
 import { Checkbox } from "@otelo/ui";
 
 import type { Fetched } from "./fetch";
 import { LIVE_MS } from "./list";
 import { formatTime } from "./time";
+
+interface PageBarProps {
+  readonly top?: JSX.Element;
+  readonly fetched: Pick<Fetched<unknown>, "loading" | "updated">;
+  readonly end?: JSX.Element;
+  readonly children?: JSX.Element;
+}
 
 /**
  * The top of every page under the top bar, which stays while the page
@@ -15,21 +22,17 @@ import { formatTime } from "./time";
  * whether a request runs, when the last answer arrived, and `end`, such as
  * the range and live mode.
  */
-export default function PageBar(props: {
-  top?: JSX.Element;
-  fetched: Pick<Fetched<unknown>, "loading" | "updated">;
-  end?: JSX.Element;
-  children?: JSX.Element;
-}) {
+export default function PageBar(props: PageBarProps) {
+  const top = children(() => props.top);
   return (
     <div
       class="relative z-20 shrink-0 bg-surface px-4 shadow-(--raised)"
-      classList={{ "pt-3.5": !!props.top }}
+      classList={{ "pt-3.5": !!top() }}
     >
-      {props.top}
+      {top()}
       <div
         class="flex min-h-7 items-center gap-3 text-muted"
-        classList={{ "pt-3 pb-2.5": !!props.top, "py-2.5": !props.top }}
+        classList={{ "pt-3 pb-2.5": !!top(), "py-2.5": !top() }}
       >
         {props.children}
         <span class="flex-1" />
