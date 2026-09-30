@@ -1,0 +1,12 @@
+a = "unclosed and b = 1
+a = `unclosed
+a = "ends in a backslash\
+a ! b
+a = 99999999999999999999 b = -9223372036854775808
+a = 1 # b
+a = "x" 🙂 b = 2
+a in 1, 2
+a in b
+a = and b = not
+= = ( , )
+5 = a "x" = 2

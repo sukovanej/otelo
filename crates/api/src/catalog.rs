@@ -1,7 +1,7 @@
 use std::fmt;
 
 use axum::extract::{Query, State};
-use otelo_query::{Signal, SuggestionKind};
+use otelo_query::{FieldHelp, FieldOrigin, Signal, SuggestionKind};
 use otelo_storage::query::AttributeKeys;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -83,10 +83,96 @@ pub struct CompleteParams {
     cursor: Option<usize>,
 }
 
-/// What can go at the cursor of a query.
+/// What can go at the cursor of a query, and what the field there holds.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct Completions {
     pub suggestions: Vec<SuggestionBody>,
+    /// The field of the term the cursor is in. Missing when the cursor is in
+    /// no term, and for an attribute that no record has.
+    #[schema(required = true)]
+    pub field: Option<FieldBody>,
+}
+
+/// A field of a query: where it comes from, its type, and its values.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FieldBody {
+    /// The field as a query writes it.
+    pub name: String,
+    pub source: FieldSource,
+    /// The type of the values. Of an attribute: `string`, `int`, `float`,
+    /// `bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,
+    /// `bool`, or `duration`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// How many records have the attribute, or how many resources for an
+    /// attribute of a resource. Missing for a built-in field, which every
+    /// record has.
+    #[schema(required = true)]
+    pub count: Option<u64>,
+    /// What a built-in field holds. Missing for an attribute.
+    #[schema(required = true)]
+    pub description: Option<String>,
+    /// The values, the most common first, and 10 at most. For a built-in
+    /// field with fixed values, those, in their order.
+    pub values: Vec<FieldValueBody>,
+    /// How many distinct values the daemon knows.
+    pub distinct_values: usize,
+    /// Whether the field has more distinct values than the daemon keeps, so
+    /// `distinct_values` counts only some of them.
+    pub many_values: bool,
+}
+
+/// Where a field comes from: the query language, the attributes of the
+/// records, or the attributes of their resources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FieldSource {
+    Builtin,
+    Attribute,
+    Resource,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FieldValueBody {
+    /// The value as a query writes it.
+    pub text: String,
+    /// How many records have the value. Missing for the fixed values of a
+    /// built-in field.
+    #[schema(required = true)]
+    pub count: Option<u64>,
+}
+
+impl From<FieldHelp> for FieldBody {
+    fn from(help: FieldHelp) -> Self {
+        let (source, count, description) = match help.origin {
+            FieldOrigin::Builtin { description } => {
+                (FieldSource::Builtin, None, Some(description.to_owned()))
+            }
+            FieldOrigin::Attribute { record_count } => {
+                (FieldSource::Attribute, Some(record_count), None)
+            }
+            FieldOrigin::Resource { resource_count } => {
+                (FieldSource::Resource, Some(resource_count), None)
+            }
+        };
+        Self {
+            name: help.name,
+            source,
+            kind: help.type_name,
+            count,
+            description,
+            values: help
+                .most_common_values
+                .into_iter()
+                .map(|value| FieldValueBody {
+                    text: value.text,
+                    count: value.record_count,
+                })
+                .collect(),
+            distinct_values: help.distinct_value_count,
+            many_values: help.many_values,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -136,7 +222,8 @@ impl fmt::Display for CompletionKind {
 }
 
 /// Suggests the fields, operators, values, and keywords that can go at the
-/// cursor of a query, from the attributes and values of the retention.
+/// cursor of a query, from the attributes and values of the retention, and
+/// describes the field of the term the cursor is in.
 #[utoipa::path(
     get,
     path = "/api/complete",
@@ -157,7 +244,9 @@ pub async fn complete(
     });
     api.run_range_query([None, None], WHOLE_RETENTION, (None, 1), move |r| {
         let chars = |byte: usize| q[..byte].chars().count();
-        let suggestions = otelo_query::complete(&q, cursor, signal, &*r.queries)
+        let completion = otelo_query::complete(&q, cursor, signal, &*r.queries);
+        let suggestions = completion
+            .suggestions
             .into_iter()
             .map(|s| SuggestionBody {
                 start: chars(s.replace.start),
@@ -167,7 +256,10 @@ pub async fn complete(
                 detail: s.detail,
             })
             .collect();
-        Ok(Completions { suggestions })
+        Ok(Completions {
+            suggestions,
+            field: completion.field_at_cursor.map(FieldBody::from),
+        })
     })
     .await
 }

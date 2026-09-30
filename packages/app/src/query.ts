@@ -4,6 +4,8 @@
 
 import type { AttributeValue } from "@otelo/api";
 
+import { isKeyword, isWordChar, lex } from "./lexer";
+
 /** The built-in fields of every signal. An attribute with one of these names
  * is written as `attr.<key>`. */
 const BUILTINS = new Set([
@@ -22,14 +24,10 @@ const BUILTINS = new Set([
   "unit",
 ]);
 
-const KEYWORDS = new Set(["and", "or", "not"]);
-
-const isWordChar = (c: string) => /[\p{L}\p{N}_.\-/:@]/u.test(c);
-
 /** Whether `key` reads back as one word that is not a number. */
 function isPlainKey(key: string): boolean {
   const [first, ...rest] = Array.from(key);
-  return first !== undefined && /[\p{L}_@]/u.test(first) && rest.every(isWordChar);
+  return first !== undefined && /[\p{Alphabetic}_@]/u.test(first) && rest.every(isWordChar);
 }
 
 /** The name a query uses for a record attribute. */
@@ -38,7 +36,7 @@ export function attributeField(key: string): string {
   if (
     key.startsWith("resource.") ||
     key.startsWith("attr.") ||
-    KEYWORDS.has(key.toLowerCase()) ||
+    isKeyword(key) ||
     BUILTINS.has(key)
   ) {
     return `attr.${key}`;
@@ -74,30 +72,14 @@ export function literal(value: AttributeValue): string | undefined {
  * term joined to it with `AND` needs the query in parentheses. */
 function hasTopLevelOr(q: string): boolean {
   let depth = 0;
-  let quoteChar: string | undefined;
-  let word = "";
-  const endWord = () => {
-    if (depth === 0 && word.toLowerCase() === "or") return true;
-    word = "";
-    return false;
-  };
-  for (let i = 0; i < q.length; i++) {
-    const c = q.charAt(i);
-    if (quoteChar) {
-      if (c === "\\") i++;
-      else if (c === quoteChar) quoteChar = undefined;
-      continue;
+  for (const { type, start, end } of lex(q)) {
+    if (type === "(") depth++;
+    else if (type === ")") depth = Math.max(0, depth - 1);
+    else if (type === "word" && depth === 0 && q.slice(start, end).toLowerCase() === "or") {
+      return true;
     }
-    if (isWordChar(c)) {
-      word += c;
-      continue;
-    }
-    if (endWord()) return true;
-    if (c === '"' || c === "'" || c === "`") quoteChar = c;
-    else if (c === "(") depth++;
-    else if (c === ")") depth = Math.max(0, depth - 1);
   }
-  return endWord();
+  return false;
 }
 
 /** The query with `term` joined to it by `AND`. A query that already ends in

@@ -1,0 +1,25 @@
+---
+source: crates/query/tests/complete.rs
+expression: out
+input_file: crates/query/tests/complete/spans/help.txt
+---
+> duration|
+duration                       field    built-in, duration replaces "duration" at 0..8
+field duration: duration, built-in: How long the span took. It takes a unit, such as duration > 250ms, and a number without one is nanoseconds.
+  0 values: 
+
+> error = |
+true                           value                       replaces "" at 8..8
+false                          value                       replaces "" at 8..8
+field error: bool, built-in: Whether the span failed, which means its status is error.
+  2 values: true, false
+
+> name|
+name                           field    built-in, string   replaces "name" at 0..4
+field name: string, built-in: The name of the span, such as GET /users.
+  2 values: "GET /languages" in 20, "POST /matches" in 5
+
+> kind|
+kind                           field    built-in, string   replaces "kind" at 0..4
+field kind: string, built-in: The role of the span. It serves a request, makes one, or works inside the service.
+  5 values: internal, server, client, producer, consumer

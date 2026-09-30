@@ -4,27 +4,29 @@ expression: out
 input_file: crates/query/tests/complete/logs/after.txt
 ---
 > user.id = 7 |
-and                            keyword               replaces "" at 12..12
-or                             keyword               replaces "" at 12..12
+and                            keyword                     replaces "" at 12..12
+or                             keyword                     replaces "" at 12..12
 
 > (user.id = 7 |
-and                            keyword               replaces "" at 13..13
-or                             keyword               replaces "" at 13..13
-)                              keyword               replaces "" at 13..13
+and                            keyword                     replaces "" at 13..13
+or                             keyword                     replaces "" at 13..13
+)                              keyword                     replaces "" at 13..13
 
 > user.id = 7 o|
-or                             keyword               replaces "o" at 12..13
+or                             keyword                     replaces "o" at 12..13
 
 > user.id = 7 us|
-user.id                        field    mixed, 40    replaces "us" at 12..14
+user.id                        field    mixed, 40          replaces "us" at 12..14
 
 > http.route in (1, /l|
-"/languages"                   value    40           replaces "/l" at 18..20
-"/login"                       value    1            replaces "/l" at 18..20
+"/languages"                   value    40                 replaces "/l" at 18..20
+"/login"                       value    1                  replaces "/l" at 18..20
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
 
 > http.route in (1 |
-,                              keyword               replaces "" at 17..17
-)                              keyword               replaces "" at 17..17
+,                              keyword                     replaces "" at 17..17
+)                              keyword                     replaces "" at 17..17
 
 > http.route in |
-(                              keyword               replaces "" at 14..14
+(                              keyword                     replaces "" at 14..14

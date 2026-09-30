@@ -130,6 +130,8 @@ impl CatalogCache {
         entry.0 = known.kind;
         entry.1 += 1;
         let Some(text) = completable_value_json(value) else {
+            // A string too long to list is still one of the values of the key.
+            known.many_values |= matches!(value, AttributeValue::String(_));
             return;
         };
         if known.values.contains(&text) {

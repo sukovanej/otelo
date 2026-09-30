@@ -1,0 +1,21 @@
+service = "api" and duration > 5ms
+level >= warn or level=error
+NOT body ~ 'time\'s up' And has(user.id)
+status in (ok, "unset", 3, true)
+(a = 1 OR b != -2.5) c <= 250us
+`odd key` == 2xx resource.host.name = web-1
+in = 1 has = 2 a IN (1) has (b)
+d = 3µs město = "Brno 🏙" e = 1.2.3 f = 1.
+a = true b = TRUE c = -5ms d = -7
+  http.route="/matches"   user.id>=7
+an
+and
+a = 1 an
+a = 1 and lev
+a = 1 and level >
+has(us
+not has
+leve and
+a = 1 and name 
+an 
+has 

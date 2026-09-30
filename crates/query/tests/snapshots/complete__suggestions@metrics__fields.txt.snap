@@ -4,25 +4,29 @@ expression: out
 input_file: crates/query/tests/complete/metrics/fields.txt
 ---
 > |
-name                           field    built-in     replaces "" at 0..0
-service                        field    built-in     replaces "" at 0..0
-kind                           field    built-in     replaces "" at 0..0
-unit                           field    built-in     replaces "" at 0..0
-state                          field    string, 6    replaces "" at 0..0
-http.route                     field    string, 3    replaces "" at 0..0
-resource.service.name          field    string, 4    replaces "" at 0..0
-resource.host.name             field    string, 3    replaces "" at 0..0
-not                            keyword               replaces "" at 0..0
-has(                           keyword               replaces "" at 0..0
-(                              keyword               replaces "" at 0..0
+name                           field    built-in, string   replaces "" at 0..0
+service                        field    built-in, string   replaces "" at 0..0
+kind                           field    built-in, string   replaces "" at 0..0
+unit                           field    built-in, string   replaces "" at 0..0
+state                          field    string, 6          replaces "" at 0..0
+http.route                     field    string, 3          replaces "" at 0..0
+resource.service.name          field    string, 4          replaces "" at 0..0
+resource.host.name             field    string, 3          replaces "" at 0..0
+not                            keyword                     replaces "" at 0..0
+has(                           keyword                     replaces "" at 0..0
+(                              keyword                     replaces "" at 0..0
 
 > name = |
-"http.server.request.duration" value    4            replaces "" at 7..7
+"http.server.request.duration" value    4                  replaces "" at 7..7
+field name: string, built-in: The name of the metric.
+  1 values: "http.server.request.duration" in 4
 
 > kind = |
-gauge                          value                 replaces "" at 7..7
-sum                            value                 replaces "" at 7..7
-histogram                      value                 replaces "" at 7..7
+gauge                          value                       replaces "" at 7..7
+sum                            value                       replaces "" at 7..7
+histogram                      value                       replaces "" at 7..7
+field kind: string, built-in: Whether the metric is a gauge, a sum, or a histogram.
+  3 values: gauge, sum, histogram
 
 > st|
-state                          field    string, 6    replaces "st" at 0..2
+state                          field    string, 6          replaces "st" at 0..2

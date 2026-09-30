@@ -31,7 +31,8 @@ export interface paths {
         };
         /**
          * Suggests the fields, operators, values, and keywords that can go at the
-         *     cursor of a query, from the attributes and values of the retention.
+         *     cursor of a query, from the attributes and values of the retention, and
+         *     describes the field of the term the cursor is in.
          */
         get: operations["complete"];
         put?: never;
@@ -469,8 +470,9 @@ export interface components {
          * @enum {string}
          */
         CompletionKind: "field" | "operator" | "value" | "keyword";
-        /** @description What can go at the cursor of a query. */
+        /** @description What can go at the cursor of a query, and what the field there holds. */
         Completions: {
+            field: null | components["schemas"]["FieldBody"];
             suggestions: components["schemas"]["SuggestionBody"][];
         };
         /**
@@ -499,6 +501,55 @@ export interface components {
         /** @description The body of every error response. */
         ErrorBody: {
             error: string;
+        };
+        /** @description A field of a query: where it comes from, its type, and its values. */
+        FieldBody: {
+            /**
+             * Format: int64
+             * @description How many records have the attribute, or how many resources for an
+             *     attribute of a resource. Missing for a built-in field, which every
+             *     record has.
+             */
+            count: number | null;
+            /** @description What a built-in field holds. Missing for an attribute. */
+            description: string | null;
+            /** @description How many distinct values the daemon knows. */
+            distinct_values: number;
+            /**
+             * @description Whether the field has more distinct values than the daemon keeps, so
+             *     `distinct_values` counts only some of them.
+             */
+            many_values: boolean;
+            /** @description The field as a query writes it. */
+            name: string;
+            source: components["schemas"]["FieldSource"];
+            /**
+             * @description The type of the values. Of an attribute: `string`, `int`, `float`,
+             *     `bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,
+             *     `bool`, or `duration`.
+             */
+            type: string;
+            /**
+             * @description The values, the most common first, and 10 at most. For a built-in
+             *     field with fixed values, those, in their order.
+             */
+            values: components["schemas"]["FieldValueBody"][];
+        };
+        /**
+         * @description Where a field comes from: the query language, the attributes of the
+         *     records, or the attributes of their resources.
+         * @enum {string}
+         */
+        FieldSource: "builtin" | "attribute" | "resource";
+        FieldValueBody: {
+            /**
+             * Format: int64
+             * @description How many records have the value. Missing for the fixed values of a
+             *     built-in field.
+             */
+            count: number | null;
+            /** @description The value as a query writes it. */
+            text: string;
         };
         IndexBody: {
             key: string;

@@ -4,26 +4,34 @@ expression: out
 input_file: crates/query/tests/complete/logs/tight.txt
 ---
 > user.id=7|
-7                              value    30           replaces "7" at 8..9
+7                              value    30                 replaces "7" at 8..9
+field user.id: mixed, attribute of 40 records
+  2+ values: 7 in 30, "8" in 10
 
 > user.id=7 |
-and                            keyword               replaces "" at 10..10
-or                             keyword               replaces "" at 10..10
+and                            keyword                     replaces "" at 10..10
+or                             keyword                     replaces "" at 10..10
 
 > level>=|
-trace                          value                 replaces "" at 7..7
-debug                          value                 replaces "" at 7..7
-info                           value                 replaces "" at 7..7
-warn                           value                 replaces "" at 7..7
-error                          value                 replaces "" at 7..7
-fatal                          value                 replaces "" at 7..7
+trace                          value                       replaces "" at 7..7
+debug                          value                       replaces "" at 7..7
+info                           value                       replaces "" at 7..7
+warn                           value                       replaces "" at 7..7
+error                          value                       replaces "" at 7..7
+fatal                          value                       replaces "" at 7..7
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal
 
 > level>=w|
-warn                           value                 replaces "w" at 7..8
+warn                           value                       replaces "w" at 7..8
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal
 
 > http.route=/m|
-"/matches"                     value    50           replaces "/m" at 11..13
+"/matches"                     value    50                 replaces "/m" at 11..13
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
 
 > (user.id=7)|
-and                            keyword               replaces "" at 11..11
-or                             keyword               replaces "" at 11..11
+and                            keyword                     replaces "" at 11..11
+or                             keyword                     replaces "" at 11..11

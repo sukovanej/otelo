@@ -1,0 +1,47 @@
+---
+source: crates/query/tests/highlight.rs
+expression: out
+input_file: crates/query/tests/highlight/terms.txt
+---
+> service = "api" and duration > 5ms
+  fffffff o sssss kkk ffffffff o nnn
+> level >= warn or level=error
+  fffff oo ssss kk fffffosssss
+> NOT body ~ 'time\'s up' And has(user.id)
+  kkk ffff o ssssssssssss kkk kkkpfffffffp
+> status in (ok, "unset", 3, true)
+  ffffff kk pssp sssssssp np bbbbp
+> (a = 1 OR b != -2.5) c <= 250us
+  pf o n kk f oo nnnnp f oo nnnnn
+> `odd key` == 2xx resource.host.name = web-1
+  fffffffff oo sss ffffffffffffffffff o sssss
+> in = 1 has = 2 a IN (1) has (b)
+  ff o n fff o n f kk pnp kkk pfp
+> d = 3µs město = "Brno 🏙" e = 1.2.3 f = 1.
+  f o nnn fffff o ssssssss f o sssss f o nn
+> a = true b = TRUE c = -5ms d = -7
+  f o bbbb f o ssss f o ssss f o nn
+>   http.route="/matches"   user.id>=7
+    ffffffffffossssssssss   fffffffoon
+> an
+  ww
+> and
+  kkk
+> a = 1 an
+  f o n ww
+> a = 1 and lev
+  f o n kkk www
+> a = 1 and level >
+  f o n kkk fffff o
+> has(us
+  kkkpff
+> not has
+  kkk www
+> leve and
+  wwww kkk
+> a = 1 and name 
+  f o n kkk ffff
+> an 
+  ff
+> has 
+  fff

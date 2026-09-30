@@ -1,7 +1,10 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use otelo_query::{Builtin, Catalog, Field, KeyInfo, Signal, Value, ValueInfo, complete};
+use otelo_query::{
+    Builtin, Catalog, Field, FieldHelp, FieldOrigin, FieldValues, KeyInfo, Signal, Value,
+    ValueInfo, complete,
+};
 
 struct SmallAppCatalog;
 
@@ -38,9 +41,9 @@ impl Catalog for SmallAppCatalog {
         }
     }
 
-    fn values(&self, signal: Signal, field: &Field) -> Vec<ValueInfo> {
+    fn values(&self, signal: Signal, field: &Field) -> FieldValues {
         let text = |text: &str| Value::String(text.into());
-        match field {
+        let listed = match field {
             Field::Attribute(key) if key == "http.route" => vec![
                 value(text("/matches"), 50),
                 value(text("/languages"), 40),
@@ -64,8 +67,40 @@ impl Catalog for SmallAppCatalog {
             }
             Field::Builtin(Builtin::Name) => vec![value(text("http.server.request.duration"), 4)],
             _ => Vec::new(),
+        };
+        FieldValues {
+            listed,
+            many_values: matches!(field, Field::Attribute(key) if key == "user.id"),
         }
     }
+}
+
+fn describe_field_help(help: &FieldHelp) -> String {
+    let origin = match &help.origin {
+        FieldOrigin::Builtin { description } => format!("built-in: {description}"),
+        FieldOrigin::Attribute { record_count } => format!("attribute of {record_count} records"),
+        FieldOrigin::Resource { resource_count } => {
+            format!("attribute of {resource_count} resources")
+        }
+    };
+    let values: Vec<String> = help
+        .most_common_values
+        .iter()
+        .map(|value| {
+            value.record_count.map_or_else(
+                || value.text.clone(),
+                |count| format!("{} in {count}", value.text),
+            )
+        })
+        .collect();
+    format!(
+        "field {}: {}, {origin}\n  {}{} values: {}",
+        help.name,
+        help.type_name,
+        help.distinct_value_count,
+        if help.many_values { "+" } else { "" },
+        values.join(", ")
+    )
 }
 
 fn signal_of_case_file(path: &Path) -> Signal {
@@ -84,15 +119,15 @@ fn suggestions() {
                 .unwrap_or_else(|| panic!("{}: {line:?} has no |", path.display()));
             let input = line.replacen('|', "", 1);
             writeln!(out, "> {line}").unwrap();
-            let suggestions = complete(&input, cursor, signal, &SmallAppCatalog);
-            if suggestions.is_empty() {
+            let completion = complete(&input, cursor, signal, &SmallAppCatalog);
+            if completion.suggestions.is_empty() {
                 writeln!(out, "(none)").unwrap();
             }
-            for s in suggestions {
+            for s in completion.suggestions {
                 let replaced = &input[s.replace.clone()];
                 writeln!(
                     out,
-                    "{:<30} {:<8} {:<12} replaces {:?} at {}..{}",
+                    "{:<30} {:<8} {:<18} replaces {:?} at {}..{}",
                     s.text,
                     s.kind.as_str(),
                     s.detail.unwrap_or_default(),
@@ -101,6 +136,9 @@ fn suggestions() {
                     s.replace.end
                 )
                 .unwrap();
+            }
+            if let Some(help) = &completion.field_at_cursor {
+                writeln!(out, "{}", describe_field_help(help)).unwrap();
             }
             writeln!(out).unwrap();
         }

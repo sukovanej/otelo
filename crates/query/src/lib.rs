@@ -1,10 +1,15 @@
 mod complete;
+mod highlight;
 mod lexer;
 mod parser;
 
 use std::fmt;
 
-pub use complete::{Catalog, KeyInfo, NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete};
+pub use complete::{
+    Catalog, Completion, FieldHelp, FieldOrigin, FieldValues, HelpValue, KeyInfo, MAX_HELP_VALUES,
+    NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete,
+};
+pub use highlight::{Highlight, HighlightKind, highlight_tokens};
 pub use parser::{ParseError, parse};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -116,6 +121,50 @@ impl Builtin {
             (Self::Status, _) => &["unset", "ok", "error"],
             (Self::Error | Self::Root, _) => &["true", "false"],
             _ => &[],
+        }
+    }
+
+    #[must_use]
+    pub const fn type_name(self) -> &'static str {
+        match self {
+            Self::Error | Self::Root => "bool",
+            Self::Duration => "duration",
+            _ => "string",
+        }
+    }
+
+    #[must_use]
+    pub const fn description(self, signal: Signal) -> &'static str {
+        match (self, signal) {
+            (Self::Service, _) => {
+                "The service that sent it, taken from service.name of its resource."
+            }
+            (Self::Level, _) => {
+                "The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal."
+            }
+            (Self::Body, _) => {
+                "The message of the log line. body ~ \"words\" finds the lines that have every word."
+            }
+            (Self::TraceId, Signal::Logs) => "The trace the log line belongs to, as hex digits.",
+            (Self::TraceId, _) => "The trace the span belongs to, as hex digits.",
+            (Self::SpanId, Signal::Logs) => "The span the log line was written in, as hex digits.",
+            (Self::SpanId, _) => "The id of the span, as hex digits.",
+            (Self::Source, _) => "How the log line arrived, such as otlp.",
+            (Self::Name, Signal::Metrics) => "The name of the metric.",
+            (Self::Name, _) => "The name of the span, such as GET /users.",
+            (Self::Kind, Signal::Metrics) => {
+                "Whether the metric is a gauge, a sum, or a histogram."
+            }
+            (Self::Kind, _) => {
+                "The role of the span. It serves a request, makes one, or works inside the service."
+            }
+            (Self::Status, _) => "How the span ended. Most spans leave it unset.",
+            (Self::Error, _) => "Whether the span failed, which means its status is error.",
+            (Self::Duration, _) => {
+                "How long the span took. It takes a unit, such as duration > 250ms, and a number without one is nanoseconds."
+            }
+            (Self::Root, _) => "Whether the span starts its trace, which means it has no parent.",
+            (Self::Unit, _) => "The unit of the metric, such as ms or By.",
         }
     }
 

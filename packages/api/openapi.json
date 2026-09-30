@@ -49,7 +49,7 @@
     },
     "/api/complete": {
       "get": {
-        "summary": "Suggests the fields, operators, values, and keywords that can go at the\ncursor of a query, from the attributes and values of the retention.",
+        "summary": "Suggests the fields, operators, values, and keywords that can go at the\ncursor of a query, from the attributes and values of the retention, and\ndescribes the field of the term the cursor is in.",
         "operationId": "complete",
         "parameters": [
           {
@@ -1473,11 +1473,23 @@
       },
       "Completions": {
         "type": "object",
-        "description": "What can go at the cursor of a query.",
+        "description": "What can go at the cursor of a query, and what the field there holds.",
         "required": [
-          "suggestions"
+          "suggestions",
+          "field"
         ],
         "properties": {
+          "field": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FieldBody",
+                "description": "The field of the term the cursor is in. Missing when the cursor is in\nno term, and for an attribute that no record has."
+              }
+            ]
+          },
           "suggestions": {
             "type": "array",
             "items": {
@@ -1560,6 +1572,96 @@
         "properties": {
           "error": {
             "type": "string"
+          }
+        }
+      },
+      "FieldBody": {
+        "type": "object",
+        "description": "A field of a query: where it comes from, its type, and its values.",
+        "required": [
+          "name",
+          "source",
+          "type",
+          "count",
+          "description",
+          "values",
+          "distinct_values",
+          "many_values"
+        ],
+        "properties": {
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many records have the attribute, or how many resources for an\nattribute of a resource. Missing for a built-in field, which every\nrecord has.",
+            "minimum": 0
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What a built-in field holds. Missing for an attribute."
+          },
+          "distinct_values": {
+            "type": "integer",
+            "description": "How many distinct values the daemon knows.",
+            "minimum": 0
+          },
+          "many_values": {
+            "type": "boolean",
+            "description": "Whether the field has more distinct values than the daemon keeps, so\n`distinct_values` counts only some of them."
+          },
+          "name": {
+            "type": "string",
+            "description": "The field as a query writes it."
+          },
+          "source": {
+            "$ref": "#/components/schemas/FieldSource"
+          },
+          "type": {
+            "type": "string",
+            "description": "The type of the values. Of an attribute: `string`, `int`, `float`,\n`bool`, `array`, `object`, or `mixed`. Of a built-in field: `string`,\n`bool`, or `duration`."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldValueBody"
+            },
+            "description": "The values, the most common first, and 10 at most. For a built-in\nfield with fixed values, those, in their order."
+          }
+        }
+      },
+      "FieldSource": {
+        "type": "string",
+        "description": "Where a field comes from: the query language, the attributes of the\nrecords, or the attributes of their resources.",
+        "enum": [
+          "builtin",
+          "attribute",
+          "resource"
+        ]
+      },
+      "FieldValueBody": {
+        "type": "object",
+        "required": [
+          "text",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many records have the value. Missing for the fixed values of a\nbuilt-in field.",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "description": "The value as a query writes it."
           }
         }
       },

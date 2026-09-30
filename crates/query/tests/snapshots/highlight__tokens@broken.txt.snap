@@ -1,0 +1,29 @@
+---
+source: crates/query/tests/highlight.rs
+expression: out
+input_file: crates/query/tests/highlight/broken.txt
+---
+> a = "unclosed and b = 1
+  f o xxxxxxxxxxxxxxxxxxx
+> a = `unclosed
+  f o xxxxxxxxx
+> a = "ends in a backslash\
+  f o xxxxxxxxxxxxxxxxxxxxx
+> a ! b
+  w x w
+> a = 99999999999999999999 b = -9223372036854775808
+  f o xxxxxxxxxxxxxxxxxxxx f o nnnnnnnnnnnnnnnnnnnn
+> a = 1 # b
+  f o n x w
+> a = "x" 🙂 b = 2
+  f o sss x f o n
+> a in 1, 2
+  f kk np n
+> a in b
+  f kk w
+> a = and b = not
+  f o kkk f o kkk
+> = = ( , )
+  o o p p p
+> 5 = a "x" = 2
+  n o s sss o n
