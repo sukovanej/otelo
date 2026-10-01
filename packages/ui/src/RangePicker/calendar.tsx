@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, on } from "solid-js";
+import { createMemo, createSignal, flush, For } from "solid-js";
 
 import { ChevronIcon } from "@otelo/icons";
 
@@ -46,14 +46,7 @@ interface CalendarProps {
 export default function Calendar(props: CalendarProps) {
   let dayGrid!: HTMLDivElement;
   const today = toLocalDate(new Date());
-  const [focusedDate, setFocusedDate] = createSignal(props.value);
-  createEffect(
-    on(
-      () => props.value,
-      (value) => setFocusedDate(value),
-      { defer: true },
-    ),
-  );
+  const [focusedDate, setFocusedDate] = createSignal(() => props.value);
 
   const month = createMemo(() => focusedDate().slice(0, 7));
   const weeks = createMemo(() => listMonthWeeks(month()));
@@ -65,6 +58,7 @@ export default function Calendar(props: CalendarProps) {
     if (!moveDate) return;
     e.preventDefault();
     setFocusedDate(moveDate(focusedDate()));
+    flush();
     dayGrid.querySelector<HTMLElement>("[tabindex='0']")?.focus();
   };
 
@@ -117,7 +111,7 @@ export default function Calendar(props: CalendarProps) {
                     )}
                     tabindex={date === focusedDate() ? 0 : -1}
                     aria-label={formatDayLabel(date)}
-                    aria-pressed={date === props.value}
+                    aria-pressed={date === props.value ? "true" : "false"}
                     aria-current={date === today ? "date" : undefined}
                     onClick={() => {
                       setFocusedDate(date);

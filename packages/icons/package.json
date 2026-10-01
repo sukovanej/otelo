@@ -6,12 +6,14 @@
     ".": "./src/index.ts"
   },
   "devDependencies": {
+    "@solidjs/web": "catalog:",
     "solid-js": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@solidjs/web": "catalog:",
     "solid-js": "catalog:"
   }
 }

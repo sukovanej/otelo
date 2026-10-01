@@ -1,5 +1,4 @@
 import {
-  A,
   type Params,
   type SearchParams,
   useNavigate,
@@ -43,9 +42,9 @@ export default function TracePage() {
       onFilterLogs={(term) => navigate(`/logs${toQueryString({ q: term })}`)}
       lead={
         <>
-          <A href="/traces" class={link}>
+          <a href="/traces" class={link}>
             Traces
-          </A>
+          </a>
           <span class="text-muted">/</span>
         </>
       }

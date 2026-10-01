@@ -22,7 +22,7 @@ export default function Tabs<T extends string>(props: TabsProps<T>) {
           <button
             type="button"
             role="tab"
-            aria-selected={props.value === option.value}
+            aria-selected={props.value === option.value ? "true" : "false"}
             class={`${plain} -ml-px h-7 cursor-pointer border px-2.5 text-muted first:ml-0 first:rounded-l-md last:rounded-r-md hover:bg-hover aria-selected:bg-active aria-selected:text-ink`}
             onClick={() => props.onChange(option.value)}
           >

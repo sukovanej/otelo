@@ -1,5 +1,4 @@
 import {
-  A,
   type Params,
   type SearchParams,
   useNavigate,
@@ -75,7 +74,6 @@ export default function ServicePage() {
         ? { variant: "call", summary: modalParams.op, kind, target }
         : { variant: "operation", name: modalParams.op, kind };
     },
-    undefined,
     { equals: isSameOpenModal },
   );
   const name = () => decodePathSegment(params.name);
@@ -118,9 +116,9 @@ export default function ServicePage() {
         fetched={fetchedService}
         title={
           <div class="flex min-w-0 items-center gap-3">
-            <A href={`/services${range.toSearch()}`} class={link}>
+            <a href={`/services${range.toSearch()}`} class={link}>
               Services
-            </A>
+            </a>
             <span class="text-muted">/</span>
             <h1 class="m-0 min-w-0 font-mono text-md font-semibold">
               <ServiceName name={name()} resource={service()?.resource ?? {}} />
@@ -129,12 +127,12 @@ export default function ServicePage() {
         }
       >
         <span class="ml-3 flex gap-3">
-          <A href={linkToTraces(serviceTerm())} class={link}>
+          <a href={linkToTraces(serviceTerm())} class={link}>
             Traces
-          </A>
-          <A href={linkToLogs(serviceTerm())} class={link}>
+          </a>
+          <a href={linkToLogs(serviceTerm())} class={link}>
             Logs
-          </A>
+          </a>
         </span>
       </RangeBar>
 
@@ -193,9 +191,9 @@ export default function ServicePage() {
                   description="The newest traces with a failed span of the service"
                   flush
                   actions={
-                    <A href={linkToTraces(`${serviceTerm()} error = true`)} class={link}>
+                    <a href={linkToTraces(`${serviceTerm()} error = true`)} class={link}>
                       All failed traces
-                    </A>
+                    </a>
                   }
                 >
                   <Show when={fetchedErrorTraces.data()}>
@@ -220,9 +218,9 @@ export default function ServicePage() {
                   description="The error logs of the service by message template"
                   flush
                   actions={
-                    <A href={linkToLogs(`${serviceTerm()} level >= error`, "groups")} class={link}>
+                    <a href={linkToLogs(`${serviceTerm()} level >= error`, "groups")} class={link}>
                       All error logs
-                    </A>
+                    </a>
                   }
                 >
                   <Show when={fetchedErrorLogs.data()}>

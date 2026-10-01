@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 
 import type { SortValue } from "./sort";
 import type { Unit } from "./units";

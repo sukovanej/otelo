@@ -1,4 +1,4 @@
-import { A, useNavigate } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { createMemo, For, Show } from "solid-js";
 
 import {
@@ -123,13 +123,13 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
             Loading…
           </span>
         </Show>
-        <A
+        <a
           href={`/traces${toQueryString({ view: "spans", q: fetched.data()?.spanQuery, since: props.range.since(), until: props.range.until() || undefined })}`}
           class={`shrink-0 whitespace-nowrap ${link}`}
           title={`Every span of the ${subjectNoun()} on the traces page`}
         >
           Open in Traces
-        </A>
+        </a>
         <CloseButton onClose={props.onClose} />
       </div>
 

@@ -1,5 +1,4 @@
-import { A } from "@solidjs/router";
-import { createSignal } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 
 import { CloseButton, Modal } from "@otelo/ui";
 
@@ -17,7 +16,7 @@ interface TracesPageTraceModalProps {
 export default function TracesPageTraceModal(props: TracesPageTraceModalProps) {
   const [tab, setTab] = createSignal<TraceTab>("spans");
   // The modal reads the first span once; it keeps its selection after that.
-  const [spanId, setSpanId] = createSignal(props.initialSpanId);
+  const [spanId, setSpanId] = createSignal(untrack(() => props.initialSpanId));
   const state = createTraceState(tab, setTab, spanId, setSpanId);
   const pagePath = () => toTracePath(props.id, state);
 
@@ -30,9 +29,9 @@ export default function TracesPageTraceModal(props: TracesPageTraceModalProps) {
         onFilterLogs={props.onFilterLogs}
         actions={
           <>
-            <A href={pagePath()} class={link} title="The page of this trace, to share">
+            <a href={pagePath()} class={link} title="The page of this trace, to share">
               Open page
-            </A>
+            </a>
             <CloseButton onClose={props.onClose} />
           </>
         }

@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createSignal, type JSX, on, onCleanup, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { createEffect, createMemo, createSignal, flush, onCleanup, Show } from "solid-js";
 
 import { measureCaretX } from "../caret";
 import { control, cx, plain, type Size, sizes, textInput } from "../classes";
@@ -77,9 +78,11 @@ export default function QueryInput(props: QueryInputProps) {
   );
   const listShown = () => listOpen() && !openHelp();
 
-  const followScroll = () => setScrollLeft(input.scrollLeft);
+  const followScroll = () => {
+    setScrollLeft(input.scrollLeft);
+  };
   // A value set from outside scrolls the input without an event.
-  createEffect(on(() => props.value, followScroll));
+  createEffect(() => props.value, followScroll);
 
   const closeSuggestions = () => {
     clearTimeout(completeTimer);
@@ -178,6 +181,7 @@ export default function QueryInput(props: QueryInputProps) {
         return;
       }
       setActiveIndex((index) => moveListIndex(index, step, list.length, true));
+      flush();
       listbox?.querySelector("[aria-selected=true]")?.scrollIntoView({ block: "nearest" });
       return;
     }
@@ -212,8 +216,11 @@ export default function QueryInput(props: QueryInputProps) {
     }
   };
 
-  onCleanup(closeSuggestions);
-  onCleanup(closeHelp);
+  onCleanup(() => {
+    clearTimeout(completeTimer);
+    completeController?.abort();
+    helpController?.abort();
+  });
 
   return (
     <div ref={frame} class="relative min-w-0 flex-1">
@@ -265,7 +272,7 @@ export default function QueryInput(props: QueryInputProps) {
         onFocus={requestSuggestions}
         onBlur={closeSuggestions}
         role="combobox"
-        aria-expanded={listShown()}
+        aria-expanded={listShown() ? "true" : "false"}
         aria-controls={SUGGESTION_LIST_ID}
         aria-activedescendant={
           listShown() && activeIndex() !== NO_SUGGESTION_PICKED

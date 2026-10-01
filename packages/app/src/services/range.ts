@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { type Accessor, createEffect, createMemo, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createMemo } from "solid-js";
 
 import { toQueryString } from "@otelo/api";
 
@@ -58,16 +58,15 @@ export function createRangeFetch<K, T>(
 ): FetchState<T> {
   const keyWithRange = createMemo(
     () => ({ ...key(), since: range.since(), until: range.until() }),
-    undefined,
     { equals: (previous, next) => JSON.stringify(previous) === JSON.stringify(next) },
   );
   const fetched = createFetch(keyWithRange, fetcher);
-  createEffect(() => {
-    if (!range.live()) return;
+  createEffect(range.live, (isLive) => {
+    if (!isLive) return undefined;
     const timer = setInterval(() => {
       if (!fetched.loading()) fetched.reload();
     }, LIVE_RELOAD_MS);
-    onCleanup(() => clearInterval(timer));
+    return () => clearInterval(timer);
   });
   return fetched;
 }

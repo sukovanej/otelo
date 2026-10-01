@@ -48,7 +48,7 @@ export default function DateInput(props: DateInputProps) {
           class="cursor-pointer text-muted hover:text-ink"
           tabindex={-1}
           aria-label={`Choose ${props.label.toLowerCase()} from a calendar`}
-          aria-expanded={calendarPopover.open()}
+          aria-expanded={calendarPopover.open() ? "true" : "false"}
           onClick={() => (calendarPopover.open() ? calendarPopover.hide() : calendarPopover.show())}
         >
           <CalendarIcon size={14} />

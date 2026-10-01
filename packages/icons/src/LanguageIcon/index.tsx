@@ -1,5 +1,5 @@
+import { dynamic } from "@solidjs/web";
 import type { Component } from "solid-js";
-import { Dynamic } from "solid-js/web";
 
 import type { IconProps } from "../icon";
 import CSharpIcon from "./c-sharp-icon";
@@ -43,9 +43,9 @@ interface LanguageIconProps extends IconProps {
 export default function LanguageIcon(props: LanguageIconProps) {
   const knownLanguage = () =>
     props.language === undefined ? undefined : LANGUAGES[props.language];
+  const PickedIcon = dynamic(() => knownLanguage()?.icon ?? CodeIcon);
   return (
-    <Dynamic
-      component={knownLanguage()?.icon ?? CodeIcon}
+    <PickedIcon
       size={props.size}
       class={knownLanguage() ? props.class : `text-muted ${props.class ?? ""}`}
       title={props.title ?? toLanguageName(props.language)}

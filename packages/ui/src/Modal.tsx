@@ -1,4 +1,5 @@
-import { type JSX, onCleanup, onMount } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { onCleanup, onSettled } from "solid-js";
 
 interface ModalProps {
   readonly label: string;
@@ -13,7 +14,7 @@ export default function Modal(props: ModalProps) {
   let openedByKeyboard = false;
   let removing = false;
 
-  onMount(() => {
+  onSettled(() => {
     const active = document.activeElement;
     if (active instanceof HTMLElement) {
       opener = active;
@@ -42,7 +43,7 @@ export default function Modal(props: ModalProps) {
       onClick={(e) => {
         if (e.target === dialog) props.onClose();
       }}
-      on:keydown={(e) => {
+      onKeyDown={(e) => {
         // "/" would focus the query of the page under the modal.
         if (e.key === "/") e.stopPropagation();
         if (e.key !== "Escape") return;

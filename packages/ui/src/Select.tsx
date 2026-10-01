@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { flush, For, Show } from "solid-js";
 
 import { CheckIcon, ChevronIcon } from "@otelo/icons";
 
@@ -28,6 +28,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
 
   const openList = () => {
     listPopover.show();
+    flush();
     listOptionElements()[Math.max(0, selectedIndex())]?.focus();
   };
   const pickValue = (value: T) => {
@@ -70,7 +71,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
           "group flex cursor-pointer items-center gap-2 whitespace-nowrap hover:bg-hover",
         )}
         aria-haspopup="listbox"
-        aria-expanded={listPopover.open()}
+        aria-expanded={listPopover.open() ? "true" : "false"}
         onClick={() => (listPopover.open() ? listPopover.hide() : openList())}
         onKeyDown={onTriggerKeyDown}
       >
@@ -93,8 +94,8 @@ export default function Select<T extends string>(props: SelectProps<T>) {
             {(choice) => (
               <li
                 role="option"
-                aria-selected={choice.value === props.value}
-                tabIndex={-1}
+                aria-selected={choice.value === props.value ? "true" : "false"}
+                tabindex={-1}
                 class={cx(
                   option,
                   "items-center gap-2 pr-4 whitespace-nowrap outline-none hover:bg-active focus:bg-active",

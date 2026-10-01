@@ -1,4 +1,4 @@
-import { type Accessor, createEffect, createSignal, on, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
 
 import { isAbortError } from "@otelo/api";
 
@@ -43,7 +43,7 @@ export function createFetch<K, T>(
     );
   };
 
-  createEffect(on(key, runRequest));
+  createEffect(key, runRequest);
   onCleanup(() => controller?.abort());
   return { data, errorMessage, loading, updatedAt, reload: () => runRequest(key()) };
 }

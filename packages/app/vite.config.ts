@@ -1,5 +1,5 @@
+import solid from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
-import solid from "vite-plugin-solid";
 import { defineConfig } from "vitest/config";
 
 // `mise run web:dev` serves the UI here and sends the API to the daemon that

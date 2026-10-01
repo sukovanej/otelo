@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { Show } from "solid-js";
 
 import type { LogLine } from "@otelo/api";
@@ -31,9 +30,9 @@ export default function LinePanel(props: LinePanelProps) {
           </span>
           <Show when={props.linksToTrace && props.line.trace_id}>
             {(traceId) => (
-              <A href={`/traces/${traceId()}`} class={link}>
+              <a href={`/traces/${traceId()}`} class={link}>
                 Trace
-              </A>
+              </a>
             )}
           </Show>
         </>

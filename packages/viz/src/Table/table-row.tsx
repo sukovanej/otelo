@@ -37,9 +37,9 @@ export default function TableRow<R>(props: TableRowProps<R>) {
   const ariaAttributes = () => {
     const level = props.level;
     return {
-      "aria-selected": props.selected,
+      "aria-selected": toAriaBoolean(props.selected),
       "aria-level": level ? level.depth + 1 : undefined,
-      "aria-expanded": level?.kind === "branch" ? level.expanded : undefined,
+      "aria-expanded": toAriaBoolean(level?.kind === "branch" ? level.expanded : undefined),
     };
   };
   const onClick = (e: MouseEvent) => {
@@ -66,7 +66,7 @@ export default function TableRow<R>(props: TableRowProps<R>) {
         <div
           role="row"
           class={pickRowClasses(props)}
-          tabIndex={props.onRowClick ? 0 : undefined}
+          tabindex={props.onRowClick ? 0 : undefined}
           onClick={onClick}
           onKeyDown={onKeyDown}
           {...ariaAttributes()}
@@ -108,4 +108,9 @@ function pickRowClasses<R>(props: TableRowProps<R>): string {
   return `col-span-full grid grid-cols-subgrid items-center border-b border-line px-3 py-1.5 ${
     isInteractive ? "cursor-pointer" : ""
   } ${stateClasses}`;
+}
+
+function toAriaBoolean(value: boolean | undefined): "true" | "false" | undefined {
+  if (value === undefined) return undefined;
+  return value ? "true" : "false";
 }

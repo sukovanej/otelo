@@ -1,4 +1,4 @@
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createSignal } from "solid-js";
 
 const WINDOW_EDGE_GAP_PX = 8;
 
@@ -24,10 +24,10 @@ export function createPopover(options: PopoverOptions): Popover {
   const onPointerDown = (e: PointerEvent) => {
     if (e.target instanceof Node && !root?.contains(e.target)) hide();
   };
-  createEffect(() => {
-    if (!open()) return;
+  createEffect(open, (isOpen) => {
+    if (!isOpen) return undefined;
     document.addEventListener("pointerdown", onPointerDown, true);
-    onCleanup(() => document.removeEventListener("pointerdown", onPointerDown, true));
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
   });
 
   return {

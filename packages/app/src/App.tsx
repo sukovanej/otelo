@@ -1,4 +1,4 @@
-import { A, type RouteSectionProps } from "@solidjs/router";
+import type { RouteSectionProps } from "@solidjs/router";
 import { For } from "solid-js";
 
 import { LogoIcon, LogsIcon, MetricsIcon, ServicesIcon, TracesIcon } from "@otelo/icons";
@@ -14,22 +14,20 @@ export default function App(props: RouteSectionProps) {
   return (
     <div class="flex h-dvh flex-col">
       <header class="flex h-12 shrink-0 items-center gap-6 border-b border-line bg-surface px-4">
-        <A href="/" class="flex items-center gap-2 font-mono text-[17px] font-semibold text-ink">
+        <a href="/" class="flex items-center gap-2 font-mono text-[17px] font-semibold text-ink">
           <LogoIcon size={20} class="text-accent" />
           otelo
-        </A>
+        </a>
         <nav class="flex gap-5">
           <For each={SECTIONS}>
             {(section) => (
-              <A
+              <a
                 href={section.href}
-                class="group flex items-center gap-1.5"
-                activeClass="text-ink"
-                inactiveClass="text-muted hover:text-ink"
+                class="group flex items-center gap-1.5 text-muted hover:text-ink data-active:text-ink"
               >
-                <section.icon class="group-aria-[current=page]:text-accent" />
+                <section.icon class="group-data-active:text-accent" />
                 {section.label}
-              </A>
+              </a>
             )}
           </For>
         </nav>

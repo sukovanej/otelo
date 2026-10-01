@@ -1,4 +1,4 @@
-import { Index, Show } from "solid-js";
+import { For, Show } from "solid-js";
 
 import { ChevronIcon } from "@otelo/icons";
 
@@ -50,11 +50,11 @@ export default function CheckboxMenu(props: CheckboxMenuProps) {
           "group flex max-w-96 cursor-pointer items-center gap-2 hover:bg-hover",
         )}
         aria-haspopup="dialog"
-        aria-expanded={menuPopover.open()}
+        aria-expanded={menuPopover.open() ? "true" : "false"}
         onClick={() => (menuPopover.open() ? menuPopover.hide() : menuPopover.show())}
       >
         <span class="text-muted">{props.label}</span>
-        <span class="truncate" classList={{ "text-muted": props.checked.length === 0 }}>
+        <span class={["truncate", { "text-muted": props.checked.length === 0 }]}>
           {props.checked.length === 0
             ? props.placeholder
             : props.checked.map((value) => labelOf(value)).join(", ")}
@@ -72,13 +72,13 @@ export default function CheckboxMenu(props: CheckboxMenuProps) {
           role="dialog"
           aria-label={props.label}
         >
-          <Index each={props.sections.filter((section) => section.options.length > 0)}>
+          <For each={props.sections.filter((section) => section.options.length > 0)} keyed={false}>
             {(section) => (
               <fieldset class="m-0 border-0 p-0">
                 <legend class="px-2 pt-1.5 pb-0.5 text-2xs font-semibold tracking-[0.04em] text-muted uppercase">
                   {section().title}
                 </legend>
-                <Index each={section().options}>
+                <For each={section().options} keyed={false}>
                   {(sectionOption) => (
                     <label
                       class={cx(option, "items-center gap-2 whitespace-nowrap hover:bg-active")}
@@ -94,10 +94,10 @@ export default function CheckboxMenu(props: CheckboxMenuProps) {
                       <span class="font-mono">{sectionOption().label}</span>
                     </label>
                   )}
-                </Index>
+                </For>
               </fieldset>
             )}
-          </Index>
+          </For>
         </div>
       </Show>
     </div>
