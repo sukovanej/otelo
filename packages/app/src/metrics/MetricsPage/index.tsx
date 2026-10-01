@@ -7,6 +7,7 @@ import { Callout, EmptyMessage } from "@otelo/ui";
 import { pageContent } from "../../classes";
 import { formatCount } from "../../count";
 import { API_MAX_ROWS, createListState, DEFAULT_SINCE, usePageKeys } from "../../list";
+import { decodePathSegment } from "../../path";
 import QueryBar from "../../QueryBar";
 import { summarizeMetricNames } from "../metric";
 import MetricsPageMetric from "./metrics-page-metric";
@@ -100,12 +101,4 @@ export default function MetricsPage() {
       </div>
     </div>
   );
-}
-
-function decodePathSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
 }
