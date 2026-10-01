@@ -1,4 +1,5 @@
-import { createSignal, type JSX, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { createSignal, Show } from "solid-js";
 
 import Panel from "../Panel";
 import type { ChartKind, TimeFrame, TimeSeries } from "../series";

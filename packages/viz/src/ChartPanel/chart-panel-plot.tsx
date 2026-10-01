@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Index, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onSettled, Show } from "solid-js";
 
 import { pickDefaultColor, toCssColor } from "../color";
 import { formatInstant, formatTick, pickTimeTicks, pickValueTicks } from "../scale";
@@ -58,14 +58,14 @@ interface ChartPanelPlotProps {
 export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   let plotElement!: HTMLDivElement;
   const [chartWidth, setChartWidth] = createSignal(0);
-  onMount(() => {
+  onSettled(() => {
     setChartWidth(plotElement.clientWidth);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry) setChartWidth(entry.contentRect.width);
     });
     observer.observe(plotElement);
-    onCleanup(() => observer.disconnect());
+    return () => observer.disconnect();
   });
 
   const plotWidth = () => Math.max(40, chartWidth() - PLOT_LEFT_PX - PLOT_RIGHT_MARGIN_PX);
@@ -246,7 +246,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
         ref={plotElement}
         class="relative cursor-crosshair touch-none rounded-md outline-offset-2 select-none"
         style={{ height: `${PLOT_TOP_PX + PLOT_HEIGHT_PX + AXIS_HEIGHT_PX}px` }}
-        tabIndex={0}
+        tabindex={0}
         role="group"
         aria-label={`${props.label}. The arrow keys read the values of each step.`}
         onPointerDown={onPointerDown}
@@ -262,11 +262,10 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
           <svg
             width={chartWidth()}
             height={PLOT_TOP_PX + PLOT_HEIGHT_PX + AXIS_HEIGHT_PX}
-            class="block overflow-visible transition-opacity"
-            classList={{ "opacity-50": props.loading }}
+            class={["block overflow-visible transition-opacity", { "opacity-50": props.loading }]}
             aria-hidden="true"
           >
-            <Index each={yTicks()}>
+            <For each={yTicks()} keyed={false}>
               {(tick) => (
                 <>
                   <line
@@ -288,8 +287,8 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
                   </text>
                 </>
               )}
-            </Index>
-            <Index each={xTicks()}>
+            </For>
+            <For each={xTicks()} keyed={false}>
               {(tick) => (
                 <text
                   x={timeToX(tick())}
@@ -300,7 +299,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
                   {formatTick(tick())}
                 </text>
               )}
-            </Index>
+            </For>
 
             <Show when={hoveredBucketIndex() !== undefined && props.kind === "bar"}>
               <rect

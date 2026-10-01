@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
@@ -72,8 +72,7 @@ export function createListState<V extends string, R extends ListResult<V>>(
   const live = () => params.live === "1" && until() === "";
   const toViewParam = (newView: V) => (newView === defaultView ? undefined : newView);
 
-  const [draftQuery, setDraftQuery] = createSignal(query());
-  createEffect(on(query, setDraftQuery, { defer: true }));
+  const [draftQuery, setDraftQuery] = createSignal(() => query());
 
   const queryIdentity = () => JSON.stringify([view(), query(), since(), until()]);
   const [raisedLimit, setRaisedLimit] = createSignal({ forQuery: "", limit: 0 });
@@ -82,17 +81,16 @@ export function createListState<V extends string, R extends ListResult<V>>(
 
   const requestKey = createMemo(
     () => ({ view: view(), q: query().trim(), since: since(), until: until(), limit: limit() }),
-    undefined,
     { equals: (previous, next) => JSON.stringify(previous) === JSON.stringify(next) },
   );
   const fetched = createFetch(requestKey, options.fetch);
 
-  createEffect(() => {
-    if (!live()) return;
+  createEffect(live, (isLive) => {
+    if (!isLive) return undefined;
     const timer = setInterval(() => {
       if (!fetched.loading()) fetched.reload();
     }, LIVE_RELOAD_MS);
-    onCleanup(() => clearInterval(timer));
+    return () => clearInterval(timer);
   });
 
   const shownResult = () => {

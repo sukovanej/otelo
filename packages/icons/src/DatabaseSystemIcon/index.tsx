@@ -1,5 +1,5 @@
+import { dynamic } from "@solidjs/web";
 import type { Component } from "solid-js";
-import { Dynamic } from "solid-js/web";
 
 import type { IconProps } from "../icon";
 import CassandraIcon from "./cassandra-icon";
@@ -40,9 +40,9 @@ interface DatabaseSystemIconProps extends IconProps {
 
 export default function DatabaseSystemIcon(props: DatabaseSystemIconProps) {
   const knownSystem = () => DATABASE_SYSTEMS[props.system];
+  const PickedIcon = dynamic(() => knownSystem()?.icon ?? DatabaseIcon);
   return (
-    <Dynamic
-      component={knownSystem()?.icon ?? DatabaseIcon}
+    <PickedIcon
       size={props.size}
       class={knownSystem() ? props.class : `text-database ${props.class ?? ""}`}
       title={props.title ?? toDatabaseName(props.system)}

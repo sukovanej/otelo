@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createMemo, Index, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 
 import { getMetricSeries, type MetricSeries, type SeriesInfo } from "@otelo/api";
 import { Callout, CheckboxMenu, EmptyMessage, Select } from "@otelo/ui";
@@ -118,7 +118,7 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
               }
             >
               {(answerFrame) => (
-                <Index each={charts()}>
+                <For each={charts()} keyed={false}>
                   {(chart) => (
                     <ChartPanel
                       title={chart().title}
@@ -131,7 +131,7 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
                       onZoom={zoomRangeTo}
                     />
                   )}
-                </Index>
+                </For>
               )}
             </Show>
           </>

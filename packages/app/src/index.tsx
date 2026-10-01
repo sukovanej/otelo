@@ -1,5 +1,5 @@
-import { Navigate, Route, Router } from "@solidjs/router";
-import { render } from "solid-js/web";
+import { createRouter, useNavigate } from "@solidjs/router";
+import { render } from "@solidjs/web";
 
 import App from "./App";
 import LogsPage from "./logs/LogsPage";
@@ -12,6 +12,25 @@ import TracesPage from "./traces/TracesPage";
 import "@otelo/ui/fonts.css";
 import "./app.css";
 
+const Router = createRouter({
+  routes: [
+    { path: "/", component: RedirectToServices },
+    { path: "/services", component: ServicesPage },
+    { path: "/services/:name", component: ServicePage },
+    { path: "/logs", component: LogsPage },
+    { path: "/traces", component: TracesPage },
+    { path: "/traces/:id", component: TracePage },
+    { path: "/metrics/:name?", component: MetricsPage },
+    { path: "*", component: NotFound },
+  ],
+});
+
+function RedirectToServices() {
+  const navigate = useNavigate();
+  navigate("/services", { replace: true });
+  return null;
+}
+
 function NotFound() {
   return <div class="py-8 text-center text-muted">Nothing is at this address.</div>;
 }
@@ -19,18 +38,4 @@ function NotFound() {
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html has no #root");
 
-render(
-  () => (
-    <Router root={App}>
-      <Route path="/" component={() => <Navigate href="/services" />} />
-      <Route path="/services" component={ServicesPage} />
-      <Route path="/services/:name" component={ServicePage} />
-      <Route path="/logs" component={LogsPage} />
-      <Route path="/traces" component={TracesPage} />
-      <Route path="/traces/:id" component={TracePage} />
-      <Route path="/metrics/:name?" component={MetricsPage} />
-      <Route path="*" component={NotFound} />
-    </Router>
-  ),
-  root,
-);
+render(() => <Router>{(props) => <App {...props} />}</Router>, root);

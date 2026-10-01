@@ -27,9 +27,11 @@ export default function ChartPanelLegend(props: ChartPanelLegendProps) {
             <li>
               <button
                 type="button"
-                class="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-hover hover:text-ink"
-                classList={{ "opacity-40": props.isolatedIndex !== undefined && !isIsolated() }}
-                aria-pressed={isIsolated()}
+                class={[
+                  "flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-hover hover:text-ink",
+                  { "opacity-40": props.isolatedIndex !== undefined && !isIsolated() },
+                ]}
+                aria-pressed={isIsolated() ? "true" : "false"}
                 title={isIsolated() ? "Show every series" : `Show ${series.label} alone`}
                 onClick={() => props.onIsolate(isIsolated() ? undefined : index())}
               >

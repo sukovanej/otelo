@@ -1,5 +1,5 @@
-import { createEffect, createSignal, createUniqueId, type JSX, onCleanup, Show } from "solid-js";
-import { Portal } from "solid-js/web";
+import { type JSX, Portal } from "@solidjs/web";
+import { createEffect, createSignal, createUniqueId, Show } from "solid-js";
 
 const POINTER_OFFSET_PX = 18;
 
@@ -44,25 +44,25 @@ export default function Tooltip(props: TooltipProps) {
     });
   };
   const hideTip = () => setAnchor(undefined);
-  onCleanup(hideTip);
 
   // Places the tip once it is in the page, since that needs its size.
-  createEffect(() => {
-    const shownAnchor = anchor();
-    const shownTip = tip();
-    if (!shownAnchor || !shownTip) return;
-    const { offsetWidth: width, offsetHeight: height } = shownTip;
-    const left = Math.min(
-      Math.max(shownAnchor.centerX - width / 2, TIP_GAP_PX),
-      window.innerWidth - width - TIP_GAP_PX,
-    );
-    const top =
-      shownAnchor.topWhenBelow + height + TIP_GAP_PX <= window.innerHeight
-        ? shownAnchor.topWhenBelow
-        : shownAnchor.bottomWhenAbove - height;
-    shownTip.style.left = `${left}px`;
-    shownTip.style.top = `${Math.max(top, TIP_GAP_PX)}px`;
-  });
+  createEffect(
+    () => [anchor(), tip()] as const,
+    ([shownAnchor, shownTip]) => {
+      if (!shownAnchor || !shownTip) return;
+      const { offsetWidth: width, offsetHeight: height } = shownTip;
+      const left = Math.min(
+        Math.max(shownAnchor.centerX - width / 2, TIP_GAP_PX),
+        window.innerWidth - width - TIP_GAP_PX,
+      );
+      const top =
+        shownAnchor.topWhenBelow + height + TIP_GAP_PX <= window.innerHeight
+          ? shownAnchor.topWhenBelow
+          : shownAnchor.bottomWhenAbove - height;
+      shownTip.style.left = `${left}px`;
+      shownTip.style.top = `${Math.max(top, TIP_GAP_PX)}px`;
+    },
+  );
 
   return (
     <>

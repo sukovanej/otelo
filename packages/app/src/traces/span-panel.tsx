@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 
 import type { TraceSpan } from "@otelo/api";
@@ -34,7 +33,7 @@ export default function SpanPanel(props: SpanPanelProps) {
             <ServiceName name={props.span.service} resource={props.span.resource} />
           </span>
           <Show when={props.onOpenTrace !== undefined}>
-            <A
+            <a
               href={`/traces/${props.span.trace_id}?span=${props.span.span_id}`}
               class={link}
               onClick={(e) => {
@@ -44,7 +43,7 @@ export default function SpanPanel(props: SpanPanelProps) {
               }}
             >
               Trace
-            </A>
+            </a>
           </Show>
         </>
       }

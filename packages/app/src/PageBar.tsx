@@ -1,4 +1,5 @@
-import { children, type JSX, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { children, Show } from "solid-js";
 
 import type { FetchState } from "./fetch";
 import { formatTime } from "./time";
@@ -14,13 +15,14 @@ export default function PageBar(props: PageBarProps) {
   const top = children(() => props.top);
   return (
     <div
-      class="relative z-20 shrink-0 bg-surface px-4 shadow-(--raised)"
-      classList={{ "pt-3.5": !!top() }}
+      class={["relative z-20 shrink-0 bg-surface px-4 shadow-(--raised)", { "pt-3.5": !!top() }]}
     >
       {top()}
       <div
-        class="flex min-h-7 items-center gap-3 text-muted"
-        classList={{ "pt-3 pb-2.5": !!top(), "py-2.5": !top() }}
+        class={[
+          "flex min-h-7 items-center gap-3 text-muted",
+          { "pt-3 pb-2.5": !!top(), "py-2.5": !top() },
+        ]}
       >
         {props.children}
         <span class="flex-1" />

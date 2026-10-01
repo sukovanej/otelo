@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { createMemo, createSignal, For, Show } from "solid-js";
 
 import {
   type Column,
@@ -67,9 +68,8 @@ export default function Table<R>(props: TableProps<R>) {
     <div
       role={props.level ? "treegrid" : "table"}
       aria-label={props.label}
-      aria-busy={props.loading}
-      class="grid gap-x-3 font-mono text-sm transition-opacity"
-      classList={{ "opacity-60": props.loading }}
+      aria-busy={props.loading ? "true" : undefined}
+      class={["grid gap-x-3 font-mono text-sm transition-opacity", { "opacity-60": props.loading }]}
       style={{ "grid-template-columns": props.columns.map(pickGridTrack).join(" ") }}
     >
       <div
@@ -98,11 +98,13 @@ export default function Table<R>(props: TableProps<R>) {
                 >
                   <button
                     type="button"
-                    class="-mx-1 flex cursor-pointer items-baseline gap-1 rounded px-1 uppercase hover:text-ink"
-                    classList={{
-                      "text-ink": isSorted(),
-                      "flex-row-reverse": resolveColumnAlign(column) === "end",
-                    }}
+                    class={[
+                      "-mx-1 flex cursor-pointer items-baseline gap-1 rounded px-1 uppercase hover:text-ink",
+                      {
+                        "text-ink": isSorted(),
+                        "flex-row-reverse": resolveColumnAlign(column) === "end",
+                      },
+                    ]}
                     onClick={() => sortByColumn(column.id)}
                   >
                     {column.label}

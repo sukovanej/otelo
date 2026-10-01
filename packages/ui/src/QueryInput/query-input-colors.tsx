@@ -1,4 +1,4 @@
-import { Index } from "solid-js";
+import { For } from "solid-js";
 
 import { cx } from "../classes";
 import { type Piece, pickPieceClass } from "../highlight";
@@ -23,9 +23,9 @@ export default function QueryInputColors(props: QueryInputColorsProps) {
           class="whitespace-pre"
           style={{ transform: `translateX(${-props.scrollLeft}px)` }}
         >
-          <Index each={props.pieces}>
+          <For each={props.pieces} keyed={false}>
             {(piece) => <span class={pickPieceClass(piece())}>{piece().text}</span>}
-          </Index>
+          </For>
         </div>
       </div>
     </div>

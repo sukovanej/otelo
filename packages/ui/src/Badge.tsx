@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
   trace: "bg-trace/15 text-trace",

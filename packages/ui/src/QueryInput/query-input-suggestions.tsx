@@ -35,7 +35,7 @@ export default function QueryInputSuggestions(props: QueryInputSuggestionsProps)
           <li
             role="option"
             id={toSuggestionId(index())}
-            aria-selected={props.activeIndex === index()}
+            aria-selected={props.activeIndex === index() ? "true" : "false"}
             class={cx(
               option,
               "items-baseline gap-2.5",

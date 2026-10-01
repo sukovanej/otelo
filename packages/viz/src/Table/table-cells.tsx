@@ -1,4 +1,5 @@
-import { For, type JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { For } from "solid-js";
 
 import { type CellTone, type Column, pickAlignClass } from "../column";
 import Value from "../Value";

@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 
 import { EmptyMessage } from "@otelo/ui";
@@ -26,10 +25,12 @@ export default function MetricsPageNameList(props: MetricsPageNameListProps) {
           <For each={props.names}>
             {(metric) => (
               <li>
-                <A
+                <a
                   href={props.toHref(metric.name)}
-                  class="block px-4 py-1.5 hover:bg-hover"
-                  classList={{ "bg-active": metric.name === props.openName }}
+                  class={[
+                    "block px-4 py-1.5 hover:bg-hover",
+                    { "bg-active": metric.name === props.openName },
+                  ]}
                   aria-current={metric.name === props.openName ? "page" : undefined}
                 >
                   <div class="truncate font-mono text-ink" title={metric.name}>
@@ -42,7 +43,7 @@ export default function MetricsPageNameList(props: MetricsPageNameListProps) {
                       `${metric.seriesCount.toLocaleString()} series`,
                     ].join(" · ")}
                   </div>
-                </A>
+                </a>
               </li>
             )}
           </For>

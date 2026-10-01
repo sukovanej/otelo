@@ -9,6 +9,7 @@
     "@otelo/ui": "workspace:*"
   },
   "devDependencies": {
+    "@solidjs/web": "catalog:",
     "solid-js": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
@@ -16,6 +17,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@solidjs/web": "catalog:",
     "solid-js": "catalog:",
     "tailwindcss": "catalog:"
   }

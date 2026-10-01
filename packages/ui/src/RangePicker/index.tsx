@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, flush, For, Show } from "solid-js";
 
 import { CheckIcon, ChevronIcon } from "@otelo/icons";
 
@@ -68,6 +68,7 @@ export default function RangePicker(props: RangePickerProps) {
     setFrom(new Date(Math.floor(resolved.startMs / 1000) * 1000));
     setTo(new Date(Math.floor(resolved.endMs / 1000) * 1000));
     pickerPopover.show();
+    flush();
     (
       presetList.querySelector<HTMLElement>("[aria-current]") ?? presetList.querySelector("button")
     )?.focus();
@@ -108,7 +109,7 @@ export default function RangePicker(props: RangePickerProps) {
           class={cx(SEGMENT_CLASSES, sizes[props.size ?? "md"], "group flex items-center gap-2")}
           aria-label={`Range: ${formatRangeLabel(range(), Date.now())}`}
           aria-haspopup="dialog"
-          aria-expanded={pickerPopover.open()}
+          aria-expanded={pickerPopover.open() ? "true" : "false"}
           onClick={() => (pickerPopover.open() ? pickerPopover.hide() : openPicker())}
         >
           <span class="flex gap-1.5 whitespace-nowrap">

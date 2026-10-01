@@ -1,4 +1,5 @@
-import { type Accessor, createMemo, createSignal, type JSX, Match, Show, Switch } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { type Accessor, createMemo, createSignal, Match, Show, Switch } from "solid-js";
 
 import { getTrace, type LogLine, toQueryString } from "@otelo/api";
 import { Button, Callout, EmptyMessage, Tabs } from "@otelo/ui";

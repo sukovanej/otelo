@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 
 const TONE_CLASSES: Record<CalloutTone, string> = {
   error: "whitespace-pre-wrap bg-error-soft font-mono text-error",
