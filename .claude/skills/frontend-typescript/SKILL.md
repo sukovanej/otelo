@@ -1,6 +1,6 @@
 ---
 name: frontend-typescript
-description: How otelo writes frontend TypeScript. Where a component lives, what its file is called, what it exports, the order inside the file, how its types are shaped, and how everything is named. Invoke before creating or editing any .ts or .tsx file under packages/, and before reviewing frontend code.
+description: How otelo writes frontend TypeScript on Solid 2. Where a component lives, what its file is called, what it exports, the order inside the file, how its types are shaped, how everything is named, and where Solid 2 differs from Solid 1. Invoke before creating or editing any .ts or .tsx file under packages/, and before reviewing frontend code.
 ---
 
 # Writing the frontend TypeScript
@@ -68,6 +68,49 @@ interface FollowingToken {
 - Branch with `following.kind === "token"`, or with a `switch` of statements.
 - Map a discriminator to a value with a `Record<Kind, …>`, where a missing tag does not
   compile. A `switch` that returns from every case fails the `consistent-return` lint.
+
+## Solid 2
+
+The UI runs on Solid 2, a release candidate newer than your training, so code written from
+memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you use it.
+
+- **Writes are staged.** A setter commits on the next microtask. A read right after it
+  returns the old value, and the DOM still shows the old state. A handler that focuses,
+  scrolls to or measures what it just changed calls `flush()` after the write, as
+  `Select.openList` does.
+- **Effects have two phases.** `createEffect(() => source(), (value) => { … })` reads in the
+  first function and acts in the second, which returns its cleanup.
+- **State that follows a source and can still be edited** is a writable derived signal,
+  `createSignal(() => props.value)`. It resets when the source changes.
+- **A prop read once on purpose** goes through `untrack(() => props.initialSpanId)`. Every
+  other prop read sits in JSX, a memo or the first function of an effect.
+- **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
+  remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
+  write during disposal held every later update, and the router froze with it.
+
+The typecheck rejects the Solid 1 form. This is the Solid 2 one:
+
+| Solid 1                          | Solid 2                                               |
+| -------------------------------- | ----------------------------------------------------- |
+| `<Index>`                        | `<For keyed={false}>`                                 |
+| `onMount`                        | `onSettled`                                           |
+| `on(source, fn)`                 | the first function of `createEffect`                  |
+| `batch`                          | nothing, since writes batch already                   |
+| `splitProps`, `mergeProps`       | `omit`, `merge`                                       |
+| `classList`                      | `class={["base", { "opacity-60": loading() }]}`       |
+| `<Dynamic component={…}>`        | `const PickedIcon = dynamic(() => …)`                 |
+| `aria-expanded={open()}`         | `aria-expanded={open() ? "true" : "false"}`           |
+| `tabIndex`, `on:keydown`         | `tabindex`, `onKeyDown`                               |
+| `<A activeClass>`                | `<a>` styled with `data-active:`                      |
+| `solid-js/web`, `JSX`            | `@solidjs/web`                                        |
+
+A boolean `aria-*` value renders as an empty attribute, which `aria-selected:` and the
+other Tailwind variants do not match.
+
+A change is done when `mise check` passes and the pages it touches, served by
+`mise run web:dev`, add no new warning to the browser console. The dev build names
+reactivity mistakes there, and
+`packages/app/node_modules/solid-js/skills/reactivity-diagnostics/SKILL.md` explains each one.
 
 ## Names
 
