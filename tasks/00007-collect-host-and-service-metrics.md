@@ -92,3 +92,7 @@ About 100 series on the droplet: 25 for the machine and otelo, and 3 for each of
 ### 2026-09-30T21:34:33Z by Milan Suk via claude-code
 
 > On macOS the first two readings after start report `/System/Volumes/Data` next to `/` for the same disk, then only `/`, so `system.filesystem.usage` grouped by state doubles for those 15 seconds. Not fixed.
+
+### 2026-10-01T08:21:26Z by Milan Suk via claude-code
+
+> On macOS `system.memory.usage` has only `used` (Activity Monitor's Memory Used) and `free` (free pages), so about 8 GB of 24 GiB, mostly the file cache, is in no state and the states never add up to `system.memory.limit`. Not fixed.
