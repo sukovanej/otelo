@@ -163,23 +163,18 @@ export function toMetricCharts(
     const description = `${firstGroup.kind} in ${firstGroup.unit === "" ? "no unit" : firstGroup.unit}`;
     const chartUnit = pickChartUnit(firstGroup.unit, firstGroup.kind);
     const labels = labelSeriesGroups(groups, by);
-    const toSeries = (group: SeriesGroup, index: number, readValue: ReadBucketValue) =>
-      withOtherColor(group.key, {
-        label: labels[index] ?? "",
-        values: readGroupValues(group, frame, readValue, chartUnit.factor),
-      });
+    const toSeries = (group: SeriesGroup, index: number, values: (number | null)[]) =>
+      withOtherColor(group.key, { label: labels[index] ?? "", values });
 
     if (firstGroup.kind !== "histogram") {
-      const readValue: ReadBucketValue =
-        firstGroup.kind === "counter"
-          ? (bucket) => (bucket.change.kind === "rate" ? bucket.change.per_second : null)
-          : (bucket) => bucket.avg;
       return [
         {
           title: KIND_TITLES[firstGroup.kind],
           description,
           unit: chartUnit.unit,
-          series: groups.map((group, index) => toSeries(group, index, readValue)),
+          series: groups.map((group, index) =>
+            toSeries(group, index, readAveragesOrRates(group, frame)),
+          ),
         },
       ];
     }
@@ -206,9 +201,20 @@ export function toMetricCharts(
       title: `${percentile.toUpperCase()} of each group`,
       description,
       unit: chartUnit.unit,
-      series: groups.map((group, index) => toSeries(group, index, readPercentile(percentile))),
+      series: groups.map((group, index) =>
+        toSeries(
+          group,
+          index,
+          readGroupValues(group, frame, readPercentile(percentile), chartUnit.factor),
+        ),
+      ),
     }));
   });
+}
+
+export function readAveragesOrRates(group: SeriesGroup, frame: TimeFrame): (number | null)[] {
+  const readValue: ReadBucketValue = group.kind === "counter" ? readRatePerSecond : readAverage;
+  return readGroupValues(group, frame, readValue, pickChartUnit(group.unit, group.kind).factor);
 }
 
 function labelSeriesGroups(
@@ -294,6 +300,14 @@ function pickChartUnit(unit: string, kind: MetricKindName): ChartUnit {
   if (unit === "%") return { unit: "ratio", factor: 0.01 };
   if (unit === "1" && kind === "gauge") return { unit: "ratio", factor: 1 };
   return { unit: isCount ? "count" : "number", factor: 1 };
+}
+
+function readAverage(bucket: SeriesGroup["buckets"][number]): number | null {
+  return bucket.avg;
+}
+
+function readRatePerSecond(bucket: SeriesGroup["buckets"][number]): number | null {
+  return bucket.change.kind === "rate" ? bucket.change.per_second : null;
 }
 
 function readPercentile(percentile: Percentile): ReadBucketValue {
