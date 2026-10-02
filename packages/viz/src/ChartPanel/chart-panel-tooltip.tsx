@@ -35,16 +35,19 @@ export default function ChartPanelTooltip(props: ChartPanelTooltipProps) {
       </div>
       <table class="border-collapse">
         <tbody>
-          <For each={props.rows}>
+          <For each={props.rows} keyed={false}>
             {(row) => (
               <tr>
                 <td class="py-px pr-2">
-                  <span class="block h-0.5 w-3 rounded-full" style={{ background: row.cssColor }} />
+                  <span
+                    class="block h-0.5 w-3 rounded-full"
+                    style={{ background: row().cssColor }}
+                  />
                 </td>
                 <td class="py-px pr-3 text-right">
-                  <Value value={row.value} unit={props.unit} />
+                  <Value value={row().value} unit={props.unit} />
                 </td>
-                <td class="py-px whitespace-nowrap text-muted">{row.label}</td>
+                <td class="py-px whitespace-nowrap text-muted">{row().label}</td>
               </tr>
             )}
           </For>

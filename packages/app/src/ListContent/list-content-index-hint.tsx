@@ -3,6 +3,8 @@ import { createSignal, For, Show } from "solid-js";
 import { addIndex, type IndexedSignal } from "@otelo/api";
 import { Button, Callout } from "@otelo/ui";
 
+type KeyIndexState = "indexing" | "indexed";
+
 interface ListContentIndexHintProps {
   readonly signal: IndexedSignal;
   readonly singularNoun: string;
@@ -10,13 +12,26 @@ interface ListContentIndexHintProps {
 }
 
 export default function ListContentIndexHint(props: ListContentIndexHintProps) {
-  const [indexedKeys, setIndexedKeys] = createSignal<ReadonlySet<string>>(new Set());
+  const [keyStates, setKeyStates] = createSignal<ReadonlyMap<string, KeyIndexState>>(new Map());
   const [errorMessage, setErrorMessage] = createSignal<string>();
-  const indexAttribute = (key: string) =>
-    addIndex(props.signal, key).then(
-      () => setIndexedKeys((keys) => new Set([...keys, key])),
-      (error: unknown) => setErrorMessage(error instanceof Error ? error.message : String(error)),
+  const setKeyState = (key: string, state: KeyIndexState | undefined) =>
+    setKeyStates((states) => {
+      const next = new Map(states);
+      if (state === undefined) next.delete(key);
+      else next.set(key, state);
+      return next;
+    });
+  const indexAttribute = (key: string) => {
+    setErrorMessage(undefined);
+    setKeyState(key, "indexing");
+    return addIndex(props.signal, key).then(
+      () => setKeyState(key, "indexed"),
+      (error: unknown) => {
+        setKeyState(key, undefined);
+        setErrorMessage(error instanceof Error ? error.message : String(error));
+      },
     );
+  };
   return (
     <Callout tone="hint">
       The query read every {props.singularNoun} in the range, because it compares attributes without
@@ -24,10 +39,15 @@ export default function ListContentIndexHint(props: ListContentIndexHintProps) {
       <For each={props.unindexedKeys}>
         {(key) => (
           <Show
-            when={!indexedKeys().has(key)}
+            when={keyStates().get(key) !== "indexed"}
             fallback={<span>{key} is indexed; the writer builds it within seconds.</span>}
           >
-            <Button size="sm" class="font-mono" onClick={() => void indexAttribute(key)}>
+            <Button
+              size="sm"
+              class="font-mono"
+              disabled={keyStates().get(key) === "indexing"}
+              onClick={() => void indexAttribute(key)}
+            >
               Index {key}
             </Button>
           </Show>

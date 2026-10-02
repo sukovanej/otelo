@@ -1,4 +1,4 @@
-import { createSignal, flush, For, Show } from "solid-js";
+import { createMemo, createSignal, flush, For, Show } from "solid-js";
 
 import { CheckIcon, ChevronIcon } from "@otelo/icons";
 
@@ -46,6 +46,7 @@ export default function RangePicker(props: RangePickerProps) {
 
   const range = (): Range => ({ since: props.since, until: props.until });
   const endsNow = () => props.until === UNTIL_NOW;
+  const pickedPreset = createMemo(() => findPreset(range()));
   const rangeLengthMs = () => {
     const resolved = resolveRange(range(), Date.now());
     return resolved && resolved.endMs - resolved.startMs;
@@ -113,10 +114,10 @@ export default function RangePicker(props: RangePickerProps) {
           onClick={() => (pickerPopover.open() ? pickerPopover.hide() : openPicker())}
         >
           <span class="flex gap-1.5 whitespace-nowrap">
-            <For each={splitRangeLabel(range(), Date.now())}>
+            <For each={splitRangeLabel(range(), Date.now())} keyed={false}>
               {(part) => (
-                <span class={part.dim ? "text-muted" : "font-medium tabular-nums"}>
-                  {part.text}
+                <span class={part().dim ? "text-muted" : "font-medium tabular-nums"}>
+                  {part().text}
                 </span>
               )}
             </For>
@@ -168,7 +169,7 @@ export default function RangePicker(props: RangePickerProps) {
                       option,
                       "w-full items-center gap-2 pr-4 whitespace-nowrap hover:bg-active",
                     )}
-                    aria-current={findPreset(range()) === preset ? "true" : undefined}
+                    aria-current={pickedPreset() === preset ? "true" : undefined}
                     onClick={() => {
                       closePicker();
                       props.onChange(preset.since, UNTIL_NOW);
@@ -176,7 +177,7 @@ export default function RangePicker(props: RangePickerProps) {
                   >
                     <CheckIcon
                       size={13}
-                      class={cx("text-accent", findPreset(range()) !== preset && "invisible")}
+                      class={cx("text-accent", pickedPreset() !== preset && "invisible")}
                     />
                     {preset.label}
                   </button>

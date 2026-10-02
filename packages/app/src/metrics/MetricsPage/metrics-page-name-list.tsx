@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { For, latest, Show } from "solid-js";
 
 import { EmptyMessage } from "@otelo/ui";
 
@@ -22,30 +22,30 @@ export default function MetricsPageNameList(props: MetricsPageNameListProps) {
         fallback={<EmptyMessage>No metrics in this range match the query.</EmptyMessage>}
       >
         <ul class="m-0 list-none p-0">
-          <For each={props.names}>
-            {(metric) => (
-              <li>
-                <a
-                  href={props.toHref(metric.name)}
-                  class={[
-                    "block px-4 py-1.5 hover:bg-hover",
-                    { "bg-active": metric.name === props.openName },
-                  ]}
-                  aria-current={metric.name === props.openName ? "page" : undefined}
-                >
-                  <div class="truncate font-mono text-ink" title={metric.name}>
-                    {metric.name}
-                  </div>
-                  <div class="truncate text-xs text-muted">
-                    {[
-                      metric.kinds.join(", "),
-                      ...metric.units.filter((unit) => unit !== ""),
-                      `${metric.seriesCount.toLocaleString()} series`,
-                    ].join(" · ")}
-                  </div>
-                </a>
-              </li>
-            )}
+          <For each={props.names} keyed={(metric) => metric.name}>
+            {(metric) => {
+              const isOpen = () => latest(() => props.openName) === metric().name;
+              return (
+                <li>
+                  <a
+                    href={props.toHref(metric().name)}
+                    class={["block px-4 py-1.5 hover:bg-hover", { "bg-active": isOpen() }]}
+                    aria-current={isOpen() ? "page" : undefined}
+                  >
+                    <div class="truncate font-mono text-ink" title={metric().name}>
+                      {metric().name}
+                    </div>
+                    <div class="truncate text-xs text-muted">
+                      {[
+                        metric().kinds.join(", "),
+                        ...metric().units.filter((unit) => unit !== ""),
+                        `${metric().seriesCount.toLocaleString()} series`,
+                      ].join(" · ")}
+                    </div>
+                  </a>
+                </li>
+              );
+            }}
           </For>
         </ul>
       </Show>

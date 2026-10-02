@@ -70,8 +70,9 @@ export default function SpanList(props: SpanListProps) {
     <Table
       label="Spans"
       rows={props.spans}
+      rowKey={toSpanKey}
       columns={COLUMNS}
-      selected={(span) => props.selectedKey === toSpanKey(span)}
+      selectedKey={() => props.selectedKey}
       tone={(span) => (isFailedSpan(span) ? "error" : undefined)}
       onRowClick={(span) =>
         props.onSelect(props.selectedKey === toSpanKey(span) ? undefined : span)

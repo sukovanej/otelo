@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { type Accessor, createMemo, createSignal, Match, Show, Switch } from "solid-js";
+import { type Accessor, createMemo, createSignal, Match, Show, snapshot, Switch } from "solid-js";
 
 import { getTrace, type LogLine, toQueryString } from "@otelo/api";
 import { Button, Callout, EmptyMessage, Tabs } from "@otelo/ui";
@@ -16,7 +16,7 @@ import { formatDateTime, formatTime, parseTime } from "../../time";
 import { isFailedSpan } from "../span";
 import SpanPanel from "../span-panel";
 import SpanTitle from "../SpanTitle";
-import { buildSpanTree, measureTraceNanos } from "../tree";
+import { buildSpanTree, keepUnchangedRows, measureTraceNanos, type TreeRow } from "../tree";
 import TraceViewWaterfall from "./trace-view-waterfall";
 
 export type TraceTab = "spans" | "logs";
@@ -47,7 +47,9 @@ export default function TraceView(props: TraceViewProps) {
     (id, signal) => getTrace(id, {}, signal),
   );
   const trace = fetched.data;
-  const rows = createMemo(() => buildSpanTree(trace()?.spans ?? []));
+  const rows = createMemo<TreeRow[]>((previousRows) =>
+    keepUnchangedRows(previousRows ?? [], buildSpanTree(trace()?.spans ?? [])),
+  );
   const rootSpan = () => rows()[0]?.span;
   const failedSpanCount = () => trace()?.spans.filter(isFailedSpan).length ?? 0;
 
@@ -212,7 +214,14 @@ export function createTraceState(
   setSpanId: (spanId: string | undefined) => void,
 ): TraceState {
   const [line, setLine] = createSignal<LogLine>();
-  return { tab, setTab, spanId, setSpanId, line, setLine };
+  return {
+    tab,
+    setTab,
+    spanId,
+    setSpanId,
+    line,
+    setLine: (selectedLine) => setLine(selectedLine && snapshot(selectedLine)),
+  };
 }
 
 export function closePanel(state: TraceState): boolean {

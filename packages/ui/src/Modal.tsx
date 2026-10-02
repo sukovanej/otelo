@@ -25,13 +25,16 @@ export default function Modal(props: ModalProps) {
 
   onCleanup(() => {
     removing = true;
-    // Closing the dialog, not only removing it, is what gives the focus back.
-    if (dialog.open) dialog.close();
-    if (!opener?.isConnected) return;
-    // After a modal opened with the keyboard the opener keeps the focus, to go
-    // on from. After one opened with the pointer it shows no focus ring.
-    if (openedByKeyboard) opener.focus();
-    else if (document.activeElement === opener) opener.blur();
+    // Moving the focus runs blur handlers that write signals, which must wait
+    // until the disposal is over.
+    queueMicrotask(() => {
+      if (dialog.open) dialog.close();
+      if (!opener?.isConnected) return;
+      // After a modal opened with the keyboard the opener keeps the focus, to go
+      // on from. After one opened with the pointer it shows no focus ring.
+      if (openedByKeyboard) opener.focus();
+      else if (document.activeElement === opener) opener.blur();
+    });
   });
 
   return (
@@ -46,7 +49,7 @@ export default function Modal(props: ModalProps) {
       onKeyDown={(e) => {
         // "/" would focus the query of the page under the modal.
         if (e.key === "/") e.stopPropagation();
-        if (e.key !== "Escape") return;
+        if (e.key !== "Escape" || e.defaultPrevented) return;
         // The page removes the modal after `onClose`, which closes the
         // dialog, so every way out takes the same path.
         e.preventDefault();

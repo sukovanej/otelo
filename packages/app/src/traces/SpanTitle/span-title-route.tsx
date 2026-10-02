@@ -15,8 +15,8 @@ interface SpanTitleRouteProps {
 export default function SpanTitleRoute(props: SpanTitleRouteProps) {
   return (
     <span class="truncate" title={props.route}>
-      <For each={splitRouteIntoParts(props.route)}>
-        {(part) => <span class={ROUTE_PART_CLASSES[part.kind]}>{part.text}</span>}
+      <For each={splitRouteIntoParts(props.route)} keyed={false}>
+        {(part) => <span class={ROUTE_PART_CLASSES[part().kind]}>{part().text}</span>}
       </For>
     </span>
   );

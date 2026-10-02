@@ -61,6 +61,7 @@ export default function TraceList(props: TraceListProps) {
     <Table
       label="Traces"
       rows={props.traces}
+      rowKey={(trace) => trace.trace_id}
       columns={COLUMNS}
       tone={(trace) => (trace.error ? "error" : undefined)}
       href={(trace) => `/traces/${trace.trace_id}`}

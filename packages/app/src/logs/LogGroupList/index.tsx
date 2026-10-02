@@ -70,15 +70,13 @@ export default function LogGroupList(props: LogGroupListProps) {
     <Table
       label="Log templates"
       rows={props.groups}
+      rowKey={(group) => group.template}
       columns={columns}
-      selected={(group) => openTemplate() === group.template}
+      selectedKey={openTemplate}
       onRowClick={(group) =>
         setOpenTemplate(openTemplate() === group.template ? undefined : group.template)
       }
-      detail={{
-        isOpen: (group) => openTemplate() === group.template,
-        draw: (group) => <LogGroupListSamples group={group} onShowLines={props.onShowLines} />,
-      }}
+      detail={(group) => <LogGroupListSamples group={group} onShowLines={props.onShowLines} />}
     />
   );
 }

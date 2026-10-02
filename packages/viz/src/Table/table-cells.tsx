@@ -30,15 +30,16 @@ export default function TableCells<R>(props: TableCellsProps<R>) {
           if (column.kind === "text") {
             return <span class="truncate">{column.value(props.row) ?? "–"}</span>;
           }
-          const value = column.value(props.row);
-          const valueElement = <Value value={value} unit={column.unit} inColumn />;
-          if (column.kind === "number") return valueElement;
-          const largest = props.largestMeterValues.get(column.id) ?? 0;
-          return (
-            <TableMeter share={largest > 0 && value !== null ? value / largest : 0}>
-              {valueElement}
-            </TableMeter>
+          const valueElement = (
+            <Value value={column.value(props.row)} unit={column.unit} inColumn />
           );
+          if (column.kind === "number") return valueElement;
+          const share = () => {
+            const value = column.value(props.row);
+            const largest = props.largestMeterValues.get(column.id) ?? 0;
+            return largest > 0 && value !== null ? value / largest : 0;
+          };
+          return <TableMeter share={share()}>{valueElement}</TableMeter>;
         };
         return (
           <div

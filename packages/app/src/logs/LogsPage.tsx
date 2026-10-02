@@ -1,4 +1,4 @@
-import { createSignal, Match, Show, Switch } from "solid-js";
+import { createSignal, Match, Show, snapshot, Switch } from "solid-js";
 
 import { getLogGroups, getLogs, type LogGroups, type LogLine, type Logs } from "@otelo/api";
 import { EmptyMessage } from "@otelo/ui";
@@ -44,7 +44,9 @@ export default function LogsPage() {
   });
 
   // The line stays open when a reload or another query no longer brings it.
+  // A snapshot, since a reload merges the next answer into the rows by position.
   const [selectedLine, setSelectedLine] = createSignal<LogLine>();
+  const selectLine = (line: LogLine | undefined) => setSelectedLine(line && snapshot(line));
   const selectedKey = () => {
     const line = selectedLine();
     return line && toLineKey(line);
@@ -116,11 +118,7 @@ export default function LogsPage() {
                 when={body().logs.length > 0}
                 fallback={<EmptyMessage>{NO_LINES_MESSAGE}</EmptyMessage>}
               >
-                <LogLines
-                  lines={body().logs}
-                  selectedKey={selectedKey()}
-                  onSelect={setSelectedLine}
-                />
+                <LogLines lines={body().logs} selectedKey={selectedKey()} onSelect={selectLine} />
               </Show>
             )}
           </Match>

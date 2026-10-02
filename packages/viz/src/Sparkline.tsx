@@ -53,9 +53,15 @@ export default function Sparkline(props: SparklineProps) {
         stroke="var(--color-line)"
         stroke-width="1"
       />
-      <For each={barRects()}>
+      <For each={barRects()} keyed={false}>
         {(bar) => (
-          <rect x={bar.x} y={bar.y} width={bar.width} height={bar.height} fill={bar.cssColor} />
+          <rect
+            x={bar().x}
+            y={bar().y}
+            width={bar().width}
+            height={bar().height}
+            fill={bar().cssColor}
+          />
         )}
       </For>
       <Show when={linePath()}>

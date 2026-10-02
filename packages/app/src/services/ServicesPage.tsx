@@ -128,6 +128,7 @@ export default function ServicesPage() {
                 <Table
                   label="Services"
                   rows={services().services}
+                  rowKey={(service) => service.service}
                   columns={columns}
                   initialSort={{ columnId: "requests", descending: true }}
                   href={(service) =>

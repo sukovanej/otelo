@@ -183,6 +183,9 @@ export default function ServicePage() {
 
                   <ServicePageResources service={name()} range={range} onZoom={zoomRangeTo} />
 
+                  <Show when={fetchedCalls.errorMessage()}>
+                    {(errorMessage) => <Callout tone="error">{errorMessage()}</Callout>}
+                  </Show>
                   <FetchErrorBoundary>
                     <Show when={fetchedCalls.data()}>
                       {(calls) => (
@@ -211,6 +214,13 @@ export default function ServicePage() {
                       </a>
                     }
                   >
+                    <Show when={fetchedErrorTraces.errorMessage()}>
+                      {(errorMessage) => (
+                        <div class="p-3">
+                          <Callout tone="error">{errorMessage()}</Callout>
+                        </div>
+                      )}
+                    </Show>
                     <FetchErrorBoundary>
                       <Show when={fetchedErrorTraces.data()}>
                         {(traces) => (
@@ -245,6 +255,13 @@ export default function ServicePage() {
                       </a>
                     }
                   >
+                    <Show when={fetchedErrorLogs.errorMessage()}>
+                      {(errorMessage) => (
+                        <div class="p-3">
+                          <Callout tone="error">{errorMessage()}</Callout>
+                        </div>
+                      )}
+                    </Show>
                     <FetchErrorBoundary>
                       <Show when={fetchedErrorLogs.data()}>
                         {(logGroups) => (

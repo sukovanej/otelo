@@ -80,7 +80,15 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
   return (
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-3">
-        <h1 class="m-0 min-w-0 flex-1 truncate font-mono text-base font-semibold">{props.name}</h1>
+        <h1
+          class={[
+            "m-0 min-w-0 flex-1 truncate font-mono text-base font-semibold transition-opacity",
+            { "opacity-60": fetched.loading() },
+          ]}
+          aria-busy={fetched.loading() ? "true" : undefined}
+        >
+          {latest(() => props.name)}
+        </h1>
         <CheckboxMenu
           label="Group by"
           placeholder="nothing"
