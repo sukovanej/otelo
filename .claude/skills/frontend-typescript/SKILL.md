@@ -84,6 +84,10 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   `createSignal(() => props.value)`. It resets when the source changes.
 - **A prop read once on purpose** goes through `untrack(() => props.initialSpanId)`. Every
   other prop read sits in JSX, a memo or the first function of an effect.
+- **An async memo holds the page.** When a source it reads changes, every reader of that
+  source shows the old value until the fetch lands. A control that echoes its own source,
+  as the range picker does, reads it through `latest(range.since)`, or it lags a click and
+  a second click builds on the old value. `createRangeFetch` is the example.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
   remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
   write during disposal held every later update, and the router froze with it.
