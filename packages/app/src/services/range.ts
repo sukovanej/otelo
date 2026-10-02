@@ -1,11 +1,10 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { useQuery } from "@tanstack/solid-query";
-import { type Accessor, createMemo } from "solid-js";
+import type { Accessor } from "solid-js";
 
 import { toQueryString } from "@otelo/api";
 
-import type { FetchState } from "../fetch";
-import { DEFAULT_SINCE, LIVE_RELOAD_MS } from "../list";
+import { createFetch, type FetchState } from "../fetch";
+import { DEFAULT_SINCE } from "../list";
 
 export interface RangeState {
   readonly since: () => string;
@@ -58,23 +57,10 @@ export function createRangeFetch<K, T>(
   key: Accessor<K>,
   fetcher: (key: K & RangeBounds, signal: AbortSignal) => Promise<T>,
 ): FetchState<T> {
-  const query = useQuery(() => {
-    const keyWithRange = { ...key(), since: range.since(), until: range.until() };
-    return {
-      queryKey: [queryName, keyWithRange],
-      queryFn: ({ signal }) => fetcher(keyWithRange, signal),
-      refetchInterval: range.live() ? LIVE_RELOAD_MS : false,
-    };
-  });
-  const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
-  const updatedAt = createMemo<Date | undefined>((previous) =>
-    query.dataUpdatedAt === 0 ? previous : new Date(query.dataUpdatedAt),
+  return createFetch(
+    queryName,
+    () => ({ ...key(), since: range.since(), until: range.until() }),
+    fetcher,
+    range.live,
   );
-  return {
-    data: () => (answered() ? query.data : undefined),
-    errorMessage: () => (!answered() || query.isRefetchError ? query.error?.message : undefined),
-    loading: () => query.isFetching,
-    updatedAt,
-    reload: () => void query.refetch(),
-  };
 }

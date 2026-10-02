@@ -42,14 +42,11 @@ interface TraceViewProps {
 export default function TraceView(props: TraceViewProps) {
   const state = () => props.state;
   const fetched = createFetch(
+    "trace",
     () => props.id,
     (id, signal) => getTrace(id, {}, signal),
   );
-  // The answer of an earlier trace does not show while this one loads.
-  const trace = () => {
-    const answer = fetched.data();
-    return answer?.trace_id === props.id.toLowerCase() ? answer : undefined;
-  };
+  const trace = fetched.data;
   const rows = createMemo(() => buildSpanTree(trace()?.spans ?? []));
   const rootSpan = () => rows()[0]?.span;
   const failedSpanCount = () => trace()?.spans.filter(isFailedSpan).length ?? 0;

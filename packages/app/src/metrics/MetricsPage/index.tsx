@@ -1,11 +1,12 @@
 import { type Params, useParams } from "@solidjs/router";
-import { createMemo, Show } from "solid-js";
+import { createMemo, Errored, Show } from "solid-js";
 
 import { getMetrics, type MetricList, toQueryString } from "@otelo/api";
 import { Callout, EmptyMessage } from "@otelo/ui";
 
 import { pageContent } from "../../classes";
 import { formatCount } from "../../count";
+import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { API_MAX_ROWS, createListState, DEFAULT_SINCE, usePageKeys } from "../../list";
 import { decodePathSegment } from "../../path";
 import QueryBar from "../../QueryBar";
@@ -26,6 +27,7 @@ interface MetricPathParams extends Params {
 
 export default function MetricsPage() {
   const list = createListState<"names", NamesResult>({
+    name: "metric-names",
     views: ["names"],
     firstLimits: { names: API_MAX_ROWS },
     fetch: async (key, signal) => ({ view: "names", body: await getMetrics(key, signal) }),
@@ -70,12 +72,18 @@ export default function MetricsPage() {
       </QueryBar>
 
       <div class="flex min-h-0 flex-1">
-        <MetricsPageNameList
-          names={names()}
-          openName={openName()}
-          loaded={list.shownResult() !== undefined}
-          toHref={toMetricHref}
-        />
+        <Errored
+          fallback={
+            <MetricsPageNameList names={[]} openName={openName()} loaded toHref={toMetricHref} />
+          }
+        >
+          <MetricsPageNameList
+            names={names()}
+            openName={openName()}
+            loaded={list.shownResult() !== undefined}
+            toHref={toMetricHref}
+          />
+        </Errored>
         <div class={`min-w-0 flex-1 ${pageContent}`}>
           <Show when={list.fetched.errorMessage()}>
             {(errorMessage) => (
@@ -84,19 +92,21 @@ export default function MetricsPage() {
               </div>
             )}
           </Show>
-          <Show
-            when={openName()}
-            fallback={<EmptyMessage>Pick a metric on the left to chart it.</EmptyMessage>}
-          >
-            {(name) => (
-              <MetricsPageMetric
-                name={name()}
-                query={list.query()}
-                range={list}
-                seriesOfMetric={seriesOfOpenMetric()}
-              />
-            )}
-          </Show>
+          <FetchErrorBoundary>
+            <Show
+              when={openName()}
+              fallback={<EmptyMessage>Pick a metric on the left to chart it.</EmptyMessage>}
+            >
+              {(name) => (
+                <MetricsPageMetric
+                  name={name()}
+                  query={list.query()}
+                  range={list}
+                  seriesOfMetric={seriesOfOpenMetric()}
+                />
+              )}
+            </Show>
+          </FetchErrorBoundary>
         </div>
       </div>
     </div>

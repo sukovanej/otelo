@@ -1,6 +1,6 @@
 import { Checkbox } from "@otelo/ui";
 
-import { LIVE_RELOAD_MS } from "./list";
+import { LIVE_RELOAD_MS } from "./fetch";
 
 interface LiveToggleProps {
   readonly live: boolean;

@@ -46,6 +46,7 @@ interface OpenTraceSearchParams extends SearchParams {
 
 export default function TracesPage() {
   const list = createListState<TracesView, TracesResult>({
+    name: "traces",
     views: ["traces", "spans"],
     firstLimits: { traces: 50, spans: 200 },
     fetch: async (key, signal) =>
