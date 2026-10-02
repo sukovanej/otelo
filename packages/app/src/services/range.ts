@@ -1,19 +1,11 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { keepPreviousData, QueryObserver } from "@tanstack/query-core";
-import {
-  type Accessor,
-  createEffect,
-  createMemo,
-  createSignal,
-  onSettled,
-  untrack,
-} from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { type Accessor, createMemo } from "solid-js";
 
 import { toQueryString } from "@otelo/api";
 
 import type { FetchState } from "../fetch";
 import { DEFAULT_SINCE, LIVE_RELOAD_MS } from "../list";
-import { queryClient } from "../queryClient";
 
 export interface RangeState {
   readonly since: () => string;
@@ -66,29 +58,23 @@ export function createRangeFetch<K, T>(
   key: Accessor<K>,
   fetcher: (key: K & RangeBounds, signal: AbortSignal) => Promise<T>,
 ): FetchState<T> {
-  const options = createMemo(() => {
+  const query = useQuery(() => {
     const keyWithRange = { ...key(), since: range.since(), until: range.until() };
     return {
       queryKey: [queryName, keyWithRange],
-      queryFn: ({ signal }: { signal: AbortSignal }) => fetcher(keyWithRange, signal),
+      queryFn: ({ signal }) => fetcher(keyWithRange, signal),
       refetchInterval: range.live() ? LIVE_RELOAD_MS : false,
-      placeholderData: keepPreviousData,
-    } as const;
+    };
   });
-  const observer = new QueryObserver(queryClient, untrack(options));
-  const [result, setResult] = createSignal(observer.getCurrentResult());
-  onSettled(() => observer.subscribe(setResult));
-  createEffect(options, (newOptions) => observer.setOptions(newOptions));
-  const updatedAt = createMemo<Date | undefined>((previous) => {
-    const fetchedAt = result().dataUpdatedAt;
-    if (fetchedAt === 0 || fetchedAt === previous?.getTime()) return previous;
-    return new Date(fetchedAt);
-  });
+  const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
+  const updatedAt = createMemo<Date | undefined>((previous) =>
+    query.dataUpdatedAt === 0 ? previous : new Date(query.dataUpdatedAt),
+  );
   return {
-    data: () => result().data,
-    errorMessage: () => result().error?.message,
-    loading: () => result().isFetching,
+    data: () => (answered() ? query.data : undefined),
+    errorMessage: () => (!answered() || query.isRefetchError ? query.error?.message : undefined),
+    loading: () => query.isFetching,
     updatedAt,
-    reload: () => void observer.refetch(),
+    reload: () => void query.refetch(),
   };
 }

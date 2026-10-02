@@ -1,10 +1,11 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, For, latest, Show } from "solid-js";
 
 import { getMetricSeries, type MetricSeries, type SeriesInfo } from "@otelo/api";
 import { Callout, CheckboxMenu, EmptyMessage, Select } from "@otelo/ui";
 import { ChartPanel, formatValue } from "@otelo/viz";
 
+import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { createRangeFetch, type RangeState } from "../../services/range";
 import { listGroupingSections, toMetricCharts, toMetricFrame } from "../metric";
 
@@ -83,14 +84,14 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
         <CheckboxMenu
           label="Group by"
           placeholder="nothing"
-          sections={listGroupingSections(props.seriesOfMetric, by())}
-          checked={by()}
+          sections={listGroupingSections(props.seriesOfMetric, latest(by))}
+          checked={latest(by)}
           onChange={(checked) => setParams({ by: checked.join(",") || undefined })}
         />
         <Select
           label="Top"
           options={TOP_OPTIONS}
-          value={top()}
+          value={latest(top)}
           onChange={(value) => setParams({ top: value || undefined })}
         />
       </div>
@@ -99,45 +100,49 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
         {(errorMessage) => <Callout tone="error">{errorMessage()}</Callout>}
       </Show>
 
-      <Show when={metric()}>
-        {(answer) => (
-          <>
-            <div class="-mt-2 text-muted">
-              Steps of {formatValue(answer().step_ns, "duration")} from{" "}
-              {RESOLUTION_NAMES[answer().resolution]}
-            </div>
-            <Show when={answer().truncated}>
-              <Callout tone="hint">
-                More series match than the chart shows. Group them, keep the top ones, or narrow the
-                query.
-              </Callout>
-            </Show>
-            <Show
-              when={frame() && charts().length > 0 && frame()}
-              fallback={
-                <EmptyMessage>No series of this metric in this range match the query.</EmptyMessage>
-              }
-            >
-              {(answerFrame) => (
-                <For each={charts()} keyed={false}>
-                  {(chart) => (
-                    <ChartPanel
-                      title={chart().title}
-                      description={chart().description}
-                      frame={answerFrame()}
-                      series={chart().series}
-                      kind="line"
-                      unit={chart().unit}
-                      loading={fetched.loading()}
-                      onZoom={zoomRangeTo}
-                    />
-                  )}
-                </For>
-              )}
-            </Show>
-          </>
-        )}
-      </Show>
+      <FetchErrorBoundary>
+        <Show when={metric()}>
+          {(answer) => (
+            <>
+              <div class="-mt-2 text-muted">
+                Steps of {formatValue(answer().step_ns, "duration")} from{" "}
+                {RESOLUTION_NAMES[answer().resolution]}
+              </div>
+              <Show when={answer().truncated}>
+                <Callout tone="hint">
+                  More series match than the chart shows. Group them, keep the top ones, or narrow
+                  the query.
+                </Callout>
+              </Show>
+              <Show
+                when={frame() && charts().length > 0 && frame()}
+                fallback={
+                  <EmptyMessage>
+                    No series of this metric in this range match the query.
+                  </EmptyMessage>
+                }
+              >
+                {(answerFrame) => (
+                  <For each={charts()} keyed={false}>
+                    {(chart) => (
+                      <ChartPanel
+                        title={chart().title}
+                        description={chart().description}
+                        frame={answerFrame()}
+                        series={chart().series}
+                        kind="line"
+                        unit={chart().unit}
+                        loading={fetched.loading()}
+                        onZoom={zoomRangeTo}
+                      />
+                    )}
+                  </For>
+                )}
+              </Show>
+            </>
+          )}
+        </Show>
+      </FetchErrorBoundary>
     </div>
   );
 }

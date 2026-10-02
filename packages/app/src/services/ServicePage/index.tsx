@@ -5,13 +5,14 @@ import {
   useParams,
   useSearchParams,
 } from "@solidjs/router";
-import { createMemo, Show } from "solid-js";
+import { createMemo, Errored, Show } from "solid-js";
 
 import { getCalls, getLogGroups, getService, getTraces, type TargetKey } from "@otelo/api";
 import { Callout, EmptyMessage } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
 import { link, pageContent } from "../../classes";
+import FetchErrorBoundary from "../../FetchErrorBoundary";
 import LogGroupList from "../../logs/LogGroupList";
 import { decodePathSegment } from "../../path";
 import { addTerm, quoteString } from "../../query";
@@ -125,7 +126,9 @@ export default function ServicePage() {
             </a>
             <span class="text-muted">/</span>
             <h1 class="m-0 min-w-0 font-mono text-md font-semibold">
-              <ServiceName name={name()} resource={service()?.resource ?? {}} />
+              <Errored fallback={<ServiceName name={name()} resource={{}} />}>
+                <ServiceName name={name()} resource={service()?.resource ?? {}} />
+              </Errored>
             </h1>
           </div>
         }
@@ -148,107 +151,124 @@ export default function ServicePage() {
             </div>
           )}
         </Show>
-        <Show when={service()}>
-          {(shownService) => (
-            <Show
-              when={shownService().stats.requests.count > 0 || shownService().stats.logs > 0}
-              fallback={<EmptyMessage>{name()} sent no spans or logs in this range.</EmptyMessage>}
-            >
-              <div class="flex flex-col gap-4">
-                <ServicePageOverview
-                  service={shownService()}
-                  loading={fetchedService.loading()}
-                  onZoom={zoomRangeTo}
-                  operationHref={(operation) =>
-                    `/services/${encodeURIComponent(name())}${range.toSearch({
-                      op: operation.name,
-                      kind: String(operation.kind),
-                    })}`
-                  }
-                  onOpenOperation={(operation) =>
-                    setModalParams({
-                      ...CLOSED_MODAL_PARAMS,
-                      op: operation.name,
-                      kind: String(operation.kind),
-                    })
-                  }
-                />
+        <FetchErrorBoundary>
+          <Show when={service()}>
+            {(shownService) => (
+              <Show
+                when={shownService().stats.requests.count > 0 || shownService().stats.logs > 0}
+                fallback={
+                  <EmptyMessage>{name()} sent no spans or logs in this range.</EmptyMessage>
+                }
+              >
+                <div class="flex flex-col gap-4">
+                  <ServicePageOverview
+                    service={shownService()}
+                    loading={fetchedService.loading()}
+                    onZoom={zoomRangeTo}
+                    operationHref={(operation) =>
+                      `/services/${encodeURIComponent(name())}${range.toSearch({
+                        op: operation.name,
+                        kind: String(operation.kind),
+                      })}`
+                    }
+                    onOpenOperation={(operation) =>
+                      setModalParams({
+                        ...CLOSED_MODAL_PARAMS,
+                        op: operation.name,
+                        kind: String(operation.kind),
+                      })
+                    }
+                  />
 
-                <Show when={fetchedCalls.data()}>
-                  {(calls) => (
-                    <Show when={calls().service === name() && calls().calls.count > 0}>
-                      <ServicePageCalls
-                        calls={calls()}
-                        loading={fetchedCalls.loading()}
-                        onZoom={zoomRangeTo}
-                        callHref={(row) =>
-                          `/services/${encodeURIComponent(name())}${range.toSearch(toCallModalParams(row))}`
-                        }
-                        onOpenCall={(row) => setModalParams(toCallModalParams(row))}
-                      />
+                  <FetchErrorBoundary>
+                    <Show when={fetchedCalls.data()}>
+                      {(calls) => (
+                        <Show when={calls().service === name() && calls().calls.count > 0}>
+                          <ServicePageCalls
+                            calls={calls()}
+                            loading={fetchedCalls.loading()}
+                            onZoom={zoomRangeTo}
+                            callHref={(row) =>
+                              `/services/${encodeURIComponent(name())}${range.toSearch(toCallModalParams(row))}`
+                            }
+                            onOpenCall={(row) => setModalParams(toCallModalParams(row))}
+                          />
+                        </Show>
+                      )}
                     </Show>
-                  )}
-                </Show>
+                  </FetchErrorBoundary>
 
-                <Panel
-                  title="Failed traces"
-                  description="The newest traces with a failed span of the service"
-                  flush
-                  actions={
-                    <a href={linkToTraces(`${serviceTerm()} error = true`)} class={link}>
-                      All failed traces
-                    </a>
-                  }
-                >
-                  <Show when={fetchedErrorTraces.data()}>
-                    {(traces) => (
-                      <Show
-                        when={traces().traces.length > 0}
-                        fallback={
-                          <EmptyMessage>No trace of {name()} failed in this range.</EmptyMessage>
-                        }
-                      >
-                        <TraceList
-                          traces={traces().traces}
-                          onOpen={(id) => navigate(`/traces/${id}`)}
-                        />
+                  <Panel
+                    title="Failed traces"
+                    description="The newest traces with a failed span of the service"
+                    flush
+                    actions={
+                      <a href={linkToTraces(`${serviceTerm()} error = true`)} class={link}>
+                        All failed traces
+                      </a>
+                    }
+                  >
+                    <FetchErrorBoundary>
+                      <Show when={fetchedErrorTraces.data()}>
+                        {(traces) => (
+                          <Show
+                            when={traces().traces.length > 0}
+                            fallback={
+                              <EmptyMessage>
+                                No trace of {name()} failed in this range.
+                              </EmptyMessage>
+                            }
+                          >
+                            <TraceList
+                              traces={traces().traces}
+                              onOpen={(id) => navigate(`/traces/${id}`)}
+                            />
+                          </Show>
+                        )}
                       </Show>
-                    )}
-                  </Show>
-                </Panel>
+                    </FetchErrorBoundary>
+                  </Panel>
 
-                <Panel
-                  title="Error logs"
-                  description="The error logs of the service by message template"
-                  flush
-                  actions={
-                    <a href={linkToLogs(`${serviceTerm()} level >= error`, "groups")} class={link}>
-                      All error logs
-                    </a>
-                  }
-                >
-                  <Show when={fetchedErrorLogs.data()}>
-                    {(logGroups) => (
-                      <Show
-                        when={logGroups().groups.length > 0}
-                        fallback={
-                          <EmptyMessage>{name()} logged no errors in this range.</EmptyMessage>
-                        }
+                  <Panel
+                    title="Error logs"
+                    description="The error logs of the service by message template"
+                    flush
+                    actions={
+                      <a
+                        href={linkToLogs(`${serviceTerm()} level >= error`, "groups")}
+                        class={link}
                       >
-                        <LogGroupList
-                          groups={logGroups().groups}
-                          onShowLines={(term) =>
-                            navigate(linkToLogs(addTerm(`${serviceTerm()} level >= error`, term)))
-                          }
-                        />
+                        All error logs
+                      </a>
+                    }
+                  >
+                    <FetchErrorBoundary>
+                      <Show when={fetchedErrorLogs.data()}>
+                        {(logGroups) => (
+                          <Show
+                            when={logGroups().groups.length > 0}
+                            fallback={
+                              <EmptyMessage>{name()} logged no errors in this range.</EmptyMessage>
+                            }
+                          >
+                            <LogGroupList
+                              groups={logGroups().groups}
+                              onShowLines={(term) =>
+                                navigate(
+                                  linkToLogs(addTerm(`${serviceTerm()} level >= error`, term)),
+                                )
+                              }
+                            />
+                          </Show>
+                        )}
                       </Show>
-                    )}
-                  </Show>
-                </Panel>
-              </div>
-            </Show>
-          )}
-        </Show>
+                    </FetchErrorBoundary>
+                  </Panel>
+                </div>
+              </Show>
+            )}
+          </Show>
+        </FetchErrorBoundary>
       </div>
 
       <Show when={openModal()} keyed>

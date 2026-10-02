@@ -84,13 +84,15 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   `createSignal(() => props.value)`. It resets when the source changes.
 - **A prop read once on purpose** goes through `untrack(() => props.initialSpanId)`. Every
   other prop read sits in JSX, a memo or the first function of an effect.
-- **A component body writes no signal.** A write there throws
-  `REACTIVE_WRITE_IN_OWNED_SCOPE`. A subscription whose listener can fire at once, as a
-  TanStack `QueryObserver` does, starts in `onSettled`, as `createRangeFetch` does.
-- **Fetching moves to TanStack Query**, `@tanstack/query-core` bridged to a signal as in
-  `createRangeFetch`. `createFetch` is what is left of the old way. Neither the
-  `@tanstack/solid-query` adapter nor an async memo fits, since both hold every reader of
-  a changed key until the answer lands, and a range picker lags its own click.
+- **Fetching moves to `useQuery` of `@tanstack/solid-query`**, as `createRangeFetch` does.
+  `createFetch` is what is left of the old way. Solid holds every reader of a changed key
+  until the answer lands, which is right, so acknowledge the wait and never route around
+  it. A control that echoes its own source reads it through `latest(range.since)`, or it
+  lags a click and a second click builds on the old value. `isFetching` shows the wait.
+- **Every read of query data sits under an `<Errored>`**: `FetchErrorBoundary` around
+  content, and an `<Errored fallback={…}>` drawing the same element without the data
+  elsewhere. A request that fails for a new key with no boundary above leaves the hold
+  open, and the page stops answering.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
   remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
   write during disposal held every later update, and the router froze with it.

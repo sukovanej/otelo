@@ -1,5 +1,5 @@
 import { useNavigate } from "@solidjs/router";
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, Errored, For, Show } from "solid-js";
 
 import {
   getCall,
@@ -14,6 +14,7 @@ import { Callout, CloseButton, EmptyMessage, Modal, SpanKindBadge } from "@otelo
 import { ChartPanel, formatValue, Panel, Stat } from "@otelo/viz";
 
 import { link, pageContent } from "../../classes";
+import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { quoteString } from "../../query";
 import { entersService, toKindName } from "../../traces/span";
 import SpanList from "../../traces/SpanList";
@@ -100,6 +101,15 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
   const requests = () => detail()?.requests;
   const zoomRangeTo = (start: number, end: number) =>
     props.range.setRange(new Date(start).toISOString(), new Date(end).toISOString());
+  const tracesLink = (spanQuery: string | undefined) => (
+    <a
+      href={`/traces${toQueryString({ view: "spans", q: spanQuery, since: props.range.since(), until: props.range.until() || undefined })}`}
+      class={`shrink-0 whitespace-nowrap ${link}`}
+      title={`Every span of the ${subjectNoun()} on the traces page`}
+    >
+      Open in Traces
+    </a>
+  );
 
   return (
     <Modal
@@ -108,7 +118,9 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
     >
       <div class="relative z-20 flex shrink-0 items-center gap-3 bg-surface px-4 py-2.5 shadow-(--raised)">
         <h1 class="m-0 min-w-0 max-w-[60ch] font-mono text-md font-semibold">
-          <SpanTitle variant="operation" name={spanName()} attributes={titleAttributes()} />
+          <Errored fallback={<SpanTitle variant="operation" name={spanName()} attributes={{}} />}>
+            <SpanTitle variant="operation" name={spanName()} attributes={titleAttributes()} />
+          </Errored>
         </h1>
         <SpanKindBadge kind={toKindName(props.kind)} />
         <Show when={callTarget()}>
@@ -124,13 +136,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
             Loading…
           </span>
         </Show>
-        <a
-          href={`/traces${toQueryString({ view: "spans", q: fetched.data()?.spanQuery, since: props.range.since(), until: props.range.until() || undefined })}`}
-          class={`shrink-0 whitespace-nowrap ${link}`}
-          title={`Every span of the ${subjectNoun()} on the traces page`}
-        >
-          Open in Traces
-        </a>
+        <Errored fallback={tracesLink(undefined)}>{tracesLink(fetched.data()?.spanQuery)}</Errored>
         <CloseButton onClose={props.onClose} />
       </div>
 
@@ -142,110 +148,112 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
             </div>
           )}
         </Show>
-        <div class="flex flex-col gap-4">
-          <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
-            <Stat
-              label={countLabel()}
-              value={requests()?.count}
-              unit="count"
-              detail={formatValue(
-                toRate(
-                  requests()?.count ?? 0,
-                  measureSeconds(detail()?.start_at ?? "", detail()?.end_at ?? ""),
-                ),
-                "rate",
-              )}
-              trend={detail()?.buckets.map((bucket) => bucket.requests.count)}
-            />
-            <Stat
-              label="Error rate"
-              value={toShare(requests()?.errors ?? 0, requests()?.count ?? 0)}
-              unit="ratio"
-              tone={(requests()?.errors ?? 0) > 0 ? "error" : undefined}
-              detail={`${(requests()?.errors ?? 0).toLocaleString()} failed`}
-              trend={errorRateSeries()[0]?.values}
-              trendColor="error"
-            />
-            <For each={PERCENTILES}>
-              {(percentile, index) => (
-                <Stat
-                  label={`${percentile.toUpperCase()} latency`}
-                  value={requests()?.latency?.[percentile]}
-                  unit="duration"
-                  trend={latencySeries()[index()]?.values}
-                  trendColor={percentile}
-                />
-              )}
-            </For>
-          </div>
-
-          <Show when={timeFrame()}>
-            {(frame) => (
-              <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                <ChartPanel
-                  title={countLabel()}
-                  description="By step"
-                  kind="bar"
-                  unit="count"
-                  frame={frame()}
-                  series={requestSeries()}
-                  loading={fetched.loading()}
-                  onZoom={zoomRangeTo}
-                />
-                <ChartPanel
-                  title="Latency"
-                  description="Percentiles of the durations"
-                  kind="line"
-                  unit="duration"
-                  frame={frame()}
-                  series={latencySeries()}
-                  loading={fetched.loading()}
-                  onZoom={zoomRangeTo}
-                  emptyMessage={`No ${countLabel().toLowerCase()} in this range`}
-                />
-                <ChartPanel
-                  title="Error rate"
-                  description="The share that failed"
-                  kind="area"
-                  unit="ratio"
-                  frame={frame()}
-                  series={errorRateSeries()}
-                  loading={fetched.loading()}
-                  onZoom={zoomRangeTo}
-                  emptyMessage={`No ${countLabel().toLowerCase()} in this range`}
-                />
-              </div>
-            )}
-          </Show>
-
-          <Panel
-            title="Spans"
-            description={`The newest ${LISTED_SPAN_LIMIT} spans of the ${subjectNoun()}; a span opens its trace`}
-            flush
-          >
-            <Show when={fetched.data()}>
-              {(result) => (
-                <Show
-                  when={result().spans.length > 0}
-                  fallback={
-                    <EmptyMessage>The {subjectNoun()} has no spans in this range.</EmptyMessage>
-                  }
-                >
-                  <SpanList
-                    spans={result().spans}
-                    selectedKey={undefined}
-                    onSelect={(span) => {
-                      if (span)
-                        navigate(
-                          `/traces/${span.trace_id}${toQueryString({ span: span.span_id })}`,
-                        );
-                    }}
+        <FetchErrorBoundary>
+          <div class="flex flex-col gap-4">
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+              <Stat
+                label={countLabel()}
+                value={requests()?.count}
+                unit="count"
+                detail={formatValue(
+                  toRate(
+                    requests()?.count ?? 0,
+                    measureSeconds(detail()?.start_at ?? "", detail()?.end_at ?? ""),
+                  ),
+                  "rate",
+                )}
+                trend={detail()?.buckets.map((bucket) => bucket.requests.count)}
+              />
+              <Stat
+                label="Error rate"
+                value={toShare(requests()?.errors ?? 0, requests()?.count ?? 0)}
+                unit="ratio"
+                tone={(requests()?.errors ?? 0) > 0 ? "error" : undefined}
+                detail={`${(requests()?.errors ?? 0).toLocaleString()} failed`}
+                trend={errorRateSeries()[0]?.values}
+                trendColor="error"
+              />
+              <For each={PERCENTILES}>
+                {(percentile, index) => (
+                  <Stat
+                    label={`${percentile.toUpperCase()} latency`}
+                    value={requests()?.latency?.[percentile]}
+                    unit="duration"
+                    trend={latencySeries()[index()]?.values}
+                    trendColor={percentile}
                   />
-                </Show>
+                )}
+              </For>
+            </div>
+
+            <Show when={timeFrame()}>
+              {(frame) => (
+                <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                  <ChartPanel
+                    title={countLabel()}
+                    description="By step"
+                    kind="bar"
+                    unit="count"
+                    frame={frame()}
+                    series={requestSeries()}
+                    loading={fetched.loading()}
+                    onZoom={zoomRangeTo}
+                  />
+                  <ChartPanel
+                    title="Latency"
+                    description="Percentiles of the durations"
+                    kind="line"
+                    unit="duration"
+                    frame={frame()}
+                    series={latencySeries()}
+                    loading={fetched.loading()}
+                    onZoom={zoomRangeTo}
+                    emptyMessage={`No ${countLabel().toLowerCase()} in this range`}
+                  />
+                  <ChartPanel
+                    title="Error rate"
+                    description="The share that failed"
+                    kind="area"
+                    unit="ratio"
+                    frame={frame()}
+                    series={errorRateSeries()}
+                    loading={fetched.loading()}
+                    onZoom={zoomRangeTo}
+                    emptyMessage={`No ${countLabel().toLowerCase()} in this range`}
+                  />
+                </div>
               )}
             </Show>
-          </Panel>
-        </div>
+
+            <Panel
+              title="Spans"
+              description={`The newest ${LISTED_SPAN_LIMIT} spans of the ${subjectNoun()}; a span opens its trace`}
+              flush
+            >
+              <Show when={fetched.data()}>
+                {(result) => (
+                  <Show
+                    when={result().spans.length > 0}
+                    fallback={
+                      <EmptyMessage>The {subjectNoun()} has no spans in this range.</EmptyMessage>
+                    }
+                  >
+                    <SpanList
+                      spans={result().spans}
+                      selectedKey={undefined}
+                      onSelect={(span) => {
+                        if (span)
+                          navigate(
+                            `/traces/${span.trace_id}${toQueryString({ span: span.span_id })}`,
+                          );
+                      }}
+                    />
+                  </Show>
+                )}
+              </Show>
+            </Panel>
+          </div>
+        </FetchErrorBoundary>
       </div>
     </Modal>
   );
