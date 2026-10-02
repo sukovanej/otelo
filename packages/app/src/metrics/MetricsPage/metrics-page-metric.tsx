@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createMemo, For, latest, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 
 import { getMetricSeries, type MetricSeries, type SeriesInfo } from "@otelo/api";
 import { Callout, CheckboxMenu, EmptyMessage, Select } from "@otelo/ui";
@@ -45,6 +45,7 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
 
   const fetched = createRangeFetch(
     props.range,
+    "metric-series",
     () => ({ name: props.name, q: props.query.trim(), by: by().join(","), top: top() }),
     (key, signal) =>
       getMetricSeries(
@@ -82,14 +83,14 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
         <CheckboxMenu
           label="Group by"
           placeholder="nothing"
-          sections={listGroupingSections(props.seriesOfMetric, latest(by))}
-          checked={latest(by)}
+          sections={listGroupingSections(props.seriesOfMetric, by())}
+          checked={by()}
           onChange={(checked) => setParams({ by: checked.join(",") || undefined })}
         />
         <Select
           label="Top"
           options={TOP_OPTIONS}
-          value={latest(top)}
+          value={top()}
           onChange={(value) => setParams({ top: value || undefined })}
         />
       </div>

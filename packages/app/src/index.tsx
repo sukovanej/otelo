@@ -4,6 +4,7 @@ import { render } from "@solidjs/web";
 import App from "./App";
 import LogsPage from "./logs/LogsPage";
 import MetricsPage from "./metrics/MetricsPage";
+import { queryClient } from "./queryClient";
 import ServicePage from "./services/ServicePage";
 import ServicesPage from "./services/ServicesPage";
 import TracePage from "./traces/TracePage";
@@ -38,4 +39,5 @@ function NotFound() {
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html has no #root");
 
+queryClient.mount();
 render(() => <Router>{(props) => <App {...props} />}</Router>, root);

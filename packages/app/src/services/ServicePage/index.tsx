@@ -81,21 +81,25 @@ export default function ServicePage() {
 
   const fetchedService = createRangeFetch(
     range,
+    "service",
     () => ({ name: name() }),
     ({ name: serviceName, ...bounds }, signal) => getService(serviceName, bounds, signal),
   );
   const fetchedCalls = createRangeFetch(
     range,
+    "calls",
     () => ({ name: name() }),
     ({ name: serviceName, ...bounds }, signal) => getCalls(serviceName, bounds, signal),
   );
   const fetchedErrorTraces = createRangeFetch(
     range,
+    "traces",
     () => ({ q: `${serviceTerm()} error = true`, limit: 10 }),
     getTraces,
   );
   const fetchedErrorLogs = createRangeFetch(
     range,
+    "log-groups",
     () => ({ q: `${serviceTerm()} level >= error`, limit: 10 }),
     getLogGroups,
   );
