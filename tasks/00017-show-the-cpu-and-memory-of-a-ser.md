@@ -6,6 +6,8 @@ dependencies:
 - ./00007-collect-host-and-service-metrics.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/30
 ---
 # Show the CPU and memory of a service on its page
 
