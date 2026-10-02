@@ -24,9 +24,9 @@ catalogs:
     '@tailwindcss/vite':
       specifier: ^4.3.3
       version: 4.3.3
-    '@tanstack/query-core':
-      specifier: ^5.104.0
-      version: 5.104.0
+    '@tanstack/solid-query':
+      specifier: 6.0.0-rc.5
+      version: 6.0.0-rc.5
     '@types/node':
       specifier: ^24.0.0
       version: 24.19.0
@@ -110,9 +110,9 @@ importers:
       '@solidjs/web':
         specifier: 'catalog:'
         version: 2.0.0-rc.13(solid-js@2.0.0-rc.13)
-      '@tanstack/query-core':
+      '@tanstack/solid-query':
         specifier: 'catalog:'
-        version: 5.104.0
+        version: 6.0.0-rc.5(@solidjs/web@2.0.0-rc.13(solid-js@2.0.0-rc.13))(solid-js@2.0.0-rc.13)
       solid-js:
         specifier: 'catalog:'
         version: 2.0.0-rc.13
@@ -893,8 +893,14 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@tanstack/query-core@5.104.0':
-    resolution: {integrity: sha512-JrC2r/JQlXt7khBSdUpsgxNvybzOg+aITa+ARRMlP2AFo93Y8vIqz077rp+e61mJetSZ0T6AJbwW1JHer1vrPQ==}
+  '@tanstack/query-core@5.101.4':
+    resolution: {integrity: sha512-gNwcvOJcRbLWPOLG/2OBm+zM+Yv+MKsXKEOWC57USuZDEsI71hEErQsiEGx5wX9rzWWkfwM0fVSPoiIFSsxfiw==}
+
+  '@tanstack/solid-query@6.0.0-rc.5':
+    resolution: {integrity: sha512-O9lD2JRgaN2ZS4ROBPL6HLPbPJ4FvnUsVe7j6FSxhE3GI8a5ntZbAj5zrTtmny6rSzhdcBuMB38R53tHIuXJkw==}
+    peerDependencies:
+      '@solidjs/web': '>=2.0.0-rc.13 <3.0.0'
+      solid-js: '>=2.0.0-rc.13 <3.0.0'
 
   '@tybys/wasm-util@0.10.4':
     resolution: {integrity: sha512-W3c4gRigFS0T/Ma4qIYF3GDAc5AQdHb1yL5znJT1Zv1YaD9Kitx656wBjvr19qbiosmZT8lWDM5BEMynUqX65A==}
@@ -2153,7 +2159,13 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.3.1(@types/node@24.19.0)(jiti@2.7.0)
 
-  '@tanstack/query-core@5.104.0': {}
+  '@tanstack/query-core@5.101.4': {}
+
+  '@tanstack/solid-query@6.0.0-rc.5(@solidjs/web@2.0.0-rc.13(solid-js@2.0.0-rc.13))(solid-js@2.0.0-rc.13)':
+    dependencies:
+      '@solidjs/web': 2.0.0-rc.13(solid-js@2.0.0-rc.13)
+      '@tanstack/query-core': 5.101.4
+      solid-js: 2.0.0-rc.13
 
   '@tybys/wasm-util@0.10.4':
     dependencies:

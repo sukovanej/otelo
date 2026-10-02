@@ -1,4 +1,4 @@
-import { Show } from "solid-js";
+import { Errored, Show } from "solid-js";
 
 import { getServices, type ServiceSummary } from "@otelo/api";
 import { Callout } from "@otelo/ui";
@@ -6,6 +6,7 @@ import { type Column, Panel, Sparkline, Table } from "@otelo/viz";
 
 import { pageContent } from "../classes";
 import { formatCount } from "../count";
+import FetchErrorBoundary from "../FetchErrorBoundary";
 import ServiceName from "../ServiceName";
 import { createRangeFetch, useRange } from "./range";
 import RangeBar from "./range-bar";
@@ -100,14 +101,16 @@ export default function ServicesPage() {
         fetched={fetched}
         title={<h1 class="m-0 font-mono text-md font-semibold">Services</h1>}
       >
-        <Show when={fetched.data()}>
-          {(services) => (
-            <span>
-              {formatCount(services().services.length, "service")}
-              {services().truncated ? ", the busiest; more sent telemetry" : ""}
-            </span>
-          )}
-        </Show>
+        <Errored fallback={null}>
+          <Show when={fetched.data()}>
+            {(services) => (
+              <span>
+                {formatCount(services().services.length, "service")}
+                {services().truncated ? ", the busiest; more sent telemetry" : ""}
+              </span>
+            )}
+          </Show>
+        </Errored>
       </RangeBar>
 
       <div class={`min-h-0 flex-1 ${pageContent}`}>
@@ -118,23 +121,25 @@ export default function ServicesPage() {
             </div>
           )}
         </Show>
-        <Show when={fetched.data()}>
-          {(services) => (
-            <Panel flush>
-              <Table
-                label="Services"
-                rows={services().services}
-                columns={columns}
-                initialSort={{ columnId: "requests", descending: true }}
-                href={(service) =>
-                  `/services/${encodeURIComponent(service.service)}${range.toSearch()}`
-                }
-                loading={fetched.loading()}
-                emptyMessage="No service sent spans or logs in this range."
-              />
-            </Panel>
-          )}
-        </Show>
+        <FetchErrorBoundary>
+          <Show when={fetched.data()}>
+            {(services) => (
+              <Panel flush>
+                <Table
+                  label="Services"
+                  rows={services().services}
+                  columns={columns}
+                  initialSort={{ columnId: "requests", descending: true }}
+                  href={(service) =>
+                    `/services/${encodeURIComponent(service.service)}${range.toSearch()}`
+                  }
+                  loading={fetched.loading()}
+                  emptyMessage="No service sent spans or logs in this range."
+                />
+              </Panel>
+            )}
+          </Show>
+        </FetchErrorBoundary>
       </div>
     </div>
   );

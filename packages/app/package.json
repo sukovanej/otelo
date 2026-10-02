@@ -9,7 +9,7 @@
     "@otelo/viz": "workspace:*",
     "@solidjs/router": "catalog:",
     "@solidjs/web": "catalog:",
-    "@tanstack/query-core": "catalog:",
+    "@tanstack/solid-query": "catalog:",
     "solid-js": "catalog:"
   },
   "devDependencies": {
