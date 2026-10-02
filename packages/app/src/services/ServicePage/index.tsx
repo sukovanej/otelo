@@ -24,6 +24,7 @@ import { isSameTarget, parseTarget } from "../target";
 import ServicePageCalls, { type CallRow } from "./service-page-calls";
 import ServicePageOperationModal from "./service-page-operation-modal";
 import ServicePageOverview from "./service-page-overview";
+import ServicePageResources from "./service-page-resources";
 
 const CLOSED_MODAL_PARAMS = {
   op: undefined,
@@ -179,6 +180,8 @@ export default function ServicePage() {
                       })
                     }
                   />
+
+                  <ServicePageResources service={name()} range={range} onZoom={zoomRangeTo} />
 
                   <FetchErrorBoundary>
                     <Show when={fetchedCalls.data()}>
