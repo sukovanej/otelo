@@ -84,15 +84,17 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   `createSignal(() => props.value)`. It resets when the source changes.
 - **A prop read once on purpose** goes through `untrack(() => props.initialSpanId)`. Every
   other prop read sits in JSX, a memo or the first function of an effect.
-- **Fetching moves to `useQuery` of `@tanstack/solid-query`**, as `createRangeFetch` does.
-  `createFetch` is what is left of the old way. Solid holds every reader of a changed key
-  until the answer lands, which is right, so acknowledge the wait and never route around
-  it. A control that echoes its own source reads it through `latest(range.since)`, or it
-  lags a click and a second click builds on the old value. `isFetching` shows the wait.
-- **Every read of query data sits under an `<Errored>`**: `FetchErrorBoundary` around
+- **Fetching goes through `createFetch`** in `fetch.ts`, which wraps `useQuery` of
+  `@tanstack/solid-query`. Each caller names its query, so two fetches with the same key
+  keep apart in the cache. Solid holds every reader of a changed key until the answer
+  lands, which is right, so acknowledge the wait and never route around it. A control
+  that echoes its own source reads it through `latest(range.since)`, or it lags a click
+  and a second click builds on the old value. `loading()` shows the wait.
+- **Every read of fetched data sits under an `<Errored>`**: `FetchErrorBoundary` around
   content, and an `<Errored fallback={…}>` drawing the same element without the data
   elsewhere. A request that fails for a new key with no boundary above leaves the hold
-  open, and the page stops answering.
+  open, and the page stops answering. A view keyed on what it fetches, as `TracePage`
+  keys `TraceView` by the trace id, never changes key, so its reads need no boundary.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
   remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
   write during disposal held every later update, and the router froze with it.

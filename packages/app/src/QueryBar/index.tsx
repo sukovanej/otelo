@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { latest, Show } from "solid-js";
+import { Errored, latest, Show } from "solid-js";
 
 import { completeQuery, type Signal } from "@otelo/api";
 import { Button, QueryInput, RangePicker, Tabs } from "@otelo/ui";
@@ -83,11 +83,13 @@ export default function QueryBar<V extends string, R extends ListResult<V>>(
         <Tabs
           label="View"
           options={props.views}
-          value={list().view()}
+          value={latest(list().view)}
           onChange={(view) => list().setView(view)}
         />
       </Show>
-      <span>{props.children}</span>
+      <span>
+        <Errored fallback={null}>{props.children}</Errored>
+      </span>
     </PageBar>
   );
 }

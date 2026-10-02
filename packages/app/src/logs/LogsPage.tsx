@@ -34,6 +34,7 @@ interface GroupsResult {
 
 export default function LogsPage() {
   const list = createListState<LogsView, LogsResult>({
+    name: "logs",
     views: ["lines", "groups"],
     firstLimits: { lines: 200, groups: 50 },
     fetch: async (key, signal) =>

@@ -5,6 +5,7 @@ import {
   useParams,
   useSearchParams,
 } from "@solidjs/router";
+import { Show } from "solid-js";
 
 import { toQueryString } from "@otelo/api";
 
@@ -34,20 +35,24 @@ export default function TracePage() {
   usePageKeys({ onEscape: () => closePanel(state) });
 
   return (
-    <TraceView
-      id={params.id}
-      state={state}
-      // A filter leaves the trace for the list it narrows.
-      onFilterSpans={(term) => navigate(`/traces${toQueryString({ view: "spans", q: term })}`)}
-      onFilterLogs={(term) => navigate(`/logs${toQueryString({ q: term })}`)}
-      lead={
-        <>
-          <a href="/traces" class={link}>
-            Traces
-          </a>
-          <span class="text-muted">/</span>
-        </>
-      }
-    />
+    <Show when={params.id} keyed>
+      {(id) => (
+        <TraceView
+          id={id}
+          state={state}
+          // A filter leaves the trace for the list it narrows.
+          onFilterSpans={(term) => navigate(`/traces${toQueryString({ view: "spans", q: term })}`)}
+          onFilterLogs={(term) => navigate(`/logs${toQueryString({ q: term })}`)}
+          lead={
+            <>
+              <a href="/traces" class={link}>
+                Traces
+              </a>
+              <span class="text-muted">/</span>
+            </>
+          }
+        />
+      )}
+    </Show>
   );
 }

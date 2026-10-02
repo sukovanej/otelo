@@ -1,6 +1,7 @@
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { type Accessor, createMemo } from "solid-js";
 
-import { isAbortError } from "@otelo/api";
+export const LIVE_RELOAD_MS = 5_000;
 
 export interface FetchState<T> {
   readonly data: Accessor<T | undefined>;
@@ -11,39 +12,28 @@ export interface FetchState<T> {
 }
 
 export function createFetch<K, T>(
+  queryName: string,
   key: Accessor<K>,
   fetcher: (key: K, signal: AbortSignal) => Promise<T>,
+  live: Accessor<boolean> = () => false,
 ): FetchState<T> {
-  const [data, setData] = createSignal<T>();
-  const [errorMessage, setErrorMessage] = createSignal<string>();
-  const [loading, setLoading] = createSignal(false);
-  const [updatedAt, setUpdatedAt] = createSignal<Date>();
-  let controller: AbortController | undefined;
-
-  const runRequest = (requestKey: K) => {
-    controller?.abort();
-    const current = new AbortController();
-    controller = current;
-    // The last result stays while the next request runs, so the page does
-    // not blank on every change.
-    setLoading(true);
-    fetcher(requestKey, current.signal).then(
-      (result) => {
-        if (controller !== current) return;
-        setData(() => result);
-        setErrorMessage(undefined);
-        setUpdatedAt(new Date());
-        setLoading(false);
-      },
-      (error: unknown) => {
-        if (controller !== current || isAbortError(error)) return;
-        setErrorMessage(error instanceof Error ? error.message : String(error));
-        setLoading(false);
-      },
-    );
+  const query = useQuery(() => {
+    const requestKey = key();
+    return {
+      queryKey: [queryName, requestKey],
+      queryFn: ({ signal }) => fetcher(requestKey, signal),
+      refetchInterval: live() ? LIVE_RELOAD_MS : false,
+    };
+  });
+  const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
+  const updatedAt = createMemo<Date | undefined>((previous) =>
+    query.dataUpdatedAt === 0 ? previous : new Date(query.dataUpdatedAt),
+  );
+  return {
+    data: () => (answered() ? query.data : undefined),
+    errorMessage: () => (!answered() || query.isRefetchError ? query.error?.message : undefined),
+    loading: () => query.isFetching,
+    updatedAt,
+    reload: () => void query.refetch(),
   };
-
-  createEffect(key, runRequest);
-  onCleanup(() => controller?.abort());
-  return { data, errorMessage, loading, updatedAt, reload: () => runRequest(key()) };
 }

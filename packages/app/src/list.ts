@@ -1,12 +1,10 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
 import { createFetch, type FetchState } from "./fetch";
 import { addTerm } from "./query";
-
-export const LIVE_RELOAD_MS = 5_000;
 
 export const DEFAULT_SINCE = "1h";
 
@@ -47,6 +45,7 @@ interface ListKey<V extends string> extends ListQuery {
 type ListViews<V extends string> = readonly [defaultView: V, ...otherViews: V[]];
 
 interface ListOptions<V extends string, R extends ListResult<V>> {
+  readonly name: string;
   readonly views: ListViews<V>;
   readonly firstLimits: Record<V, number>;
   readonly fetch: (key: ListKey<V>, signal: AbortSignal) => Promise<R>;
@@ -79,19 +78,12 @@ export function createListState<V extends string, R extends ListResult<V>>(
   const limit = () =>
     raisedLimit().forQuery === queryIdentity() ? raisedLimit().limit : options.firstLimits[view()];
 
-  const requestKey = createMemo(
+  const fetched = createFetch(
+    options.name,
     () => ({ view: view(), q: query().trim(), since: since(), until: until(), limit: limit() }),
-    { equals: (previous, next) => JSON.stringify(previous) === JSON.stringify(next) },
+    options.fetch,
+    live,
   );
-  const fetched = createFetch(requestKey, options.fetch);
-
-  createEffect(live, (isLive) => {
-    if (!isLive) return undefined;
-    const timer = setInterval(() => {
-      if (!fetched.loading()) fetched.reload();
-    }, LIVE_RELOAD_MS);
-    return () => clearInterval(timer);
-  });
 
   const shownResult = () => {
     const result = fetched.data();

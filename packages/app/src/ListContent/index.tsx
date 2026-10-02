@@ -6,6 +6,7 @@ import { Button, Callout } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
 import { pageContent } from "../classes";
+import FetchErrorBoundary from "../FetchErrorBoundary";
 import type { ListResult, ListState } from "../list";
 import ListContentIndexHint from "./list-content-index-hint";
 
@@ -41,27 +42,29 @@ export default function ListContent<V extends string, R extends IndexedListResul
           )}
         </Show>
 
-        <Show when={list().shownResult()?.body.unindexed.length}>
-          <div class="mb-3">
-            <ListContentIndexHint
-              signal={props.signal}
-              singularNoun={props.singularNoun}
-              unindexedKeys={list().shownResult()?.body.unindexed ?? []}
-            />
-          </div>
-        </Show>
+        <FetchErrorBoundary>
+          <Show when={list().shownResult()?.body.unindexed.length}>
+            <div class="mb-3">
+              <ListContentIndexHint
+                signal={props.signal}
+                singularNoun={props.singularNoun}
+                unindexedKeys={list().shownResult()?.body.unindexed ?? []}
+              />
+            </div>
+          </Show>
 
-        <Panel flush>{props.children}</Panel>
+          <Panel flush>{props.children}</Panel>
 
-        <Show when={list().canShowMore()}>
-          <Button
-            class="mx-auto mt-3 block"
-            disabled={list().fetched.loading()}
-            onClick={() => list().showMore()}
-          >
-            Show more
-          </Button>
-        </Show>
+          <Show when={list().canShowMore()}>
+            <Button
+              class="mx-auto mt-3 block"
+              disabled={list().fetched.loading()}
+              onClick={() => list().showMore()}
+            >
+              Show more
+            </Button>
+          </Show>
+        </FetchErrorBoundary>
       </div>
       {props.panel}
     </div>
