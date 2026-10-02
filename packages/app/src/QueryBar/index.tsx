@@ -41,7 +41,7 @@ export default function QueryBar<V extends string, R extends ListResult<V>>(
           }}
         >
           <QueryInput
-            value={list().draftQuery()}
+            value={latest(list().draftQuery)}
             highlight={highlightQuery}
             complete={(query, cursorInChars, abort) =>
               completeQuery(props.signal, query, cursorInChars, abort).then(

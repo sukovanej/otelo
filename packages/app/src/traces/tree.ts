@@ -51,6 +51,17 @@ export function buildSpanTree(spans: ReadonlyArray<TraceSpan>): TreeRow[] {
   return rows;
 }
 
+export function keepUnchangedRows(
+  previousRows: ReadonlyArray<TreeRow>,
+  rows: ReadonlyArray<TreeRow>,
+): TreeRow[] {
+  const previousRowsBySpanId = new Map(previousRows.map((row) => [row.span.span_id, row]));
+  return rows.map((row) => {
+    const previousRow = previousRowsBySpanId.get(row.span.span_id);
+    return previousRow !== undefined && isSameTreeRow(previousRow, row) ? previousRow : row;
+  });
+}
+
 export function dropCollapsedRows(
   rows: ReadonlyArray<TreeRow>,
   collapsedSpanIds: ReadonlySet<string>,
@@ -67,4 +78,13 @@ export function dropCollapsedRows(
 
 export function measureTraceNanos(rows: ReadonlyArray<TreeRow>): number {
   return Math.max(0, ...rows.map((row) => row.startOffsetNanos + row.span.duration_ns));
+}
+
+function isSameTreeRow(row: TreeRow, other: TreeRow): boolean {
+  return (
+    row.span === other.span &&
+    row.depth === other.depth &&
+    row.childCount === other.childCount &&
+    row.startOffsetNanos === other.startOffsetNanos
+  );
 }

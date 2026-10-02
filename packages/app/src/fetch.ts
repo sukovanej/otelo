@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/solid-query";
-import { type Accessor, createMemo } from "solid-js";
+import { type Accessor, createMemo, isPending } from "solid-js";
 
 export const LIVE_RELOAD_MS = 5_000;
 
@@ -32,7 +32,7 @@ export function createFetch<K, T>(
   return {
     data: () => (answered() ? query.data : undefined),
     errorMessage: () => (!answered() || query.isRefetchError ? query.error?.message : undefined),
-    loading: () => query.isFetching,
+    loading: () => query.isFetching || isPending(() => query.data),
     updatedAt,
     reload: () => void query.refetch(),
   };

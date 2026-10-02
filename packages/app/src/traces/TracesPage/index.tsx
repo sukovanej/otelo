@@ -1,5 +1,5 @@
 import { type SearchParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { createSignal, Match, Show, Switch } from "solid-js";
+import { createSignal, Match, Show, snapshot, Switch } from "solid-js";
 
 import {
   getSpans,
@@ -56,7 +56,9 @@ export default function TracesPage() {
   });
 
   // The span stays open when a reload or another query no longer brings it.
+  // A snapshot, since a reload merges the next answer into the rows by position.
   const [selectedSpan, setSelectedSpan] = createSignal<TraceSpan>();
+  const selectSpan = (span: TraceSpan | undefined) => setSelectedSpan(span && snapshot(span));
   const selectedKey = () => {
     const span = selectedSpan();
     return span && toSpanKey(span);
@@ -149,11 +151,7 @@ export default function TracesPage() {
                 when={body().spans.length > 0}
                 fallback={<EmptyMessage>No spans in this range match the query.</EmptyMessage>}
               >
-                <SpanList
-                  spans={body().spans}
-                  selectedKey={selectedKey()}
-                  onSelect={setSelectedSpan}
-                />
+                <SpanList spans={body().spans} selectedKey={selectedKey()} onSelect={selectSpan} />
               </Show>
             )}
           </Match>

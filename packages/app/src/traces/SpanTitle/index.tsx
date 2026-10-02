@@ -1,4 +1,4 @@
-import { Match, Show, Switch } from "solid-js";
+import { createMemo, Match, Show, Switch } from "solid-js";
 
 import type { Attributes } from "@otelo/api";
 import { SpanIcon } from "@otelo/icons";
@@ -30,12 +30,12 @@ interface SpanTitleOfOperationProps extends SpanTitleBaseProps {
 }
 
 export default function SpanTitle(props: SpanTitleProps) {
-  const meaning = (): SpanMeaning => {
+  const meaning = createMemo((): SpanMeaning => {
     const spanMeaning = readSpanMeaning(props.attributes);
     return spanMeaning.kind === "http" && props.variant === "operation"
       ? { ...spanMeaning, status: undefined }
       : spanMeaning;
-  };
+  });
   const remainingName = () => stripBadgesFromName(props.name, meaning());
   const httpMeaning = () => {
     const spanMeaning = meaning();

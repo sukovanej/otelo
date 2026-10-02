@@ -5,6 +5,7 @@ import type { TraceSpan } from "@otelo/api";
 import {
   buildSpanTree,
   dropCollapsedRows,
+  keepUnchangedRows,
   measureTraceNanos,
   type TreeRow,
 } from "../src/traces/tree";
@@ -32,6 +33,19 @@ test("buildSpanTree makes a span with a missing parent a root", () => {
 test("buildSpanTree keeps spans that are each other's parents", () => {
   const rows = buildSpanTree([makeSpan("x", "y", 0, 1), makeSpan("y", "x", 1, 1)]);
   expect(printTree(rows)).toEqual(["x +0", "  y +1"]);
+});
+
+test("keepUnchangedRows reuses the rows a rebuild did not change", () => {
+  const root = makeSpan("root", null, 0, 100);
+  const a = makeSpan("a", "root", 10, 30);
+  const previousRows = buildSpanTree([root, a]);
+  const rows = keepUnchangedRows(
+    previousRows,
+    buildSpanTree([root, a, makeSpan("b", "root", 50, 40)]),
+  );
+  expect(rows[0]).not.toBe(previousRows[0]);
+  expect(rows[1]).toBe(previousRows[1]);
+  expect(printTree(rows)).toEqual(["root +0", "  a +10", "  b +50"]);
 });
 
 test("dropCollapsedRows hides the descendants of a folded span", () => {

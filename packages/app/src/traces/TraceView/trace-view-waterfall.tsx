@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createProjection, createSignal, For, Show } from "solid-js";
 
 import type { TraceSpan } from "@otelo/api";
 import { ChevronIcon } from "@otelo/icons";
@@ -29,6 +29,10 @@ interface TraceViewWaterfallProps {
 
 export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
   const [collapsedSpanIds, setCollapsedSpanIds] = createSignal<ReadonlySet<string>>(new Set());
+  const collapsedSpans = createProjection<Record<string, true>>(
+    () => Object.fromEntries([...collapsedSpanIds()].map((spanId) => [spanId, true])),
+    {},
+  );
   const traceNanos = () => Math.max(1, measureTraceNanos(props.rows));
   const toPercentOfTrace = (nanos: number) => `${(100 * nanos) / traceNanos()}%`;
   const toggleFold = (spanId: string) =>
@@ -45,7 +49,7 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
       label: "Span",
       width: "minmax(28ch,2fr)",
       cell: (row) => {
-        const isCollapsed = () => collapsedSpanIds().has(row.span.span_id);
+        const isCollapsed = () => collapsedSpans[row.span.span_id] === true;
         return (
           <span
             class="flex min-w-0 items-baseline gap-1.5"
@@ -132,17 +136,18 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
     <Table
       label="Spans of the trace"
       rows={dropCollapsedRows(props.rows, collapsedSpanIds())}
+      rowKey={(row) => row.span.span_id}
       columns={columns}
       level={(row) =>
         row.childCount > 0
           ? {
               kind: "branch",
               depth: row.depth,
-              expanded: !collapsedSpanIds().has(row.span.span_id),
+              expanded: collapsedSpans[row.span.span_id] !== true,
             }
           : { kind: "leaf", depth: row.depth }
       }
-      selected={(row) => props.selectedSpanId === row.span.span_id}
+      selectedKey={() => props.selectedSpanId}
       tone={(row) => (isFailedSpan(row.span) ? "error" : undefined)}
       onRowClick={(row) =>
         props.onSelect(props.selectedSpanId === row.span.span_id ? undefined : row.span)

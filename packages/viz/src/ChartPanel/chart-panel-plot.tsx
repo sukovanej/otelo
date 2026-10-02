@@ -229,6 +229,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
         setHoveredBucketIndex(bucketCount - 1);
         break;
       case "Escape":
+        if (hoveredBucketIndex() === undefined) return;
         setHoveredBucketIndex(undefined);
         break;
       default:
@@ -312,19 +313,21 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
               />
             </Show>
 
-            <For each={barPaths()}>{(bar) => <path d={bar.path} fill={bar.cssColor} />}</For>
-            <For each={linePaths()}>
+            <For each={barPaths()} keyed={false}>
+              {(bar) => <path d={bar().path} fill={bar().cssColor} />}
+            </For>
+            <For each={linePaths()} keyed={false}>
               {(line) => (
-                <For each={line.runs}>
+                <For each={line().runs} keyed={false}>
                   {(run) => (
                     <>
                       <Show when={props.kind === "area"}>
-                        <path d={run.area} fill={line.cssColor} fill-opacity="0.1" />
+                        <path d={run().area} fill={line().cssColor} fill-opacity="0.1" />
                       </Show>
                       <path
-                        d={run.line}
+                        d={run().line}
                         fill="none"
-                        stroke={line.cssColor}
+                        stroke={line().cssColor}
                         stroke-width="2"
                         stroke-linejoin="round"
                         stroke-linecap="round"

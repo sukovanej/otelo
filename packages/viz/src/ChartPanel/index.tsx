@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createSignal, Show } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 
 import Panel from "../Panel";
 import type { ChartKind, TimeFrame, TimeSeries } from "../series";
@@ -20,7 +20,13 @@ interface ChartPanelProps {
 }
 
 export default function ChartPanel(props: ChartPanelProps) {
-  const [isolatedIndex, setIsolatedIndex] = createSignal<number>();
+  const [isolatedLabel, setIsolatedLabel] = createSignal<string>();
+  const isolatedIndex = createMemo(() => {
+    const index = props.series.findIndex((series) => series.label === isolatedLabel());
+    return index === -1 ? undefined : index;
+  });
+  const isolateSeries = (index: number | undefined) =>
+    setIsolatedLabel(index === undefined ? undefined : props.series[index]?.label);
   return (
     <Panel
       title={props.title}
@@ -31,7 +37,7 @@ export default function ChartPanel(props: ChartPanelProps) {
             series={props.series}
             kind={props.kind}
             isolatedIndex={isolatedIndex()}
-            onIsolate={setIsolatedIndex}
+            onIsolate={isolateSeries}
           />
         </Show>
       }

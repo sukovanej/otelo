@@ -98,6 +98,9 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
   const requestSeries = createMemo(() => toRequestSeries(detail()?.buckets ?? []));
   const latencySeries = createMemo(() => toLatencySeries(detail()?.buckets ?? []));
   const errorRateSeries = createMemo(() => toErrorRateSeries(detail()?.buckets ?? []));
+  const requestCountTrend = createMemo(() =>
+    detail()?.buckets.map((bucket) => bucket.requests.count),
+  );
   const requests = () => detail()?.requests;
   const zoomRangeTo = (start: number, end: number) =>
     props.range.setRange(new Date(start).toISOString(), new Date(end).toISOString());
@@ -162,7 +165,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
                   ),
                   "rate",
                 )}
-                trend={detail()?.buckets.map((bucket) => bucket.requests.count)}
+                trend={requestCountTrend()}
               />
               <Stat
                 label="Error rate"

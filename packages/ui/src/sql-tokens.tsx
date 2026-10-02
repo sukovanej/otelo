@@ -19,8 +19,8 @@ interface SqlTokensProps {
 
 export default function SqlTokens(props: SqlTokensProps) {
   return (
-    <For each={props.tokens}>
-      {(token) => <span class={SQL_TOKEN_CLASSES[token.kind]}>{token.text}</span>}
+    <For each={props.tokens} keyed={false}>
+      {(token) => <span class={SQL_TOKEN_CLASSES[token().kind]}>{token().text}</span>}
     </For>
   );
 }

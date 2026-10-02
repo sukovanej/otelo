@@ -54,9 +54,16 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
     return series;
   });
 
+  const knownRows = new WeakMap<CallOperation, CallRow>();
   const rows = createMemo<CallRow[]>(() =>
     props.calls.targets.flatMap((target) =>
-      target.operations.map((operation) => ({ target, operation })),
+      target.operations.map((operation) => {
+        const knownRow = knownRows.get(operation);
+        if (knownRow?.target === target) return knownRow;
+        const row = { target, operation };
+        knownRows.set(operation, row);
+        return row;
+      }),
     ),
   );
 
@@ -171,6 +178,7 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
         <Table
           label="Calls"
           rows={rows()}
+          rowKey={toCallKey}
           columns={columns}
           initialSort={{ columnId: "total", descending: true }}
           href={props.callHref}
@@ -180,4 +188,9 @@ export default function ServicePageCalls(props: ServicePageCallsProps) {
       </Panel>
     </>
   );
+}
+
+function toCallKey(row: CallRow): string {
+  const { target, operation } = row;
+  return `${target.type} ${target.system ?? ""} ${target.name ?? ""} ${operation.kind} ${operation.summary}`;
 }

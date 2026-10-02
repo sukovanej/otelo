@@ -56,8 +56,9 @@ export default function LogLines(props: LogLinesProps) {
     <Table
       label="Log lines"
       rows={props.lines}
+      rowKey={toLineKey}
       columns={COLUMNS}
-      selected={(line) => props.selectedKey === toLineKey(line)}
+      selectedKey={() => props.selectedKey}
       tone={(line) => (line.severity >= MIN_ERROR_SEVERITY ? "error" : undefined)}
       onRowClick={(line) =>
         props.onSelect(props.selectedKey === toLineKey(line) ? undefined : line)

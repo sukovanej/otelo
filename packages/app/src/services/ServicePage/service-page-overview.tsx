@@ -38,6 +38,8 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
   const requestSeries = createMemo(() => toRequestSeries(buckets()));
   const latencySeries = createMemo(() => toLatencySeries(buckets()));
   const errorRateSeries = createMemo(() => toErrorRateSeries(buckets()));
+  const requestCountTrend = createMemo(() => buckets().map((bucket) => bucket.requests.count));
+  const logCountTrend = createMemo(() => buckets().map((bucket) => bucket.logs));
   const logSeries = createMemo<TimeSeries[]>(() => [
     {
       label: "Below error",
@@ -116,7 +118,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           value={requests().count}
           unit="count"
           detail={formatValue(toRate(requests().count, rangeSeconds()), "rate")}
-          trend={buckets().map((bucket) => bucket.requests.count)}
+          trend={requestCountTrend()}
         />
         <Stat
           label="Error rate"
@@ -143,7 +145,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           value={stats().logs}
           unit="count"
           detail={`${stats().error_logs.toLocaleString()} errors`}
-          trend={buckets().map((bucket) => bucket.logs)}
+          trend={logCountTrend()}
           trendColor="muted"
         />
       </div>
@@ -206,6 +208,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           <Table
             label="Operations"
             rows={props.service.operations}
+            rowKey={(operation) => `${operation.kind} ${operation.name}`}
             columns={operationColumns()}
             initialSort={{ columnId: "requests", descending: true }}
             href={props.operationHref}

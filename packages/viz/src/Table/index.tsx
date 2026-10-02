@@ -1,5 +1,13 @@
 import type { JSX } from "@solidjs/web";
-import { createMemo, createSignal, For, Show } from "solid-js";
+import {
+  type Accessor,
+  createMemo,
+  createProjection,
+  createSignal,
+  For,
+  Show,
+  untrack,
+} from "solid-js";
 
 import {
   type Column,
@@ -16,28 +24,26 @@ interface SortOrder {
   readonly descending: boolean;
 }
 
-interface RowDetail<R> {
-  readonly isOpen: (row: R) => boolean;
-  readonly draw: (row: R) => JSX.Element;
-}
-
 interface TableProps<R> {
   readonly label: string;
   readonly rows: ReadonlyArray<R>;
+  readonly rowKey: (row: R) => string;
   readonly columns: ReadonlyArray<Column<R>>;
   readonly initialSort?: SortOrder;
   readonly href?: (row: R) => string;
   readonly onRowClick?: (row: R) => void;
-  readonly selected?: (row: R) => boolean;
+  readonly selectedKey?: Accessor<string | undefined>;
   readonly tone?: (row: R) => RowTone | undefined;
-  readonly detail?: RowDetail<R>;
+  readonly detail?: (row: R) => JSX.Element;
   readonly level?: (row: R) => TreeLevel;
   readonly emptyMessage?: JSX.Element;
   readonly loading?: boolean;
 }
 
 export default function Table<R>(props: TableProps<R>) {
-  const [sortOrder, setSortOrder] = createSignal<SortOrder | undefined>(props.initialSort);
+  const [sortOrder, setSortOrder] = createSignal<SortOrder | undefined>(
+    untrack(() => props.initialSort),
+  );
   const isSortable = (column: Column<R>) =>
     props.initialSort !== undefined && pickSortValueReader(column) !== undefined;
   const sortedRows = createMemo(() => {
@@ -48,15 +54,22 @@ export default function Table<R>(props: TableProps<R>) {
       ? sortRows(props.rows, readSortValue, order.descending)
       : props.rows;
   });
-  const largestMeterValues = createMemo(() => {
-    const largest = new Map<string, number>();
-    for (const column of props.columns) {
-      if (column.kind !== "meter") continue;
-      const values = props.rows.map((row) => column.value(row)).filter((value) => value !== null);
-      largest.set(column.id, Math.max(0, ...values));
-    }
-    return largest;
-  });
+  const largestMeterValues = createMemo(
+    () => {
+      const largest = new Map<string, number>();
+      for (const column of props.columns) {
+        if (column.kind !== "meter") continue;
+        const values = props.rows.map((row) => column.value(row)).filter((value) => value !== null);
+        largest.set(column.id, Math.max(0, ...values));
+      }
+      return largest;
+    },
+    { equals: haveSameEntries },
+  );
+  const selectedKeys = createProjection<Record<string, true>>(() => {
+    const key = props.selectedKey?.();
+    return key === undefined ? {} : { [key]: true };
+  }, {});
   const sortByColumn = (columnId: string) =>
     setSortOrder((order) =>
       order?.columnId === columnId
@@ -121,32 +134,45 @@ export default function Table<R>(props: TableProps<R>) {
 
       <For
         each={sortedRows()}
+        keyed={props.rowKey}
         fallback={
           <div role="row" class="col-span-full px-3 py-8 text-center font-sans text-muted">
             <span role="cell">{props.emptyMessage ?? "Nothing to show."}</span>
           </div>
         }
       >
-        {(row) => (
-          <>
-            <TableRow
-              row={row}
-              columns={props.columns}
-              largestMeterValues={largestMeterValues()}
-              href={props.href?.(row)}
-              onRowClick={props.onRowClick}
-              selected={props.selected?.(row)}
-              tone={props.tone?.(row)}
-              level={props.level?.(row)}
-            />
-            <Show when={props.detail?.isOpen(row)}>
-              <div role="row" class="col-span-full border-b border-line">
-                <div role="cell">{props.detail?.draw(row)}</div>
-              </div>
-            </Show>
-          </>
-        )}
+        {(row) => {
+          const isSelected = () => selectedKeys[props.rowKey(row())] === true;
+          return (
+            <>
+              <TableRow
+                row={row()}
+                columns={props.columns}
+                largestMeterValues={largestMeterValues()}
+                href={props.href?.(row())}
+                onRowClick={props.onRowClick}
+                selected={props.selectedKey ? isSelected() : undefined}
+                tone={props.tone?.(row())}
+                level={props.level?.(row())}
+              />
+              <Show when={props.detail && isSelected()}>
+                <div role="row" class="col-span-full border-b border-line">
+                  <div role="cell">{props.detail?.(row())}</div>
+                </div>
+              </Show>
+            </>
+          );
+        }}
       </For>
     </div>
   );
+}
+
+function haveSameEntries(
+  previous: ReadonlyMap<string, number>,
+  next: ReadonlyMap<string, number>,
+): boolean {
+  if (previous.size !== next.size) return false;
+  for (const [key, value] of next) if (previous.get(key) !== value) return false;
+  return true;
 }
