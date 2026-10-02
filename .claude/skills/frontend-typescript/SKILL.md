@@ -89,7 +89,18 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   keep apart in the cache. Solid holds every reader of a changed key until the answer
   lands, which is right, so acknowledge the wait and never route around it. A control
   that echoes its own source reads it through `latest(range.since)`, or it lags a click
-  and a second click builds on the old value. `loading()` shows the wait.
+  and a second click builds on the old value. The `latest()` read sits in the control's
+  own JSX: a memo or projection derived from a held value stays held, even when it reads
+  through `latest()`. `loading()` shows the wait.
+- **Fetched rows are a store a reload merges into by position**, since the daemon's rows
+  carry no `id`. A row kept past the next answer turns into whatever record lands at its
+  index, so a selection keeps `snapshot(row)`, as `TracesPage` does.
+- **A list of objects a memo builds anew** goes through `<For keyed={false}>`, or keyed
+  by a stable field, as `Table` keys rows by `rowKey`. Keyed by identity, every refresh
+  throws away and rebuilds each row.
+- **One value compared in every row**, a selection or an open item, is a
+  `createProjection` map that each row reads by its own key, as `Table` does with
+  `selectedKey`. A change then re-runs the two rows that flipped.
 - **Every read of fetched data sits under an `<Errored>`**: `FetchErrorBoundary` around
   content, and an `<Errored fallback={…}>` drawing the same element without the data
   elsewhere. A request that fails for a new key with no boundary above leaves the hold
