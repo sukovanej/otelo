@@ -1,19 +1,19 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
+import { keepPreviousData, QueryObserver } from "@tanstack/query-core";
 import {
   type Accessor,
-  action,
-  affects,
   createEffect,
   createMemo,
-  isPending,
-  onCleanup,
-  refresh,
+  createSignal,
+  onSettled,
+  untrack,
 } from "solid-js";
 
 import { toQueryString } from "@otelo/api";
 
 import type { FetchState } from "../fetch";
 import { DEFAULT_SINCE, LIVE_RELOAD_MS } from "../list";
+import { queryClient } from "../queryClient";
 
 export interface RangeState {
   readonly since: () => string;
@@ -60,70 +60,35 @@ interface RangeBounds {
   readonly until: string;
 }
 
-type RangeAnswer<T> = FetchedAnswer<T> | FailedAnswer<T>;
-
-interface FetchedAnswer<T> {
-  readonly state: "fetched";
-  readonly data: T;
-  readonly updatedAt: Date;
-}
-
-interface FailedAnswer<T> {
-  readonly state: "failed";
-  readonly errorMessage: string;
-  readonly lastFetched: FetchedAnswer<T> | undefined;
-}
-
 export function createRangeFetch<K, T>(
   range: LiveRange,
+  queryName: string,
   key: Accessor<K>,
   fetcher: (key: K & RangeBounds, signal: AbortSignal) => Promise<T>,
 ): FetchState<T> {
-  const keyWithRange = createMemo(
-    () => ({ ...key(), since: range.since(), until: range.until() }),
-    { equals: (previous, next) => JSON.stringify(previous) === JSON.stringify(next) },
-  );
-  const answer = createMemo<RangeAnswer<T> | undefined>(
-    async (previous) => {
-      const controller = new AbortController();
-      onCleanup(() => controller.abort());
-      try {
-        const data = await fetcher(keyWithRange(), controller.signal);
-        return { state: "fetched", data, updatedAt: new Date() };
-      } catch (error) {
-        return {
-          state: "failed",
-          errorMessage: error instanceof Error ? error.message : String(error),
-          lastFetched: previous?.state === "fetched" ? previous : previous?.lastFetched,
-        };
-      }
-    },
-    { loadingValue: undefined },
-  );
-  const lastFetched = () => {
-    const shownAnswer = answer();
-    return shownAnswer?.state === "failed" ? shownAnswer.lastFetched : shownAnswer;
-  };
-  const loading = () => answer() === undefined || isPending(answer);
-  const reload = action(function* () {
-    affects(answer);
-    yield refresh(answer);
+  const options = createMemo(() => {
+    const keyWithRange = { ...key(), since: range.since(), until: range.until() };
+    return {
+      queryKey: [queryName, keyWithRange],
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetcher(keyWithRange, signal),
+      refetchInterval: range.live() ? LIVE_RELOAD_MS : false,
+      placeholderData: keepPreviousData,
+    } as const;
   });
-  createEffect(range.live, (isLive) => {
-    if (!isLive) return undefined;
-    const timer = setInterval(() => {
-      if (!loading()) void reload();
-    }, LIVE_RELOAD_MS);
-    return () => clearInterval(timer);
+  const observer = new QueryObserver(queryClient, untrack(options));
+  const [result, setResult] = createSignal(observer.getCurrentResult());
+  onSettled(() => observer.subscribe(setResult));
+  createEffect(options, (newOptions) => observer.setOptions(newOptions));
+  const updatedAt = createMemo<Date | undefined>((previous) => {
+    const fetchedAt = result().dataUpdatedAt;
+    if (fetchedAt === 0 || fetchedAt === previous?.getTime()) return previous;
+    return new Date(fetchedAt);
   });
   return {
-    data: () => lastFetched()?.data,
-    errorMessage: () => {
-      const shownAnswer = answer();
-      return shownAnswer?.state === "failed" ? shownAnswer.errorMessage : undefined;
-    },
-    loading,
-    updatedAt: () => lastFetched()?.updatedAt,
-    reload: () => void reload(),
+    data: () => result().data,
+    errorMessage: () => result().error?.message,
+    loading: () => result().isFetching,
+    updatedAt,
+    reload: () => void observer.refetch(),
   };
 }

@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { latest, Show } from "solid-js";
+import { Show } from "solid-js";
 
 import { completeQuery, type Signal } from "@otelo/api";
 import { Button, QueryInput, RangePicker, Tabs } from "@otelo/ui";
@@ -61,8 +61,8 @@ export default function QueryBar<V extends string, R extends ListResult<V>>(
             ref={props.ref}
           />
           <RangePicker
-            since={latest(list().since)}
-            until={latest(list().until)}
+            since={list().since()}
+            until={list().until()}
             onChange={(since, until) => list().setRange(since, until)}
             size="lg"
           />
@@ -73,8 +73,8 @@ export default function QueryBar<V extends string, R extends ListResult<V>>(
       }
       end={
         <LiveToggle
-          live={latest(list().live)}
-          until={latest(list().until)}
+          live={list().live()}
+          until={list().until()}
           onChange={(live) => list().setLive(live)}
         />
       }

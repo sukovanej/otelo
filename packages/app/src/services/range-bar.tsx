@@ -1,5 +1,4 @@
 import type { JSX } from "@solidjs/web";
-import { latest } from "solid-js";
 
 import { RangePicker } from "@otelo/ui";
 
@@ -22,13 +21,13 @@ export default function RangeBar(props: RangeBarProps) {
       end={
         <>
           <RangePicker
-            since={latest(props.range.since)}
-            until={latest(props.range.until)}
+            since={props.range.since()}
+            until={props.range.until()}
             onChange={(since, until) => props.range.setRange(since, until)}
           />
           <LiveToggle
-            live={latest(props.range.live)}
-            until={latest(props.range.until)}
+            live={props.range.live()}
+            until={props.range.until()}
             onChange={(live) => props.range.setLive(live)}
           />
         </>

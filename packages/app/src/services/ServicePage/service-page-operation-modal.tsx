@@ -61,6 +61,7 @@ export default function ServicePageOperationModal(props: ServicePageOperationMod
   const subjectNoun = () => (props.variant === "call" ? "call" : "operation");
   const fetched = createRangeFetch(
     props.range,
+    "operation",
     () => ({ service: props.service, name: spanName(), kind: props.kind, target: callTarget() }),
     async ({ service, name, kind, target, since, until }, signal): Promise<OperationResult> => {
       if (target) {

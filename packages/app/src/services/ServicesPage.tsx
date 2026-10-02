@@ -13,7 +13,7 @@ import { measureSeconds, toRate, toShare } from "./stats";
 
 export default function ServicesPage() {
   const range = useRange();
-  const fetched = createRangeFetch(range, () => ({}), getServices);
+  const fetched = createRangeFetch(range, "services", () => ({}), getServices);
   const rangeSeconds = () => {
     const services = fetched.data();
     return services ? measureSeconds(services.start_at, services.end_at) : 0;
