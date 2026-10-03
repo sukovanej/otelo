@@ -1,5 +1,5 @@
 ---
-status: backlog
+status: todo
 created: 2026-10-03T22:33:34Z
 tags:
 - bug
