@@ -40,15 +40,6 @@ sequenceDiagram
 - The CLI reads the password from `OTELO_PASSWORD`, as it reads the address from `OTELO_URL`, and sends it as `Authorization: Bearer <password>`.
 - The OTLP receivers stay without a password, on `127.0.0.1`.
 
-## Migrations of state.sqlite
-
-The password is the first data otelo keeps that no journal can rebuild ([[./00021-rebuild-the-index-from-a-journal.md]]), so `state.sqlite` gets migrations in this task:
-
-- An ordered list of SQL steps in the code. `PRAGMA user_version` is the number of steps applied.
-- At open, each step after it runs once, in a transaction with the new `user_version`.
-- The table `telemetry_indexes` of today is step 1.
-- A file with a `user_version` past the last step, from a newer otelo, fails the startup.
-
 ## Tests
 
 - `otelo init` prints a password and stores only its hash. A second `otelo init` refuses, and `--new-password` replaces the password.
@@ -56,7 +47,6 @@ The password is the first data otelo keeps that no journal can rebuild ([[./0002
 - `/api` answers 401 without the password and with a wrong one, as a bearer token or as the cookie.
 - The login sets the cookie for the right password only, and the logout clears it.
 - The CLI sends `OTELO_PASSWORD`.
-- The migrations bring a new file and a file of step 1 to the last step.
 
 ## Comments
 
