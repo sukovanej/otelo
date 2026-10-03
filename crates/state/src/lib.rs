@@ -3,17 +3,14 @@ mod password;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, bail};
 use otelo_indexed_storage::{IndexedAttribute, IndexedSignal};
 use otelo_query::Signal;
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::password::{generate_password, hash_password};
 
-const MIGRATIONS: [&str; 2] = [
-    include_str!("migrations/1_telemetry_indexes.sql"),
-    include_str!("migrations/2_passwords.sql"),
-];
+const STATE_SCHEMA: &str = include_str!("schema.sql");
 
 pub struct StateFile {
     path: PathBuf,
@@ -24,12 +21,10 @@ impl StateFile {
         let state = Self {
             path: data_directory.join("state.sqlite"),
         };
-        let mut connection = state.open_connection()?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .with_context(|| format!("turn on the write-ahead log of {}", state.path.display()))?;
-        apply_migrations(&mut connection)
-            .with_context(|| format!("migrate {}", state.path.display()))?;
+        state
+            .open_connection()?
+            .execute_batch(STATE_SCHEMA)
+            .with_context(|| format!("create the schema in {}", state.path.display()))?;
         Ok(state)
     }
 
@@ -116,26 +111,4 @@ impl StateFile {
             .query_row("SELECT hash FROM passwords", [], |row| row.get(0))
             .optional()?)
     }
-}
-
-fn apply_migrations(connection: &mut Connection) -> anyhow::Result<()> {
-    let applied_steps: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    let numbered_steps = (1_u32..).zip(MIGRATIONS);
-    let known_steps = numbered_steps
-        .clone()
-        .last()
-        .map_or(0, |(number, _)| number);
-    ensure!(
-        applied_steps <= known_steps,
-        "a newer otelo wrote it: it has {applied_steps} steps of the schema, and this otelo knows {known_steps}"
-    );
-    for (step_number, step) in numbered_steps.skip_while(|(number, _)| *number <= applied_steps) {
-        let transaction = connection.transaction()?;
-        transaction
-            .execute_batch(step)
-            .with_context(|| format!("apply step {step_number}"))?;
-        transaction.pragma_update(None, "user_version", step_number)?;
-        transaction.commit()?;
-    }
-    Ok(())
 }
