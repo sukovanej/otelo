@@ -265,18 +265,18 @@ impl TickMetrics {
         &mut self,
         name: &str,
         unit: &str,
-        labels: &[(&str, &str)],
+        attribute_pairs: &[(&str, &str)],
         value: f64,
         points_of_kind: fn(Vec<NumberPoint>) -> Points,
     ) {
-        let mut label_attributes = Attributes::new();
-        for &(key, value) in labels {
-            label_attributes.insert(key, value);
+        let mut attributes = Attributes::new();
+        for &(key, value) in attribute_pairs {
+            attributes.insert(key, value);
         }
         self.metrics.push(Metric {
             name: name.into(),
             unit: unit.into(),
-            labels: label_attributes,
+            attributes,
             points: points_of_kind(vec![NumberPoint {
                 recorded_at: self.recorded_at,
                 value,
@@ -284,17 +284,23 @@ impl TickMetrics {
         });
     }
 
-    fn push_gauge(&mut self, name: &str, unit: &str, labels: &[(&str, &str)], value: f64) {
-        self.push_point(name, unit, labels, value, Points::Gauge);
+    fn push_gauge(&mut self, name: &str, unit: &str, attribute_pairs: &[(&str, &str)], value: f64) {
+        self.push_point(name, unit, attribute_pairs, value, Points::Gauge);
     }
 
     #[expect(clippy::cast_precision_loss, reason = "a level far below 2^53")]
-    fn push_level(&mut self, name: &str, unit: &str, labels: &[(&str, &str)], value: u64) {
-        self.push_point(name, unit, labels, value as f64, Points::UpDown);
+    fn push_level(&mut self, name: &str, unit: &str, attribute_pairs: &[(&str, &str)], value: u64) {
+        self.push_point(name, unit, attribute_pairs, value as f64, Points::UpDown);
     }
 
-    fn push_counter(&mut self, name: &str, unit: &str, labels: &[(&str, &str)], total: f64) {
-        self.push_point(name, unit, labels, total, |points| {
+    fn push_counter(
+        &mut self,
+        name: &str,
+        unit: &str,
+        attribute_pairs: &[(&str, &str)],
+        total: f64,
+    ) {
+        self.push_point(name, unit, attribute_pairs, total, |points| {
             Points::Counter(Temporality::Cumulative, points)
         });
     }

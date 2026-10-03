@@ -36,7 +36,7 @@ struct SeriesKey {
     service: String,
     kind: MetricKind,
     unit: String,
-    labels_json: String,
+    attributes_json: String,
     resource_attributes_json: String,
 }
 
@@ -49,7 +49,7 @@ impl SeriesKey {
             service: self.service,
             kind: self.kind,
             unit: self.unit,
-            labels: serde_json::from_str(&self.labels_json)?,
+            attributes: serde_json::from_str(&self.attributes_json)?,
             resource: serde_json::from_str(&self.resource_attributes_json)?,
             summaries_by_step,
         })
@@ -162,7 +162,7 @@ pub(super) fn list_metrics(
     let select_series_in_schema = |schema: &dyn fmt::Display, conditions: String| {
         format!(
             "SELECT series.name, series.kind, series.temporality, series.unit, resource.service,
-                    series.labels, resource.attributes AS resource_attributes
+                    series.attributes, resource.attributes AS resource_attributes
              FROM {schema}.series
              JOIN {schema}.resources resource ON resource.id = series.resource_id
              WHERE {conditions}"
@@ -171,19 +171,19 @@ pub(super) fn list_metrics(
     let read_series_info = |row: &rusqlite::Row| {
         let kind: String = row.get(1)?;
         let temporality: Option<String> = row.get(2)?;
-        let labels: String = row.get(5)?;
+        let attributes: String = row.get(5)?;
         let resource: String = row.get(6)?;
         Ok(SeriesInfo {
             name: row.get(0)?,
             kind: metric_kind_from_stored_names(&kind, temporality.as_deref())?,
             unit: row.get(3)?,
             service: row.get(4)?,
-            labels: serde_json::from_str(&labels)?,
+            attributes: serde_json::from_str(&attributes)?,
             resource: serde_json::from_str(&resource)?,
         })
     };
     let head = "SELECT DISTINCT * FROM (";
-    let tail = format!(") ORDER BY name, service, labels LIMIT {}", limit + 1);
+    let tail = format!(") ORDER BY name, service, attributes LIMIT {}", limit + 1);
     let mut series = if rollup_table.is_some() {
         let sql = format!(
             "{head}{}{tail}",
@@ -258,7 +258,7 @@ fn read_buckets_of_raw_points(
         |day_schema| {
             format!(
                 "SELECT resource.service, series.kind, series.temporality, series.unit,
-                        series.labels, resource.attributes, point.recorded_at, point.value,
+                        series.attributes, resource.attributes, point.recorded_at, point.value,
                         point.histogram
                  FROM {day_schema}.points point
                  JOIN {day_schema}.series ON series.id = point.series_id
@@ -276,7 +276,7 @@ fn read_buckets_of_raw_points(
                 service: row.get(0)?,
                 kind,
                 unit: row.get(3)?,
-                labels_json: row.get(4)?,
+                attributes_json: row.get(4)?,
                 resource_attributes_json: row.get(5)?,
             };
             let point = read_series_point(row, 6)?;
@@ -345,7 +345,7 @@ fn read_buckets_of_summaries(
         &mut where_clause,
     )?;
     let sql = format!(
-        "SELECT resource.service, series.kind, series.temporality, series.unit, series.labels,
+        "SELECT resource.service, series.kind, series.temporality, series.unit, series.attributes,
                 resource.attributes, summary.start_at, {}
          FROM {ROLLUP_SCHEMA_NAME}.{} summary
          JOIN {ROLLUP_SCHEMA_NAME}.series ON series.id = summary.series_id
@@ -365,7 +365,7 @@ fn read_buckets_of_summaries(
             service: row.get(0)?,
             kind: metric_kind_from_stored_names(&kind, temporality.as_deref())?,
             unit: row.get(3)?,
-            labels_json: row.get(4)?,
+            attributes_json: row.get(4)?,
             resource_attributes_json: row.get(5)?,
         };
         let summary_start_at: i64 = row.get(6)?;

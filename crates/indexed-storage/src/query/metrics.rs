@@ -59,7 +59,7 @@ pub struct SeriesInfo {
     pub kind: MetricKind,
     pub unit: String,
     pub service: String,
-    pub labels: Attributes,
+    pub attributes: Attributes,
     /// The attributes of the resource that sends the series.
     pub resource: Attributes,
 }
@@ -120,7 +120,7 @@ impl FromStr for Resolution {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GroupingField {
     Service,
-    Label(String),
+    Attribute(String),
     Resource(String),
 }
 
@@ -130,10 +130,10 @@ impl FromStr for GroupingField {
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         match resolve_field(Signal::Metrics, name) {
             Field::Builtin(BuiltinField::Service) => Ok(Self::Service),
-            Field::Attribute(key) => Ok(Self::Label(key)),
+            Field::Attribute(key) => Ok(Self::Attribute(key)),
             Field::Resource(key) => Ok(Self::Resource(key)),
             Field::Builtin(builtin_field) => Err(format!(
-                "the series of a metric share its {}; group them by a label, service, or \
+                "the series of a metric share its {}; group them by an attribute, service, or \
                  resource.<key>",
                 builtin_field.name()
             )),
@@ -145,7 +145,7 @@ impl fmt::Display for GroupingField {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let field = match self {
             Self::Service => Field::Builtin(BuiltinField::Service),
-            Self::Label(key) => Field::Attribute(key.clone()),
+            Self::Attribute(key) => Field::Attribute(key.clone()),
             Self::Resource(key) => Field::Resource(key.clone()),
         };
         field.fmt(formatter)
@@ -215,7 +215,7 @@ pub struct SeriesGroup {
 pub enum GroupKey {
     Series {
         service: String,
-        labels: Attributes,
+        attributes: Attributes,
         /// The attributes of the resource that sends the series.
         resource: Attributes,
     },

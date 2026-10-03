@@ -334,7 +334,7 @@ impl WriterState {
         .map(|(name, unit, total)| Metric {
             name: name.into(),
             unit: unit.into(),
-            labels: Attributes::new(),
+            attributes: Attributes::new(),
             points: Points::Counter(
                 Temporality::Cumulative,
                 vec![NumberPoint {
@@ -577,8 +577,8 @@ impl DayFile {
                 &mut self.series_cache,
                 resource_id,
                 &records.point_rows_by_metric,
-                |labels| {
-                    catalog.count_attributes(&mut catalog_delta, KeyGroup::Metrics, labels);
+                |attributes| {
+                    catalog.count_attributes(&mut catalog_delta, KeyGroup::Metrics, attributes);
                 },
             )?;
         }
@@ -610,13 +610,13 @@ fn write_points_and_count_rejected(
                 name: &metric.name,
                 kind: metric.points.kind(),
                 unit: &metric.unit,
-                labels_json: &metric.labels.to_json(),
+                attributes_json: &metric.attributes.to_json(),
             },
         )?;
         let series_id = match stored_series {
             StoredSeries::Found(series_id) => series_id,
             StoredSeries::Inserted(series_id) => {
-                on_new_series(&metric.labels);
+                on_new_series(&metric.attributes);
                 series_id
             }
             StoredSeries::PastSeriesLimit => {

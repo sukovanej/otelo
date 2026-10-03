@@ -362,7 +362,7 @@
     },
     "/api/metrics": {
       "get": {
-        "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the labels, and\nthe resource. A range of metrics can go back 90 days, further than the\nlogs and the spans.",
+        "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the attributes, and\nthe resource. A range of metrics can go back 90 days, further than the\nlogs and the spans.",
         "operationId": "list_metrics",
         "parameters": [
           {
@@ -472,7 +472,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "The series to keep, by their labels and resource, such as\n`state = used`. Every series of the metric when missing.",
+            "description": "The series to keep, by their attributes and resource, such as\n`state = used`. Every series of the metric when missing.",
             "required": false,
             "schema": {
               "type": "string"
@@ -499,7 +499,7 @@
           {
             "name": "by",
             "in": "query",
-            "description": "The names to group the series by, separated by commas: labels,\n`service`, or `resource.<key>`, such as `http.route,resource.host.name`.\nThe series with the same values of them combine into one group. Each\nseries is its own group when missing.",
+            "description": "The names to group the series by, separated by commas: attributes,\n`service`, or `resource.<key>`, such as `http.route,resource.host.name`.\nThe series with the same values of them combine into one group. Each\nseries is its own group when missing.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1219,7 +1219,7 @@
             "items": {
               "$ref": "#/components/schemas/Attribute"
             },
-            "description": "The attributes of the records: of the logs, the spans, or the labels\nof the series."
+            "description": "The attributes of the records: of the logs, the spans, or the attributes\nof the series."
           },
           "resource": {
             "type": "array",
@@ -1744,12 +1744,12 @@
             "type": "object",
             "required": [
               "service",
-              "labels",
+              "attributes",
               "resource",
               "type"
             ],
             "properties": {
-              "labels": {
+              "attributes": {
                 "$ref": "#/components/schemas/Attributes"
               },
               "resource": {
@@ -2396,11 +2396,11 @@
               "name",
               "unit",
               "service",
-              "labels",
+              "attributes",
               "resource"
             ],
             "properties": {
-              "labels": {
+              "attributes": {
                 "$ref": "#/components/schemas/Attributes"
               },
               "name": {

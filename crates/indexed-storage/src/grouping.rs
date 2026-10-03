@@ -10,7 +10,7 @@ pub struct SummarizedSeries {
     pub service: String,
     pub kind: MetricKind,
     pub unit: String,
-    pub labels: Attributes,
+    pub attributes: Attributes,
     pub resource: Attributes,
     pub summaries_by_step: BTreeMap<i64, StepSummary>,
 }
@@ -21,7 +21,7 @@ impl SummarizedSeries {
         for field in by {
             let value = match field {
                 GroupingField::Service => Some(AttributeValue::from(self.service.as_str())),
-                GroupingField::Label(key) => self.labels.get(key).cloned(),
+                GroupingField::Attribute(key) => self.attributes.get(key).cloned(),
                 GroupingField::Resource(key) => self.resource.get(key).cloned(),
             };
             if let Some(value) = value {
@@ -93,7 +93,7 @@ fn keep_series_alone(series: SummarizedSeries) -> (GroupIdentity, CombinedSeries
     combined.add_summaries_of_series(series.summaries_by_step);
     let identity = GroupIdentity::Series {
         service: series.service,
-        labels: series.labels,
+        attributes: series.attributes,
         resource: series.resource,
     };
     (identity, combined)
@@ -122,7 +122,7 @@ fn group_series_by_values(
 enum GroupIdentity {
     Series {
         service: String,
-        labels: Attributes,
+        attributes: Attributes,
         resource: Attributes,
     },
     Values(Attributes),
@@ -133,11 +133,11 @@ impl GroupIdentity {
         match self {
             Self::Series {
                 service,
-                labels,
+                attributes,
                 resource,
             } => GroupKey::Series {
                 service,
-                labels,
+                attributes,
                 resource,
             },
             Self::Values(values) => GroupKey::Values {

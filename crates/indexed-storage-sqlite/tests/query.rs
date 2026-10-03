@@ -61,7 +61,7 @@ fn memory_usage_metric(points: &[(i64, f64)]) -> Metric {
     Metric {
         name: "process.memory.usage".into(),
         unit: "By".into(),
-        labels: attributes_from_json(json!({"state": "used"})),
+        attributes: attributes_from_json(json!({"state": "used"})),
         points: Points::UpDown(
             points
                 .iter()
@@ -90,11 +90,13 @@ fn distribution_of(bucket: &Bucket) -> &Distribution {
     }
 }
 
-fn labels_and_resource_of(group: &SeriesGroup) -> (&Attributes, &Attributes) {
+fn attributes_and_resource_of(group: &SeriesGroup) -> (&Attributes, &Attributes) {
     match &group.key {
         GroupKey::Series {
-            labels, resource, ..
-        } => (labels, resource),
+            attributes,
+            resource,
+            ..
+        } => (attributes, resource),
         other => panic!("one series, not {other:?}"),
     }
 }
@@ -517,7 +519,7 @@ fn a_trace_has_its_spans_and_logs() {
 }
 
 #[test]
-fn metrics_filter_series_by_labels_and_resource() {
+fn metrics_filter_series_by_attributes_and_resource() {
     let fixture = Fixture::new();
     let reader = fixture.reader_around_midnight();
     let metric_names_matching = |query: &str| {
@@ -554,7 +556,7 @@ fn metrics_filter_series_by_labels_and_resource() {
     assert_eq!(metric.groups.len(), 1);
     assert_eq!(metric.groups[0].kind, MetricKind::UpDown);
     assert_eq!(
-        labels_and_resource_of(&metric.groups[0]).1["host.name"],
+        attributes_and_resource_of(&metric.groups[0]).1["host.name"],
         "droplet"
     );
     let buckets: Vec<(u64, f64, f64, f64, f64)> = metric.groups[0]
@@ -766,7 +768,7 @@ fn a_histogram_returns_the_bucket_counts_of_each_step() {
     api.metrics = vec![Metric {
         name: "http.server.request.duration".into(),
         unit: "s".into(),
-        labels: attributes_from_json(json!({"http.route": "/matches"})),
+        attributes: attributes_from_json(json!({"http.route": "/matches"})),
         points: Points::Histogram(
             Temporality::Cumulative,
             vec![
@@ -914,10 +916,10 @@ fn the_catalog_marks_a_key_with_a_value_too_long_to_list() {
 fn a_counter_returns_its_rate_from_the_point_before_the_range() {
     let directory = tempfile::tempdir().unwrap();
     let range_start_at = Day::today().start_at() + 3600 * SECOND;
-    let network_io_metric = |labels: Value, points: &[(i64, f64)]| Metric {
+    let network_io_metric = |attributes: Value, points: &[(i64, f64)]| Metric {
         name: "system.network.io".into(),
         unit: "By".into(),
-        labels: attributes_from_json(labels),
+        attributes: attributes_from_json(attributes),
         points: Points::Counter(
             Temporality::Cumulative,
             points
@@ -986,7 +988,7 @@ fn a_counter_returns_its_rate_from_the_point_before_the_range() {
             "temporality": "cumulative",
             "unit": "By",
             "service": "api",
-            "labels": {"network.interface.name": "eth0"},
+            "attributes": {"network.interface.name": "eth0"},
             "resource": {"service.name": "api"},
         })
     );
@@ -999,7 +1001,7 @@ fn a_series_past_the_limit_is_cut_by_the_points_of_the_range() {
     let queue_lag_metric = |queue: &str, offset: i64| Metric {
         name: "queue.lag".into(),
         unit: "s".into(),
-        labels: attributes_from_json(json!({"queue": queue})),
+        attributes: attributes_from_json(json!({"queue": queue})),
         points: Points::Gauge(vec![NumberPoint {
             recorded_at: range_start_at + offset * SECOND,
             value: 1.0,
@@ -1030,7 +1032,7 @@ fn a_series_past_the_limit_is_cut_by_the_points_of_the_range() {
     let limited_to_one = reader.get_metric_series(&filter, 1).unwrap();
     assert_eq!(limited_to_one.groups.len(), 1);
     assert_eq!(
-        labels_and_resource_of(&limited_to_one.groups[0]).0["queue"],
+        attributes_and_resource_of(&limited_to_one.groups[0]).0["queue"],
         "email"
     );
     assert!(limited_to_one.truncated);
@@ -1065,7 +1067,7 @@ fn an_exponential_histogram_returns_the_bounds_of_its_buckets() {
     api.metrics = vec![Metric {
         name: "http.server.request.duration".into(),
         unit: "s".into(),
-        labels: Attributes::new(),
+        attributes: Attributes::new(),
         points: Points::Histogram(
             Temporality::Delta,
             vec![point(1, 0, &[10, 10]), point(30, 1, &[2, 2])],
@@ -1103,7 +1105,7 @@ fn a_group_combines_the_series_of_two_resources() {
     let memory_usage_metric = |state: &str, value: f64| Metric {
         name: "system.memory.usage".into(),
         unit: "By".into(),
-        labels: attributes_from_json(json!({"system.memory.state": state})),
+        attributes: attributes_from_json(json!({"system.memory.state": state})),
         points: Points::UpDown(vec![NumberPoint {
             recorded_at: range_start_at + 10 * SECOND,
             value,

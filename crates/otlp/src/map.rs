@@ -272,12 +272,12 @@ struct MetricDescriptor<'a> {
 }
 
 impl MetricDescriptor<'_> {
-    // The writer merges the metrics of equal labels into one series.
-    fn wrap_points_in_metric(&self, labels: Vec<KeyValue>, points: Points) -> Metric {
+    // The writer merges the metrics of equal attributes into one series.
+    fn wrap_points_in_metric(&self, attributes: Vec<KeyValue>, points: Points) -> Metric {
         Metric {
             name: self.name.clone(),
             unit: self.unit.clone(),
-            labels: overlay_on_scope_attributes(self.scope, labels),
+            attributes: overlay_on_scope_attributes(self.scope, attributes),
             points,
         }
     }
@@ -298,7 +298,7 @@ impl MetricDescriptor<'_> {
             },
         };
         Ok(self.wrap_points_in_metric(
-            point.labels,
+            point.attributes,
             Points::Histogram(temporality, vec![histogram_point]),
         ))
     }
@@ -349,7 +349,7 @@ fn number_kind_of_sum(
 
 struct MappedHistogramPoint {
     has_no_recorded_value: bool,
-    labels: Vec<KeyValue>,
+    attributes: Vec<KeyValue>,
     recorded_at: i64,
     count: u64,
     sum: Option<f64>,
@@ -367,7 +367,7 @@ fn map_explicit_histogram_point(point: HistogramDataPoint) -> MappedHistogramPoi
     };
     MappedHistogramPoint {
         has_no_recorded_value: has_no_recorded_value(point.flags),
-        labels: point.attributes,
+        attributes: point.attributes,
         recorded_at: clamp_to_signed_nanos(point.time_unix_nano),
         count: point.count,
         sum: point.sum,
@@ -380,7 +380,7 @@ fn map_explicit_histogram_point(point: HistogramDataPoint) -> MappedHistogramPoi
 fn map_exponential_histogram_point(point: ExponentialHistogramDataPoint) -> MappedHistogramPoint {
     MappedHistogramPoint {
         has_no_recorded_value: has_no_recorded_value(point.flags),
-        labels: point.attributes,
+        attributes: point.attributes,
         recorded_at: clamp_to_signed_nanos(point.time_unix_nano),
         count: point.count,
         sum: point.sum,

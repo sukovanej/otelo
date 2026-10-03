@@ -50,7 +50,7 @@ struct PointRow {
     name: String,
     kind: &'static str,
     unit: String,
-    labels: Value,
+    attributes: Value,
     value: f64,
 }
 
@@ -71,7 +71,7 @@ fn collect_point_rows(batch: &Batch) -> Vec<PointRow> {
                     name: metric.name.clone(),
                     kind,
                     unit: metric.unit.clone(),
-                    labels: serde_json::from_str(&metric.labels.to_json()).unwrap(),
+                    attributes: serde_json::from_str(&metric.attributes.to_json()).unwrap(),
                     value: point.value,
                 });
             }
@@ -84,10 +84,10 @@ fn map_to_point_rows(snapshot_mapper: &mut SnapshotMapper, snapshot: &Snapshot) 
     collect_point_rows(&snapshot_mapper.map_snapshot_to_batch(TICK_AT, snapshot, None))
 }
 
-fn values_by_label(rows: &[PointRow], name: &str, label: &str) -> Vec<(String, f64)> {
+fn values_by_attribute(rows: &[PointRow], name: &str, key: &str) -> Vec<(String, f64)> {
     rows.iter()
         .filter(|row| row.name == name)
-        .map(|row| (row.labels[label].as_str().unwrap().to_owned(), row.value))
+        .map(|row| (row.attributes[key].as_str().unwrap().to_owned(), row.value))
         .collect()
 }
 
@@ -98,10 +98,10 @@ fn values_of_service(rows: &[PointRow], service: &str) -> Vec<(String, f64)> {
         .collect()
 }
 
-fn labelled(pairs: &[(&str, f64)]) -> Vec<(String, f64)> {
+fn owned_pairs(pairs: &[(&str, f64)]) -> Vec<(String, f64)> {
     pairs
         .iter()
-        .map(|&(label, value)| (label.to_owned(), value))
+        .map(|&(name, value)| (name.to_owned(), value))
         .collect()
 }
 
@@ -137,8 +137,8 @@ fn the_cpu_shares_are_the_change_between_two_readings() {
 
     let rows = map_to_point_rows(&mut snapshot_mapper, &snapshot_with_ticks(second_ticks));
     assert_eq!(
-        values_by_label(&rows, "system.cpu.utilization", "cpu.mode"),
-        labelled(&[
+        values_by_attribute(&rows, "system.cpu.utilization", "cpu.mode"),
+        owned_pairs(&[
             ("user", 0.3),
             ("nice", 0.0),
             ("system", 0.1),
@@ -177,7 +177,7 @@ fn a_machine_without_cpu_modes_sends_one_share() {
         .filter(|row| row.name == "system.cpu.utilization")
         .collect();
     assert_eq!(shares.len(), 1);
-    assert_eq!(shares[0].labels, json!({}));
+    assert_eq!(shares[0].attributes, json!({}));
     assert!((shares[0].value - 0.25).abs() < f64::EPSILON);
 }
 
@@ -198,8 +198,8 @@ fn the_memory_of_linux_has_four_states_that_add_up_to_the_limit() {
         },
     );
     assert_eq!(
-        values_by_label(&rows, "system.memory.usage", "system.memory.state"),
-        labelled(&[
+        values_by_attribute(&rows, "system.memory.usage", "system.memory.state"),
+        owned_pairs(&[
             ("used", 620.0),
             ("free", 100.0),
             ("cached", 250.0),
@@ -221,8 +221,8 @@ fn the_memory_of_macos_has_the_states_it_reports() {
     let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let rows = map_to_point_rows(&mut snapshot_mapper, &idle_machine());
     assert_eq!(
-        values_by_label(&rows, "system.memory.usage", "system.memory.state"),
-        labelled(&[("used", 600.0), ("free", 100.0)])
+        values_by_attribute(&rows, "system.memory.usage", "system.memory.state"),
+        owned_pairs(&[("used", 600.0), ("free", 100.0)])
     );
 }
 
@@ -243,8 +243,8 @@ fn a_machine_without_swap_has_no_series_of_it() {
         },
     );
     assert_eq!(
-        values_by_label(&rows, "system.paging.usage", "system.paging.state"),
-        labelled(&[("used", 0.0), ("free", 2048.0)])
+        values_by_attribute(&rows, "system.paging.usage", "system.paging.state"),
+        owned_pairs(&[("used", 0.0), ("free", 2048.0)])
     );
 }
 
@@ -324,9 +324,9 @@ fn a_disk_counts_once_under_its_shortest_mount_point() {
     let usage: Vec<(Value, f64)> = rows
         .iter()
         .filter(|row| row.name == "system.filesystem.usage")
-        .map(|row| (row.labels.clone(), row.value))
+        .map(|row| (row.attributes.clone(), row.value))
         .collect();
-    let labels = |device: &str, mount_point: &str, filesystem_type: &str, state: &str| {
+    let attributes = |device: &str, mount_point: &str, filesystem_type: &str, state: &str| {
         json!({
             "system.device": device,
             "system.filesystem.mountpoint": mount_point,
@@ -337,10 +337,10 @@ fn a_disk_counts_once_under_its_shortest_mount_point() {
     assert_eq!(
         usage,
         [
-            (labels("/dev/vda1", "/", "ext4", "used"), 6000.0),
-            (labels("/dev/vda1", "/", "ext4", "free"), 2000.0),
-            (labels("/dev/vda15", "/boot/efi", "vfat", "used"), 300.0),
-            (labels("/dev/vda15", "/boot/efi", "vfat", "free"), 100.0),
+            (attributes("/dev/vda1", "/", "ext4", "used"), 6000.0),
+            (attributes("/dev/vda1", "/", "ext4", "free"), 2000.0),
+            (attributes("/dev/vda15", "/boot/efi", "vfat", "used"), 300.0),
+            (attributes("/dev/vda15", "/boot/efi", "vfat", "free"), 100.0),
         ]
     );
 }
@@ -360,13 +360,13 @@ fn the_volumes_of_an_apfs_container_count_once() {
         },
     );
     let devices: Vec<(String, f64)> =
-        values_by_label(&rows, "system.filesystem.usage", "system.device")
+        values_by_attribute(&rows, "system.filesystem.usage", "system.device")
             .into_iter()
             .step_by(2)
             .collect();
     assert_eq!(
         devices,
-        labelled(&[
+        owned_pairs(&[
             ("Macintosh HD", 370_788_596_736.0),
             ("Backup", 750_000_000_000.0),
         ])
@@ -403,12 +403,12 @@ fn leaves_out_the_loopback_and_the_idle_interfaces() {
             .all(|row| row.kind == "counter" && row.unit == "By")
     );
     assert_eq!(
-        network_io_rows[0].labels,
+        network_io_rows[0].attributes,
         json!({"network.interface.name": "eth0", "network.io.direction": "receive"})
     );
     assert_eq!(
-        values_by_label(&rows, "system.network.io", "network.io.direction"),
-        labelled(&[("receive", 5000.0), ("transmit", 1200.0)])
+        values_by_attribute(&rows, "system.network.io", "network.io.direction"),
+        owned_pairs(&[("receive", 5000.0), ("transmit", 1200.0)])
     );
 }
 
@@ -458,11 +458,11 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
     let rows = collect_point_rows(&batch);
     assert_eq!(
         values_of_service(&rows, "caddy"),
-        labelled(&[("process.cpu.time", 93.25)])
+        owned_pairs(&[("process.cpu.time", 93.25)])
     );
     assert_eq!(
         values_of_service(&rows, "mudro"),
-        labelled(&[
+        owned_pairs(&[
             ("process.cpu.time", 93.25),
             ("process.memory.usage", 45_000_000.0),
             ("process.cgroup.memory.usage", 171_000_000.0),
@@ -471,7 +471,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
     // otelo counts once, from its own process and not from its unit.
     assert_eq!(
         values_of_service(&rows, "otelo"),
-        labelled(&[
+        owned_pairs(&[
             ("process.cpu.time", 1.5),
             ("process.memory.usage", 40_000_000.0),
         ])
@@ -537,12 +537,12 @@ fn the_cpu_time_of_a_process_tree_never_falls_when_a_child_exits() {
             process(11, 10, 2000, 200),
             process(12, 11, 8000, 300),
         ]),
-        labelled(&[("process.cpu.time", 0.0), ("process.memory.usage", 600.0)])
+        owned_pairs(&[("process.cpu.time", 0.0), ("process.memory.usage", 600.0)])
     );
     // The grandchild 12 exited with its 8 seconds. The others gained 1 and 2 seconds.
     assert_eq!(
         map_tick_with_mudro(&[process(10, 1, 6000, 100), process(11, 10, 4000, 250)]),
-        labelled(&[("process.cpu.time", 3.0), ("process.memory.usage", 350.0)])
+        owned_pairs(&[("process.cpu.time", 3.0), ("process.memory.usage", 350.0)])
     );
     // A child that started since the last reading counts with all its time.
     assert_eq!(
@@ -551,7 +551,7 @@ fn the_cpu_time_of_a_process_tree_never_falls_when_a_child_exits() {
             process(11, 10, 4500, 250),
             process(13, 10, 250, 50),
         ]),
-        labelled(&[("process.cpu.time", 3.75), ("process.memory.usage", 400.0)])
+        owned_pairs(&[("process.cpu.time", 3.75), ("process.memory.usage", 400.0)])
     );
 }
 
@@ -569,8 +569,8 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
         Some(storage_size),
     ));
     assert_eq!(
-        values_by_label(&rows, "otelo.storage.size", "otelo.storage.file"),
-        labelled(&[
+        values_by_attribute(&rows, "otelo.storage.size", "otelo.storage.file"),
+        owned_pairs(&[
             ("telemetry", 52_000_000.0),
             ("rollup", 4_000_000.0),
             ("state", 8192.0),

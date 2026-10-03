@@ -111,7 +111,7 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
         &connection,
         "SELECT json_object('name', series.name, 'kind', series.kind,
                             'temporality', series.temporality, 'unit', series.unit,
-                            'plan', series.labels ->> 'plan', 'value', point.value,
+                            'plan', series.attributes ->> 'plan', 'value', point.value,
                             'counts', point.histogram -> 'counts',
                             'bounds', point.histogram -> 'bounds')
          FROM points point
@@ -173,22 +173,22 @@ fn send_each_signal(receiver: &Receiver, transport: Transport) {
     context.span().end();
 
     let meter = meter_provider.meter("shop-test");
-    let plan_labels = [KeyValue::new("plan", "free")];
+    let plan_attributes = [KeyValue::new("plan", "free")];
     let adds_counter = meter.u64_counter("cart.adds").with_unit("{item}").build();
-    adds_counter.add(3, &plan_labels);
+    adds_counter.add(3, &plan_attributes);
     let duration_histogram = meter
         .f64_histogram("cart.duration")
         .with_unit("ms")
         .with_boundaries(vec![10.0, 100.0])
         .build();
-    duration_histogram.record(5.0, &plan_labels);
-    duration_histogram.record(50.0, &plan_labels);
+    duration_histogram.record(5.0, &plan_attributes);
+    duration_histogram.record(50.0, &plan_attributes);
     let item_counter = meter
         .i64_up_down_counter("cart.items")
         .with_unit("{item}")
         .build();
-    item_counter.add(3, &plan_labels);
-    item_counter.add(-1, &plan_labels);
+    item_counter.add(3, &plan_attributes);
+    item_counter.add(-1, &plan_attributes);
 
     // Shutting a provider down exports what it holds.
     tracer_provider.shutdown().unwrap();

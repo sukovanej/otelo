@@ -11,8 +11,12 @@ import {
 
 const HOST = { "host.name": "droplet" };
 
-function toSeriesInfo(name: string, labels: SeriesInfo["labels"], service = "otelo"): SeriesInfo {
-  return { name, kind: "updown", unit: "By", service, labels, resource: HOST };
+function toSeriesInfo(
+  name: string,
+  attributes: SeriesInfo["attributes"],
+  service = "otelo",
+): SeriesInfo {
+  return { name, kind: "updown", unit: "By", service, attributes, resource: HOST };
 }
 
 function toMetricSeries(groups: SeriesGroup[], stepSeconds = 60): MetricSeries {
@@ -32,11 +36,14 @@ function toBucket(minute: number, avg: number, change: SeriesGroup["buckets"][nu
   return { start_at: startAt, count: 1, min: avg, max: avg, avg, last: avg, change };
 }
 
-function toGaugeGroup(labels: SeriesInfo["labels"], averagesByMinute: number[][]): SeriesGroup {
+function toGaugeGroup(
+  attributes: SeriesInfo["attributes"],
+  averagesByMinute: number[][],
+): SeriesGroup {
   return {
     kind: "updown",
     unit: "By",
-    key: { type: "series", service: "otelo", labels, resource: HOST },
+    key: { type: "series", service: "otelo", attributes, resource: HOST },
     buckets: averagesByMinute.map(([minute = 0, avg = 0]) =>
       toBucket(minute, avg, { kind: "none" }),
     ),
@@ -48,7 +55,7 @@ function toHistogramGroup(service: string): SeriesGroup {
     kind: "histogram",
     temporality: "delta",
     unit: "ms",
-    key: { type: "series", service, labels: {}, resource: HOST },
+    key: { type: "series", service, attributes: {}, resource: HOST },
     buckets: [
       toBucket(0, 0, {
         kind: "distribution",
@@ -74,7 +81,7 @@ test("summarizeMetricNames counts the series of each name", () => {
   ]);
 });
 
-test("listGroupingSections offers the labels, the service, and the resource keys that differ", () => {
+test("listGroupingSections offers the attributes, the service, and the resource keys that differ", () => {
   const sections = listGroupingSections(
     [
       { ...toSeriesInfo("m", { state: "used", name: "a" }), resource: { "host.name": "a", x: 1 } },
@@ -84,7 +91,7 @@ test("listGroupingSections offers the labels, the service, and the resource keys
   );
   expect(sections).toEqual([
     {
-      title: "Labels",
+      title: "Attributes",
       options: [
         { value: "attr.name", label: "name" },
         { value: "state", label: "state" },
@@ -139,7 +146,7 @@ test("a series is labeled by what tells it apart, and a group by its values", ()
     key: {
       type: "series",
       service: "otelo",
-      labels: { state: "used" },
+      attributes: { state: "used" },
       resource: { "host.name": "backup" },
     },
   } satisfies SeriesGroup;
@@ -171,7 +178,7 @@ test("a counter is its rate, in bytes per second for bytes", () => {
       kind: "counter",
       temporality: "cumulative",
       unit: "By",
-      key: { type: "series", service: "otelo", labels: {}, resource: HOST },
+      key: { type: "series", service: "otelo", attributes: {}, resource: HOST },
       buckets: [
         toBucket(0, 100, { kind: "none" }),
         toBucket(1, 160, { kind: "rate", per_second: 1 }),
