@@ -33,6 +33,7 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 | `otelo-query` | the query language: its parser and its completion |
 | `otelo-storage` | the storage interface: the model of the records, what the queries return, the channel to the writer, and the `Storage` and `RangeQueries` traits |
 | `otelo-storage-sqlite` | the SQLite backend: the day files, the writer, the queries, and the indexed attributes in the state file, `state.sqlite` |
+| `otelo-journal` | the journal of OTLP requests: its frames, its segments, their compression, and the retention ([[../tasks/00023-journal-the-otlp-that-otelo-rece.md]]) |
 | `otelo-otlp` | the OTLP receiver over HTTP and gRPC |
 | `otelo-host` | the host collector: the readers of the machine, of its services, and of otelo itself, and the mapping from what they read to metric points |
 | `otelo-api` | the HTTP API, its errors, and its OpenAPI spec |
@@ -40,7 +41,12 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 
 ## Storage
 
-SQLite. One state file for the indexed attributes, and later the users and tokens. One telemetry file per day, so retention deletes old files. FTS5 for log search. Spans indexed by `trace_id`. Metrics in a `series` table and a narrow `points` table, with 1-minute and 1-hour rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]).
+A journal and an index ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
+
+- The journal keeps the OTLP export requests as protobuf, in hourly segments per signal, compressed with zstd once the hour ends. It is the only telemetry that has to outlive a change of the storage, and it keeps 30 days by default.
+- The index is one SQLite file, `telemetry.sqlite`, that an indexer builds from the journal: FTS5 for log search, spans indexed by `trace_id`, metrics in a `series` table and a narrow `points` table, and their 1-minute and 1-hour rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Each signal has its own retention, 7 days by default, and retention deletes rows.
+- The index carries a storage version. After a change of the storage, the daemon does not start on an index of another version, and `otelo reindex` rebuilds it from the journal.
+- One state file for the indexed attributes, and later the users and tokens. A journal cannot rebuild it, so it has migrations ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]).
 
 ## UI and CLI auth
 
@@ -71,10 +77,11 @@ A tool that does these could send its events to otelo over OTLP, so otelo shows 
 ## Order
 
 1. OTLP receiver, day files, the query API and CLI, and the logs, traces, and services pages. Done.
-2. Send mudro's traces to a local otelo ([[../tasks/00012-send-mudro-s-traces-to-a-local-s.md]]).
-3. Host metrics ([[../tasks/00007-collect-host-and-service-metrics.md]]) and metric rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]).
-4. Auth ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]), then run otelo on the droplet and turn off Better Stack.
-5. `otelo guide` ([[../tasks/00011-print-a-debugging-guide-with-sin.md]]).
+2. Host metrics ([[../tasks/00007-collect-host-and-service-metrics.md]]) and metric rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Done.
+3. The journal and the index built from it ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
+4. Send mudro's traces to a local otelo, and measure the journal and the index ([[../tasks/00012-send-mudro-s-traces-to-a-local-s.md]]).
+5. Auth ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]), then run otelo on the droplet and turn off Better Stack.
+6. `otelo guide` ([[../tasks/00011-print-a-debugging-guide-with-sin.md]]).
 
 ## Open questions
 
