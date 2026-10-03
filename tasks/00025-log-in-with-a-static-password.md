@@ -59,3 +59,9 @@ The password and the sessions are the first data otelo keeps that no journal can
 - A write with another `Origin` is refused.
 - `otelo login` keeps the session, and the next command sends it.
 - The migrations bring a new file and a file of step 1 to the last step.
+
+## Comments
+
+### 2026-10-03T16:30:20Z by Milan Suk via claude-code
+
+> No `mise dev` task exists, so `mise run serve:dev` makes the dev password on its first run and keeps it in target/dev/password.
