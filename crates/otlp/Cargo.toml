@@ -4,6 +4,7 @@ description = "Receives OTLP logs, traces, and metrics over HTTP and gRPC append
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

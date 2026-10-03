@@ -4,6 +4,7 @@ description = "The SQLite backend of otelo's storage: one file of the logs, trac
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

@@ -4,6 +4,7 @@ description = "Deploys, runs, and observes the apps on one Linux server: the dae
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 repository.workspace = true
 
 # `publish = false` hides a binary from dist unless this names it.

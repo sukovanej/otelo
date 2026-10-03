@@ -4,6 +4,7 @@ description = "Parses and completes the query language that filters otelo's logs
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 serde = { workspace = true }

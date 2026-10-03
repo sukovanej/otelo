@@ -18,3 +18,7 @@ otelo update --canary   # the newest build of main
 ```
 
 A running daemon keeps the old version until it restarts. [CHANGELOG.md](CHANGELOG.md) lists the changes of each release.
+
+## License
+
+[MIT](LICENSE)
