@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 use common::{
     Daemon, StopSignal, find_header_value, init_data_dir, send_get_request, send_request,
-    send_request_with_body, start_daemon, stop_daemon,
+    send_request_with_body, start_daemon, start_daemon_without_auth, stop_daemon,
 };
 
 fn send_login(daemon: &Daemon, password: &str, headers: &[(&str, &str)]) -> String {
@@ -96,6 +96,46 @@ fn serve_without_a_password_does_not_start() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("otelo init"), "{stderr}");
+}
+
+#[test]
+fn unsafe_no_auth_serves_the_api_without_a_password() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_daemon_without_auth(dir.path());
+    let response = send_request(&daemon.api_addr, "GET", "/api/services", &[]);
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let output = daemon
+        .otelo_command()
+        .env_remove("OTELO_PASSWORD")
+        .args(["services", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    stop_daemon(daemon, StopSignal::Term);
+}
+
+#[test]
+fn unsafe_no_auth_does_not_listen_beyond_loopback() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_otelo"))
+        .args([
+            "serve",
+            "--unsafe-no-auth",
+            "--listen",
+            "0.0.0.0:0",
+            "--data",
+        ])
+        .arg(dir.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("loopback"), "{stderr}");
 }
 
 #[test]
