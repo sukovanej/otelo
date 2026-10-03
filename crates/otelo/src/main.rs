@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use otelo::{cli, init, reindex, serve};
+use otelo::{cli, init, reindex, serve, update};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]
@@ -42,6 +42,8 @@ enum Command {
     Index(cli::IndexArgs),
     /// Print the spec of the query API that /api/openapi.json serves, without a daemon
     Openapi,
+    /// Replace this executable with the newest release, or with the newest build of main
+    Update(update::UpdateArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -65,5 +67,6 @@ fn main() -> anyhow::Result<()> {
             println!("{}", otelo_api::build_openapi_spec().to_pretty_json()?);
             Ok(())
         }
+        Command::Update(args) => update::update_executable(&args),
     }
 }

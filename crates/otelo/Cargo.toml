@@ -4,6 +4,11 @@ description = "Deploys, runs, and observes the apps on one Linux server: the dae
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+repository.workspace = true
+
+# `publish = false` hides a binary from dist unless this names it.
+[package.metadata.dist]
+dist = true
 
 [dependencies]
 anyhow = { workspace = true }
@@ -16,6 +21,7 @@ opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 serde = { workspace = true }
 rust-embed = { workspace = true }
+semver = { workspace = true }
 serde_json = { workspace = true }
 otelo-api = { workspace = true }
 otelo-host = { workspace = true }
@@ -26,6 +32,7 @@ otelo-query = { workspace = true }
 otelo-state = { workspace = true }
 otelo-indexed-storage = { workspace = true }
 otelo-indexed-storage-sqlite = { workspace = true }
+otelo-update = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

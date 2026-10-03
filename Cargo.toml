@@ -6,6 +6,7 @@ members = ["crates/*"]
 version = "0.0.1"
 edition = "2024"
 publish = false
+repository = "https://github.com/sukovanej/otelo"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
@@ -25,10 +26,12 @@ opentelemetry-proto = { version = "0.33", default-features = false, features = [
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "logs", "internal-logs"] }
 prost = "0.14"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+semver = "1.0.28"
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"
+tar = "0.4"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk", "network"] }
 otelo-api = { path = "crates/api" }
 otelo-host = { path = "crates/host" }
@@ -39,6 +42,7 @@ otelo-query = { path = "crates/query" }
 otelo-state = { path = "crates/state" }
 otelo-indexed-storage = { path = "crates/indexed-storage" }
 otelo-indexed-storage-sqlite = { path = "crates/indexed-storage-sqlite" }
+otelo-update = { path = "crates/update" }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-util = "0.7.19"
@@ -57,3 +61,22 @@ pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.33.0"
+ci = "github"
+# The release only makes sense for a tag, so a pull request runs no dist job.
+pr-run-mode = "skip"
+installers = ["shell"]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# `otelo` embeds `packages/app/dist` at compile time, so each build job builds the UI first.
+github-build-setup = "../build-setup.yml"
+install-path = "~/.local/bin"
+# `otelo update` replaces the binary itself.
+install-updater = false
+# `otelo update` unpacks this archive.
+unix-archive = ".tar.gz"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

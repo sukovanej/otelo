@@ -1,0 +1,8 @@
+- name: Install Node and pnpm
+  uses: ./.github/actions/setup-web
+# `otelo` embeds `packages/app/dist` at compile time. Without this build the binary links, but it
+# serves no UI. The release must stop instead.
+- name: Build the UI
+  run: |
+    mise run web:build
+    test -s packages/app/dist/index.html
