@@ -260,7 +260,7 @@ impl Compiler<'_> {
                 let param = self.bind_param(value_as_text(value));
                 Ok(format!("{column} {} {param}", operator.symbol()))
             }
-            BuiltinField::Level => compile_level_comparison(&column, operator, value),
+            BuiltinField::Level => self.compile_level_comparison(&column, operator, value),
             BuiltinField::TraceId | BuiltinField::SpanId => {
                 ensure_equality_operator(operator)?;
                 let id = match value {
@@ -294,7 +294,8 @@ impl Compiler<'_> {
                     }
                     _ => return Err(not_a_fixed_value(value)),
                 };
-                Ok(format!("{column} {} {number}", operator.symbol()))
+                let param = self.bind_param(number);
+                Ok(format!("{column} {} {param}", operator.symbol()))
             }
             BuiltinField::Error | BuiltinField::Root => {
                 ensure_equality_operator(operator)?;
@@ -327,6 +328,40 @@ impl Compiler<'_> {
             }
         }
     }
+
+    fn compile_level_comparison(
+        &mut self,
+        column: &str,
+        operator: Operator,
+        value: &Value,
+    ) -> Result<String> {
+        let (low, high) = match value {
+            Value::Int(number) => {
+                let number = i32::try_from(*number)
+                    .map_err(|_| InvalidQuery(format!("{number} is not a severity")))?;
+                (number, number)
+            }
+            Value::String(level) => Severity::parse_level_or_number(level)
+                .map_err(|error| InvalidQuery(error.to_string()))?
+                .level_number_range()
+                .into_inner(),
+            _ => return invalid_query(format!("level takes a level such as warn, not {value}")),
+        };
+        Ok(match operator {
+            Operator::Eq => {
+                let (low, high) = (self.bind_param(low), self.bind_param(high));
+                format!("{column} BETWEEN {low} AND {high}")
+            }
+            Operator::Ne => {
+                let (low, high) = (self.bind_param(low), self.bind_param(high));
+                format!("{column} NOT BETWEEN {low} AND {high}")
+            }
+            Operator::Lt => format!("{column} < {}", self.bind_param(low)),
+            Operator::Le => format!("{column} <= {}", self.bind_param(high)),
+            Operator::Gt => format!("{column} > {}", self.bind_param(high)),
+            Operator::Ge => format!("{column} >= {}", self.bind_param(low)),
+        })
+    }
 }
 
 fn find_kind_or_status_number(
@@ -342,29 +377,6 @@ fn find_kind_or_status_number(
         _ => SpanStatus::from_name(name)?.number(),
     };
     Some(i64::from(number))
-}
-
-fn compile_level_comparison(column: &str, operator: Operator, value: &Value) -> Result<String> {
-    let (low, high) = match value {
-        Value::Int(number) => {
-            let number = i32::try_from(*number)
-                .map_err(|_| InvalidQuery(format!("{number} is not a severity")))?;
-            (number, number)
-        }
-        Value::String(level) => Severity::parse_level_or_number(level)
-            .map_err(|error| InvalidQuery(error.to_string()))?
-            .level_number_range()
-            .into_inner(),
-        _ => return invalid_query(format!("level takes a level such as warn, not {value}")),
-    };
-    Ok(match operator {
-        Operator::Eq => format!("{column} BETWEEN {low} AND {high}"),
-        Operator::Ne => format!("{column} NOT BETWEEN {low} AND {high}"),
-        Operator::Lt => format!("{column} < {low}"),
-        Operator::Le => format!("{column} <= {high}"),
-        Operator::Gt => format!("{column} > {high}"),
-        Operator::Ge => format!("{column} >= {low}"),
-    })
 }
 
 fn value_as_text(value: &Value) -> String {

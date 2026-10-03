@@ -64,17 +64,17 @@ impl Reader {
         &self,
         rowids: impl Iterator<Item = SpanRowid>,
     ) -> anyhow::Result<HashMap<SpanRowid, SpanNameAndAttributes>> {
-        let rowid_list = rowids
-            .map(|rowid| rowid.0.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        if rowid_list.is_empty() {
+        let rowids: Vec<i64> = rowids.map(|rowid| rowid.0).collect();
+        if rowids.is_empty() {
             return Ok(HashMap::new());
         }
-        let sql =
-            format!("SELECT rowid, name, attributes FROM spans WHERE rowid IN ({rowid_list})");
+        let mut where_clause = WhereClause::new();
+        where_clause.push_param(":rowids", serde_json::to_string(&rowids)?);
         let mut spans = HashMap::new();
-        self.scan_rows(&sql, &WhereClause::new(), |row| {
+        let sql = "SELECT rowid, name, attributes
+                   FROM spans
+                   WHERE rowid IN (SELECT value FROM json_each(:rowids))";
+        self.scan_rows(sql, &where_clause, |row| {
             let attributes: String = row.get(2)?;
             spans.insert(
                 SpanRowid(row.get(0)?),

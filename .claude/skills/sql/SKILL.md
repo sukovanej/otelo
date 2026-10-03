@@ -59,8 +59,15 @@ The statements are strings in the Rust sources of the crate that owns the file.
   twice says which one: `matching_span`. `metric_series` takes no alias.
 - A value is a bound parameter, never text in the statement. A query built from parts
   names its parameters, `:since`. A fixed statement numbers them, `?1`.
-- Rust formats only names and numbers of its own into a statement: a table, a column, a
-  limit, a row id it read.
+- A statement has the same text for every call of its query. otelo records the text as the
+  `db.query.text` of a span, and the services view groups spans by it, so a value in the
+  text makes a group of each call.
+- Rust formats only names and constants of its own into a statement: a table, a column,
+  `MAX_CATALOG_ROWS`, `SpanStatus::Error.number()`. A limit, a row id it read, and the
+  level or kind a query names are parameters.
+- A list of values is one parameter: a JSON array that the statement reads with
+  `json_each`, `rowid IN (SELECT value FROM json_each(:rowids))`. A blob goes in the array
+  as hex and comes out with `unhex(value)`.
 - The number of an OpenTelemetry enum comes from its type: `SpanKind::Server.number()`,
   never `2`.
 - The path of an attribute comes from `attribute_json_path`, so the expression is the one

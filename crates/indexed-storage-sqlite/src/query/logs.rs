@@ -11,7 +11,8 @@ use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    WhereClause, span_id_from_blob, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
+    WhereClause, row_limit_with_one_more, span_id_from_blob, timestamp_from_nanos,
+    trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
 
@@ -99,11 +100,11 @@ fn log_line_from_row(row: &Row) -> anyhow::Result<LogLine> {
 }
 
 pub(super) fn read_logs(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Logs> {
-    let (where_clause, unindexed) = compile_log_query(reader, query)?;
+    let (mut where_clause, unindexed) = compile_log_query(reader, query)?;
+    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let sql = format!(
-        "{} ORDER BY log.logged_at DESC LIMIT {}",
-        select_logs(LOG_LINE_COLUMNS, &where_clause),
-        limit + 1
+        "{} ORDER BY log.logged_at DESC LIMIT :limit",
+        select_logs(LOG_LINE_COLUMNS, &where_clause)
     );
     let mut logs = reader.collect_rows(&sql, &where_clause, log_line_from_row)?;
     let truncated = truncate_to_limit(&mut logs, limit);

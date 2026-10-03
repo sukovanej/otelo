@@ -175,9 +175,14 @@ pub fn new_statement_span(sql: &str) -> tracing::Span {
         "SELECT",
         otel.kind = "client",
         db.system.name = "sqlite",
+        db.operation.name = "SELECT",
         db.query.text = sql,
         db.response.returned_rows = tracing::field::Empty,
     )
+}
+
+pub fn row_limit_with_one_more(limit: usize) -> anyhow::Result<i64> {
+    Ok(i64::try_from(limit)?.saturating_add(1))
 }
 
 pub fn truncate_to_limit<T>(rows: &mut Vec<T>, limit: usize) -> bool {
