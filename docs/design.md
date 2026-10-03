@@ -46,11 +46,11 @@ A journal and an index ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
 - The journal keeps the OTLP export requests as protobuf, in hourly segments per signal, compressed with zstd once the hour ends. It is the only telemetry that has to outlive a change of the storage, and it keeps 30 days by default.
 - The index is one SQLite file, `telemetry.sqlite`, that an indexer builds from the journal: FTS5 for log search, spans indexed by `trace_id`, metrics in a `series` table and a narrow `points` table, and their 1-minute and 1-hour rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Each signal has its own retention, 7 days by default, and retention deletes rows.
 - The index carries a storage version. After a change of the storage, the daemon does not start on an index of another version, and `otelo reindex` rebuilds it from the journal.
-- One state file for the indexed attributes, and later the users and tokens. A journal cannot rebuild it, so it has migrations ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]).
+- One state file for the indexed attributes, and later the users and tokens. A journal cannot rebuild it, so it has migrations ([[../tasks/00025-log-in-with-a-static-password.md]]).
 
 ## UI and CLI auth
 
-Passkeys for the UI, and scoped tokens for the CLI and agents. [[../tasks/00013-authenticate-with-passkeys-and-s.md]] has the plan. Until it lands, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel.
+First a static password ([[../tasks/00025-log-in-with-a-static-password.md]]): `otelo init` generates it, prints it once, and stores its hash in the state file. The UI and `otelo login` trade it for a session. Then passkeys for the UI, and scoped tokens for the CLI and agents ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]). Until the password lands, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel. After it, the daemon still listens on `127.0.0.1`, and Caddy puts it on a hostname.
 
 ## What otelo replaces in conquer
 
@@ -80,8 +80,9 @@ A tool that does these could send its events to otelo over OTLP, so otelo shows 
 2. Host metrics ([[../tasks/00007-collect-host-and-service-metrics.md]]) and metric rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Done.
 3. The journal and the index built from it ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
 4. Send mudro's traces to a local otelo, and measure the journal and the index ([[../tasks/00012-send-mudro-s-traces-to-a-local-s.md]]).
-5. Auth ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]), then run otelo on the droplet and turn off Better Stack.
-6. `otelo guide` ([[../tasks/00011-print-a-debugging-guide-with-sin.md]]).
+5. A static password ([[../tasks/00025-log-in-with-a-static-password.md]]), then run otelo on the droplet and turn off Better Stack.
+6. Passkeys and scoped tokens ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]).
+7. `otelo guide` ([[../tasks/00011-print-a-debugging-guide-with-sin.md]]).
 
 ## Open questions
 
