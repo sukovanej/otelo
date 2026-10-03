@@ -390,10 +390,8 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
         ),
         1
     );
-    let metrics_reading = pipeline.signals[2];
-    assert_eq!(metrics_reading.signal, Signal::Metrics);
     assert_eq!(
-        metrics_reading.records,
+        pipeline.metrics.records,
         RecordCounts {
             written: 1002,
             skipped: 0,

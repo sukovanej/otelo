@@ -142,7 +142,11 @@ fn open_planned_segment(planned: PlannedSegment) -> anyhow::Result<SegmentReader
                     .with_context(|| format!("read the size of {}", path.display()))?
                     .len();
                 if length < planned.skipped_bytes {
-                    return Err(ended_before_position(&path, length, planned.skipped_bytes));
+                    return Err(report_end_before_position(
+                        &path,
+                        length,
+                        planned.skipped_bytes,
+                    ));
                 }
                 file.seek(SeekFrom::Start(planned.skipped_bytes))
                     .with_context(|| format!("read {}", path.display()))?;
@@ -159,7 +163,11 @@ fn open_planned_segment(planned: PlannedSegment) -> anyhow::Result<SegmentReader
                 )
                 .with_context(|| format!("read {}", path.display()))?;
                 if skipped < planned.skipped_bytes {
-                    return Err(ended_before_position(&path, skipped, planned.skipped_bytes));
+                    return Err(report_end_before_position(
+                        &path,
+                        skipped,
+                        planned.skipped_bytes,
+                    ));
                 }
                 (path, Box::new(decoder))
             }
@@ -187,7 +195,7 @@ fn open_planned_segment(planned: PlannedSegment) -> anyhow::Result<SegmentReader
     })
 }
 
-fn ended_before_position(path: &Path, length: u64, position: u64) -> anyhow::Error {
+fn report_end_before_position(path: &Path, length: u64, position: u64) -> anyhow::Error {
     anyhow!(
         "{} ends at byte {length}, before the position {position}",
         path.display()

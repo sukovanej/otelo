@@ -9,12 +9,12 @@ publish.workspace = true
 anyhow = { workspace = true }
 opentelemetry-proto = { workspace = true }
 otelo-indexed-storage = { workspace = true }
+otelo-query = { workspace = true }
 sysinfo = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 otelo-otlp = { workspace = true }
-otelo-query = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 

@@ -131,7 +131,7 @@ impl Storage for Sqlite {
 }
 
 // The write-ahead log and its index are part of the database.
-fn paths_of_database(path: &Path) -> impl Iterator<Item = PathBuf> {
+fn list_paths_of_database(path: &Path) -> impl Iterator<Item = PathBuf> {
     ["", "-wal", "-shm"].into_iter().map(|suffix| {
         let mut path = path.to_owned().into_os_string();
         path.push(suffix);
@@ -140,7 +140,7 @@ fn paths_of_database(path: &Path) -> impl Iterator<Item = PathBuf> {
 }
 
 fn delete_database(path: &Path) -> anyhow::Result<()> {
-    for path in paths_of_database(path) {
+    for path in list_paths_of_database(path) {
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -151,7 +151,7 @@ fn delete_database(path: &Path) -> anyhow::Result<()> {
 }
 
 fn size_of_database_in_bytes(path: &Path) -> anyhow::Result<u64> {
-    paths_of_database(path)
+    list_paths_of_database(path)
         .map(|path| match std::fs::metadata(&path) {
             Ok(metadata) => Ok(metadata.len()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),

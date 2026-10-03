@@ -189,7 +189,7 @@ async fn serve_until_shutdown(
         otelo_otlp::serve_grpc(otlp_grpc, intake.clone(), shutdown.clone()),
         collect_host_metrics(
             host,
-            HostReadings {
+            CollectorSources {
                 storage,
                 state,
                 journal,
@@ -212,7 +212,7 @@ async fn serve_until_shutdown(
 
 // The readers of the collector block, and the runtime of a machine with one CPU has one worker
 // thread, so every read runs on a thread that may block.
-struct HostReadings {
+struct CollectorSources {
     storage: Arc<dyn Storage>,
     state: Arc<StateFile>,
     journal: Arc<dyn Journal>,
@@ -221,7 +221,7 @@ struct HostReadings {
 
 async fn collect_host_metrics(
     host: HostIdentity,
-    readings: HostReadings,
+    sources: CollectorSources,
     intake: Intake,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
@@ -239,10 +239,10 @@ async fn collect_host_metrics(
     // the points of all series line up.
     let mut recorded_at = now_unix_nanos();
     loop {
-        let storage = Arc::clone(&readings.storage);
-        let state = Arc::clone(&readings.state);
-        let journal = Arc::clone(&readings.journal);
-        let pipeline = readings.meters.read_pipeline();
+        let storage = Arc::clone(&sources.storage);
+        let state = Arc::clone(&sources.state);
+        let journal = Arc::clone(&sources.journal);
+        let pipeline = sources.meters.read_pipeline();
         let (collector_after_reading, request) = tokio::task::spawn_blocking(move || {
             let storage_size = read_storage_size(storage.as_ref(), &state, journal.as_ref())
                 .inspect_err(|error| tracing::warn!("read the size of the storage: {error:#}"))

@@ -40,7 +40,7 @@ struct Appending {
     open_segment: Option<OpenSegment>,
     newest_closed_hour: Option<Hour>,
     appended_frames: u64,
-    newest_received_at: i64,
+    newest_received_at: Option<i64>,
     sync_failure: Option<String>,
     stopping: bool,
 }
@@ -82,7 +82,7 @@ impl SignalLog {
                 open_segment,
                 newest_closed_hour,
                 appended_frames: 0,
-                newest_received_at: 0,
+                newest_received_at: None,
                 sync_failure: None,
                 stopping: false,
             }),
@@ -145,7 +145,7 @@ impl SignalLog {
         }
         open_segment.length += frame.len() as u64;
         appending.appended_frames += 1;
-        appending.newest_received_at = received_at;
+        appending.newest_received_at = Some(received_at);
         let frame_number = appending.appended_frames;
         drop(appending);
         self.frame_appended.notify_one();
@@ -195,7 +195,9 @@ impl SignalLog {
                             segment_hour: open_segment.hour,
                             byte_offset: open_segment.length,
                         },
-                        newest_received_at: appending.newest_received_at,
+                        newest_received_at: appending
+                            .newest_received_at
+                            .expect("a frame was appended"),
                     },
                 )
             };
