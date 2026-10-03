@@ -70,13 +70,13 @@ erDiagram
   }
   series {
     int id PK
-    int hash "xxh3 of resource, name, kind, temporality, unit, labels, unique"
+    int hash "xxh3 of resource, name, kind, temporality, unit, attributes, unique"
     int resource_id FK
     text name
     text kind "gauge, updown, counter, histogram"
     text temporality "cumulative or delta for a counter and a histogram, null for the rest"
     text unit
-    text labels "JSON"
+    text attributes "JSON"
   }
   points {
     int series_id PK, FK
@@ -99,7 +99,7 @@ erDiagram
   }
 ```
 
-The `attributes` and `labels` columns hold JSON objects. In Rust they are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. The JSON of the columns is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes.
+The `attributes` columns hold JSON objects. In Rust they are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. The JSON of the columns is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes.
 
 ## OTLP receiver
 
@@ -115,7 +115,7 @@ The `otelo-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 - Summaries, a delta sum that is not monotonic, a sum or a histogram without a temporality, and a span without valid IDs are rejected. Span links, severity text, trace state, exemplars, and the start time of a point are not kept.
 - Proto3 JSON leaves out a field at its default, and the decoder of `opentelemetry-proto` takes a point of an exponential histogram only with every field. The receiver fills the missing ones before it decodes.
 - A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
-- A metric gets at most 1,000 series per day file, so one label that holds a user ID cannot fill the disk. The writer skips the points of a series past that. The receiver has answered by then, so the writer counts them in `otelo.telemetry.rejected_points`, next to `otelo.telemetry.dropped_batches`, and warns in its log.
+- A metric gets at most 1,000 series per day file, so one attribute that holds a user ID cannot fill the disk. The writer skips the points of a series past that. The receiver has answered by then, so the writer counts them in `otelo.telemetry.rejected_points`, next to `otelo.telemetry.dropped_batches`, and warns in its log.
 
 ## Host collector
 
@@ -127,7 +127,7 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 - The metrics of a service have the name of its systemd unit without `.service`, or its launchd label. A unit named like the `service.name` its app sends puts these numbers next to the telemetry of the app.
 - Every resource carries `host.name`, `host.id`, `host.arch`, and `os.type`. A query finds the machine by `resource.host.name` and the `system.*` names, not by the service.
 
-| Metric | Kind | Unit | Labels |
+| Metric | Kind | Unit | Attributes |
 |---|---|---|---|
 | `system.cpu.utilization` | gauge | `1` | `cpu.mode` on Linux: `user`, `nice`, `system`, `interrupt`, `iowait`, `steal`, `idle`. The shares add up to 1. |
 | `system.cpu.load_average.1m`, `.5m`, `.15m` | gauge | `{thread}` | |
@@ -142,7 +142,7 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 | `otelo.storage.size` | updown | `By` | `otelo.storage.file`: `telemetry`, `rollup`, `state` |
 
 - The kinds are the four of the model in [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]. A counter is cumulative, and a chart shows its rate.
-- The names, units, and labels are the OpenTelemetry semantic conventions for system and process metrics, which are still in development and can change. Three names are not from there: the load averages have the names the OpenTelemetry Collector gives them, and `process.cgroup.memory.usage` and `otelo.storage.size` are otelo's.
+- The names, units, and attributes are the OpenTelemetry semantic conventions for system and process metrics, which are still in development and can change. Three names are not from there: the load averages have the names the OpenTelemetry Collector gives them, and `process.cgroup.memory.usage` and `otelo.storage.size` are otelo's.
 - `iowait` is the time the CPUs sat idle waiting for the disk, and `steal` the time the hypervisor gave to another tenant. Without the two, a slow droplet at 30% CPU looks healthy.
 - The `process.*` metrics cover a whole service, every process of its unit, and otelo's own process. `process.memory.usage` is the memory the processes hold themselves. `process.cgroup.memory.usage`, on Linux only, adds the page cache the unit filled, which is what `MemoryMax` and the OOM killer count.
 - `otelo.storage.size` is the size of otelo's data. The storage backend reports it through `Storage::size()`, so the collector knows no file names. The SQLite backend adds up its files, and a WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
@@ -180,7 +180,7 @@ The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serv
 - The rate of a counter is its increase between two neighbouring points, divided by the time between them and not by the step, so a 30-second step over points a minute apart stays right. A cumulative value that goes down is a restart, and the increase counts from zero. The query also reads the 5 minutes before the range, so the first step has a point to count from.
 - A histogram point keeps its buckets in `points.histogram` as JSON: `count`, `sum`, `min`, `max`, and either `bounds` and `counts` (one more than the bounds), or `scale`, `zero_count`, `positive`, and `negative` for an exponential histogram. The writer skips a point whose counts do not fit its bounds. `otelo metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
 - Two exponential points always merge. Both go down to the lower scale, where each step joins neighbouring buckets in pairs. The API returns every distribution with explicit bounds, and joins the buckets of an exponential one until 64 are left. The percentiles are estimated before that. An explicit and an exponential point in one step do not merge, and the step keeps the newer one.
-- `otelo metric --by` and the `by` of `/api/metrics/{name}` group the series of a metric by labels, `service`, or `resource.<key>`, and combine the series of a group in each step: a `gauge` takes their average, an `updown` adds them up, a `counter` adds up its rates, and a `histogram` merges its buckets. The minimum and the maximum of series that add up are the sums of theirs, since their points do not line up in time. A series with no point in a step adds nothing to it. Series of different kinds or units never combine, and histogram points of different explicit bounds do not merge, so the step keeps one of them.
+- `otelo metric --by` and the `by` of `/api/metrics/{name}` group the series of a metric by attributes, `service`, or `resource.<key>`, and combine the series of a group in each step: a `gauge` takes their average, an `updown` adds them up, a `counter` adds up its rates, and a `histogram` merges its buckets. The minimum and the maximum of series that add up are the sums of theirs, since their points do not line up in time. A series with no point in a step adds nothing to it. Series of different kinds or units never combine, and histogram points of different explicit bounds do not merge, so the step keeps one of them.
 - The groups come highest first, by their value over the range: the average of a `gauge` and an `updown`, the rate of a `counter`, and the sum of the values of a `histogram`, which for a duration is the total time. `--top N` keeps N groups and combines the rest into one group `other`, and `--limit` drops the rest. Without `--by` each series is its own group, so `otelo metric process.memory.usage --top 5` names the 5 services with the most memory. A group needs every series of the metric, so a query reads up to 2,000 series and says so when it stops there.
 - `otelo services` lists the services that sent spans or logs, the most requests first, with their requests, errors, p50, p95, and p99 latency, logs, and error logs. `otelo service <name>` prints the same for one service and its requests by span name. A request is a span that enters the service: a root span, or a span of the server or the consumer kind. The percentiles come from buckets that each grow by 2%, so an estimate is off by 1% at most and the memory does not grow with the count of spans. `--buckets` adds the numbers of each step.
 - `otelo calls <name>` prints the calls a service makes, by target and by what they do, the most time first. A call is a span of the client or the producer kind, or a span with `db.system.name` or `db.system` of any kind, since an in-process database such as SQLite may mark its spans internal. Its target comes from the OpenTelemetry attributes, the older names too: a database by system and `db.namespace`, a host by `server.address` or the host of `url.full`, with a port other than 80 or 443, an RPC service by `rpc.system` and `rpc.service`, a message destination by `messaging.system` and `messaging.destination.name`, and else `peer.service`. What a call does is `db.query.summary`, or the query with each string, number, and parameter such as `$1` or `:id` as `?` and a list of them as one `?`, for a database; the method and `url.template`, or the path with each id as `{id}`, for HTTP; and the span name for the rest. So `SELECT * FROM users WHERE id = 7` and `… id = 8` are one row, and two queries under one span name such as `SELECT` are two. Each target carries the span query terms that keep its calls, such as `db.system.name = "postgresql" db.namespace = "app"`.
@@ -191,7 +191,7 @@ The traces page takes a span query the same way. It lists the traces that have a
 
 The services page of the UI, its start page, lists the services of the range with the same numbers and a bar chart of the requests of each one, failed ones on top. A click on a column name sorts by it. A service opens its own page: the numbers of the range, then charts of the requests, the latency percentiles, the error rate, and the logs over the range, and its operations, the requests by span name and kind, each shown like a span, with the icon and badges of the attributes of its newest request. An operation opens in a modal over the page, with its numbers, its requests, latency, and error rate over the range from `/api/services/{name}/operation`, and its newest spans, each of which opens its trace. The open operation lives in the URL, so Back closes it. Its CPU and memory follow, from the `process.*` metrics the host collector stores under the name of the unit: the CPU time as a share of one core, and the memory of its processes with the memory of its cgroup beside it on Linux. The page reads only the series without `telemetry.sdk.name`, so process metrics an app sends from its own SDK do not add up with them. A service whose unit has another name has none of them, and the page says so and names the three metrics. Its calls follow, from `/api/services/{name}/calls`: the time they take by target over the range, stacked for the 7 targets with the most time and the rest as one, their count over the range, and one table of what they do with the target of each, a database call as its query with the values taken out. A call opens in the same modal as an operation, from `/api/services/{name}/call`, which counts the calls of that target and summary and lists the newest 50 of them, and its target lives in the URL with it. The newest failed traces and the templates of the error logs close the page, with links to the traces and logs pages that show all of them. Dragging across a chart zooms the range to that stretch. The range and live mode live in the URL, and a link from one page to the other keeps the range.
 
-The metrics page lists the metric names of the range from `/api/metrics`, each with its kinds, units, and count of series. It reads up to 10,000 series and says so when more match. It takes the metrics query with completion, and the same query narrows the series of the open metric. A metric opens beside the list, with a chart for each kind and unit it has. A `gauge` and an `updown` draw the average of each step, a `counter` its rate per second, and a `histogram` its P50, P90, and P99, in one chart for one group and in a chart per percentile for several. A value stands for the empty steps after it for up to 5 minutes, as a sample does in Prometheus, so an app that sends every minute draws a line at a step of 30 seconds. A menu sets the `by` of `/api/metrics/{name}` from the labels, `service`, and the resource keys whose values differ between the series, and a select sets `top`. The name is in the path, and the query, the range, the grouping, and live mode in the URL. Dragging across a chart zooms the range.
+The metrics page lists the metric names of the range from `/api/metrics`, each with its kinds, units, and count of series. It reads up to 10,000 series and says so when more match. It takes the metrics query with completion, and the same query narrows the series of the open metric. A metric opens beside the list, with a chart for each kind and unit it has. A `gauge` and an `updown` draw the average of each step, a `counter` its rate per second, and a `histogram` its P50, P90, and P99, in one chart for one group and in a chart per percentile for several. A value stands for the empty steps after it for up to 5 minutes, as a sample does in Prometheus, so an app that sends every minute draws a line at a step of 30 seconds. A menu sets the `by` of `/api/metrics/{name}` from the attributes, `service`, and the resource keys whose values differ between the series, and a select sets `top`. The name is in the path, and the query, the range, the grouping, and live mode in the URL. Dragging across a chart zooms the range.
 
 ## Query language
 
@@ -204,13 +204,13 @@ root = true AND duration > 500ms AND NOT resource.host.name = "droplet"
 ```
 
 - A name is a built-in field of the signal, `resource.<key>` for a resource attribute, `attr.<key>` for an attribute named like a built-in field, or else a record attribute. A key with other characters goes in backticks.
-- Built-in fields. Logs: `service`, `level`, `body`, `trace_id`, `span_id`. Spans: `service`, `name`, `kind`, `status`, `error`, `duration`, `root`, `trace_id`, `span_id`. Metrics: `name`, `service`, `kind`, `unit`, and the labels as attributes.
+- Built-in fields. Logs: `service`, `level`, `body`, `trace_id`, `span_id`. Spans: `service`, `name`, `kind`, `status`, `error`, `duration`, `root`, `trace_id`, `span_id`. Metrics: `name`, `service`, `kind`, `unit`, and the attributes of the series.
 - Operators: `= != < <= > >=`, `in (…)`, `~` (words in a log body through FTS5, a substring elsewhere), `has(key)`, `AND`, `OR`, `NOT`, and parentheses. Terms next to each other join with `AND`.
 - A number also matches the same number sent as a string. `!=` and `NOT` keep the records that lack the attribute.
 
 ## Catalog and completion
 
-The writer keeps the attribute keys of each signal and of the resources in `attribute_keys` in every day file, with their JSON type in `value_type` and their count. The `key_group` of a row says whose keys they are: `logs`, `spans`, `metrics` for the labels of the series, or `resource`. `attribute_values` keeps up to 200 values of each key, and `has_more_values_than_listed` marks a key that has more. The group `span_names` holds the names of the spans under the key `name`. The writer only touches these tables for a new key or value and for the counts, once per transaction.
+The writer keeps the attribute keys of each signal and of the resources in `attribute_keys` in every day file, with their JSON type in `value_type` and their count. The `key_group` of a row says whose keys they are: `logs`, `spans`, `metrics` for the attributes of the series, or `resource`. `attribute_values` keeps up to 200 values of each key, and `has_more_values_than_listed` marks a key that has more. The group `span_names` holds the names of the spans under the key `name`. The writer only touches these tables for a new key or value and for the counts, once per transaction.
 
 `otelo complete <signal> <query>` and `/api/complete` suggest the fields, operators, values, and keywords that fit at the cursor, from the catalog of the retention. `otelo attributes <signal>` lists the keys.
 
