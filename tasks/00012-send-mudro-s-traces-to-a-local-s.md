@@ -5,6 +5,7 @@ parent: ./00001-collect-and-query-telemetry.md
 dependencies:
 - ./00004-receive-otlp-over-http.md
 - ./00009-serve-the-query-api.md
+- ./00024-index-from-the-journal-and-rebui.md
 tags:
 - feature
 ---
