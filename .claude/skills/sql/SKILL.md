@@ -73,9 +73,11 @@ The statements are strings in the Rust sources of the crate that owns the file.
 
 - otelo is in development and the tables are still being designed. Change a table, a
   column, or an index as soon as a better design shows up.
-- The files carry no schema version, and no code handles a file of an older schema: no
-  migration, no check, nothing that sets the file aside or fills in what it lacks.
-- After a change, delete the telemetry files written before it, such as
-  `target/dev/telemetry/`.
-- The same commit changes the `telemetry` doc, the tests, and the SQL in
-  `packages/ui/tests/sql.test.ts`.
+- No code migrates a file of an older schema. The journal keeps the telemetry, and
+  `otelo reindex` builds `telemetry.sqlite` from it again.
+- A change of `schema.sql` bumps `STORAGE_VERSION` in `version.rs` and sets
+  `SCHEMA_HASH_AT_STORAGE_VERSION` to the hash the failing test prints. A change of the
+  mapping that changes what is stored bumps `STORAGE_VERSION` too.
+- `otelo serve` does not start on a file of another version. Run `otelo reindex` with the
+  daemon stopped, such as `cargo run -q -- reindex --data target/dev`.
+- The same commit changes the `telemetry` doc and the tests.
