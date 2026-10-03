@@ -207,7 +207,7 @@ When the daemon starts, and then once an hour, the writer deletes what is past t
 | traces | `spans` by `started_at`, through its index |
 | metrics | `metric_points` and the two summary tables, one series at a time by its primary key, then the series that have no rows left |
 
-- A resource that no row refers to is deleted with the metrics.
+- A resource that no row refers to is deleted with the metrics. `logs` and `spans` have an index on `resource_id` and the time, so the check reads an index and not the tables.
 - The catalog deletes the days past the retention of their signal. A resource belongs to every signal, so its keys stay as long as the longest retention.
 - Deleted pages go to the freelist, and new rows reuse them, so the file keeps its size without a `VACUUM`. When the freelist passes a quarter of the file, after a retention was lowered, the writer runs `PRAGMA incremental_vacuum` in steps of 2,048 pages.
 
