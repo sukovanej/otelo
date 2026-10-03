@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE INDEX IF NOT EXISTS logs_logged_at ON logs (logged_at);
 CREATE INDEX IF NOT EXISTS logs_trace_id ON logs (trace_id) WHERE trace_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS logs_resource_id_logged_at ON logs (resource_id, logged_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS log_body_search USING fts5 (body, content = 'logs');
 CREATE TRIGGER IF NOT EXISTS log_body_search_insert AFTER INSERT ON logs BEGIN
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS spans (
 );
 CREATE INDEX IF NOT EXISTS spans_trace_id ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS spans_started_at ON spans (started_at);
+CREATE INDEX IF NOT EXISTS spans_resource_id_started_at ON spans (resource_id, started_at);
 
 CREATE TABLE IF NOT EXISTS metric_series (
   id INTEGER PRIMARY KEY,
