@@ -344,7 +344,7 @@ export interface components {
              */
             type: components["schemas"]["ValueType"];
         };
-        /** @description The attribute keys of a signal, over the attached days. */
+        /** @description The attribute keys of a signal, over the retention of the signal. */
         AttributeKeys: {
             /**
              * @description The attributes of the records: of the logs, the spans, or the attributes

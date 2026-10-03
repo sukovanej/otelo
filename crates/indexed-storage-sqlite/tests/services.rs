@@ -44,7 +44,7 @@ fn span(
         kind,
         started_at,
         duration_ns: 10 * MILLISECOND,
-        status: SpanStatus::Unset,
+        status_code: SpanStatus::Unset,
         attributes: Attributes::new(),
         events: Vec::new(),
     }
@@ -53,7 +53,7 @@ fn span(
 fn log(logged_at: i64, severity: Severity) -> Log {
     Log {
         logged_at,
-        severity,
+        severity_number: severity,
         body: "a line".into(),
         trace_context: TraceContext::None,
         attributes: Attributes::new(),
@@ -92,7 +92,7 @@ impl Fixture {
         api.spans = vec![
             Span {
                 duration_ns: 30 * MILLISECOND,
-                status: SpanStatus::Error,
+                status_code: SpanStatus::Error,
                 attributes: attributes_from_json(
                     json!({"http.route": "/users", "http.request.method": "GET"}),
                 ),

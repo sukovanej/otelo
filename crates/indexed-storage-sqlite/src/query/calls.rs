@@ -347,7 +347,7 @@ fn keep_busiest_operations(
             .then_with(|| a_operation_key.cmp(b_operation_key))
     });
     let truncated = truncate_to_limit(&mut operations, limit);
-    let mut attributes_by_location =
+    let mut attributes_by_rowid =
         reader.read_span_attributes(operations.iter().filter_map(|(_, _, operation)| {
             operation
                 .newest_request
@@ -361,7 +361,7 @@ fn keep_busiest_operations(
             .map(|newest_request| {
                 (
                     newest_request.detail,
-                    attributes_by_location.remove(&newest_request.rowid),
+                    attributes_by_rowid.remove(&newest_request.rowid),
                 )
             })
             .unwrap_or_default();

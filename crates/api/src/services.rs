@@ -9,7 +9,7 @@ use utoipa::IntoParams;
 
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{parse_step_ns, resolve_step};
-use crate::{Api, DefaultSince, RequestedRange};
+use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 
 /// The range, the limit, and the step of the services.
 #[derive(Deserialize, IntoParams)]
@@ -47,7 +47,7 @@ pub async fn list_services(
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     api.run_limited_range_query(
         RequestedRange {
-            signals: &[Signal::Spans, Signal::Logs],
+            signals: RangeSignals::SpansAndLogs,
             since: params.since,
             until: params.until,
             default_since: DefaultSince::HourBeforeNow,
@@ -85,7 +85,7 @@ pub async fn get_service(
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     api.run_limited_range_query(
         RequestedRange {
-            signals: &[Signal::Spans, Signal::Logs],
+            signals: RangeSignals::SpansAndLogs,
             since: params.since,
             until: params.until,
             default_since: DefaultSince::HourBeforeNow,
@@ -143,7 +143,7 @@ pub async fn get_operation(
     let (operation, kind) = (params.operation, params.kind);
     api.run_range_query(
         RequestedRange {
-            signals: &[Signal::Spans],
+            signals: RangeSignals::One(Signal::Spans),
             since: params.since,
             until: params.until,
             default_since: DefaultSince::HourBeforeNow,
@@ -186,7 +186,7 @@ pub async fn list_calls(
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     api.run_limited_range_query(
         RequestedRange {
-            signals: &[Signal::Spans],
+            signals: RangeSignals::One(Signal::Spans),
             since: params.since,
             until: params.until,
             default_since: DefaultSince::HourBeforeNow,
@@ -260,7 +260,7 @@ pub async fn get_call(
     let (summary, kind) = (params.summary, params.kind);
     api.run_range_query(
         RequestedRange {
-            signals: &[Signal::Spans],
+            signals: RangeSignals::One(Signal::Spans),
             since: params.since,
             until: params.until,
             default_since: DefaultSince::HourBeforeNow,

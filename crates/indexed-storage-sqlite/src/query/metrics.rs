@@ -16,6 +16,7 @@ use super::compile::{TableAliases, compile_query};
 use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
 use crate::rollup::{SummaryTable, convert_to_summary_kind, read_summary, summary_columns_of};
+use crate::series::MetricSeriesId;
 
 // A counter and a cumulative histogram count from the point before. The apps export every
 // minute, so five minutes before the range hold that point.
@@ -29,8 +30,7 @@ const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
     resource: "resource",
 };
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct SeriesKey {
+struct SeriesDescription {
     service: String,
     kind: MetricKind,
     unit: String,
@@ -38,7 +38,21 @@ struct SeriesKey {
     resource_attributes_json: String,
 }
 
-impl SeriesKey {
+impl SeriesDescription {
+    // The row has the service, kind, aggregation temporality, unit, attributes, and resource
+    // attributes in this order from service_column.
+    fn read_from_row(row: &rusqlite::Row, service_column: usize) -> anyhow::Result<Self> {
+        let kind: String = row.get(service_column + 1)?;
+        let aggregation_temporality: Option<String> = row.get(service_column + 2)?;
+        Ok(Self {
+            service: row.get(service_column)?,
+            kind: metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?,
+            unit: row.get(service_column + 3)?,
+            attributes_json: row.get(service_column + 4)?,
+            resource_attributes_json: row.get(service_column + 5)?,
+        })
+    }
+
     fn into_summarized_series(
         self,
         summaries_by_step: BTreeMap<i64, StepSummary>,
@@ -131,7 +145,7 @@ pub(super) fn list_metrics(
     ensure_metrics_query(query)?;
     let summary_table = SummaryTable::from_resolution(resolution);
     let (points_table, point_alias, instant_column) = summary_table
-        .map_or(("metric_points", "point", "recorded_at"), |table| {
+        .map_or(("metric_points", "metric_point", "recorded_at"), |table| {
             (table.name(), "summary", "start_at")
         });
     let mut where_clause = WhereClause::new();
@@ -214,12 +228,12 @@ fn read_buckets_of_raw_points(
     let range_start_at = reader.range().start_at();
     let mut where_clause = WhereClause::new();
     where_clause.push_condition_with_param(
-        "point.recorded_at >= :since",
+        "metric_point.recorded_at >= :since",
         ":since",
         range_start_at.saturating_sub(BASELINE_LOOKBACK_NS),
     );
     where_clause.push_condition_with_param(
-        "point.recorded_at < :until",
+        "metric_point.recorded_at < :until",
         ":until",
         reader.range().end_at(),
     );
@@ -236,34 +250,31 @@ fn read_buckets_of_raw_points(
         &mut where_clause,
     )?;
     let sql = format!(
-        "SELECT resource.service, metric_series.kind, metric_series.aggregation_temporality,
-                metric_series.unit, metric_series.attributes, resource.attributes,
-                point.recorded_at, point.value, point.histogram
+        "SELECT metric_series.id, resource.service, metric_series.kind,
+                metric_series.aggregation_temporality, metric_series.unit,
+                metric_series.attributes, resource.attributes, metric_point.recorded_at,
+                metric_point.value, metric_point.histogram
          FROM metric_series
-         JOIN metric_points point ON point.metric_series_id = metric_series.id
+         JOIN metric_points metric_point ON metric_point.metric_series_id = metric_series.id
          JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE {}
-         ORDER BY point.recorded_at",
+         ORDER BY metric_point.recorded_at",
         where_clause.sql()
     );
-    let mut steps_by_series: BTreeMap<SeriesKey, SeriesSteps> = BTreeMap::new();
+    let mut steps_by_series: BTreeMap<MetricSeriesId, (SeriesDescription, SeriesSteps)> =
+        BTreeMap::new();
     let mut series_in_range_count = 0;
     let mut has_more_series_than_read = false;
     reader.scan_rows(&sql, &where_clause, |row| {
-        let kind: String = row.get(1)?;
-        let aggregation_temporality: Option<String> = row.get(2)?;
-        let kind = metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?;
-        let series_key = SeriesKey {
-            service: row.get(0)?,
-            kind,
-            unit: row.get(3)?,
-            attributes_json: row.get(4)?,
-            resource_attributes_json: row.get(5)?,
+        let point = read_series_point(row, 7)?;
+        let (_, series_steps) = match steps_by_series.entry(row.get(0)?) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let description = SeriesDescription::read_from_row(row, 1)?;
+                let series_steps = SeriesSteps::new(description.kind);
+                entry.insert((description, series_steps))
+            }
         };
-        let point = read_series_point(row, 6)?;
-        let series_steps = steps_by_series
-            .entry(series_key)
-            .or_insert_with(|| SeriesSteps::new(kind));
         let step_start_at = point.recorded_at().div_euclid(step_ns) * step_ns;
         if point.recorded_at() < range_start_at {
             series_steps.add_point_before_range(step_start_at, point);
@@ -281,10 +292,10 @@ fn read_buckets_of_raw_points(
         Ok(ControlFlow::Continue(()))
     })?;
     let series = steps_by_series
-        .into_iter()
+        .into_values()
         .filter(|(_, series_steps)| !series_steps.has_no_point_in_range())
-        .map(|(series_key, series_steps)| {
-            series_key.into_summarized_series(series_steps.into_summaries_by_step())
+        .map(|(description, series_steps)| {
+            description.into_summarized_series(series_steps.into_summaries_by_step())
         })
         .collect::<anyhow::Result<_>>()?;
     Ok(group_summarized_series(
@@ -329,9 +340,9 @@ fn read_buckets_of_summaries(
         &mut where_clause,
     )?;
     let sql = format!(
-        "SELECT resource.service, metric_series.kind, metric_series.aggregation_temporality,
-                metric_series.unit, metric_series.attributes, resource.attributes,
-                summary.start_at, {}
+        "SELECT metric_series.id, resource.service, metric_series.kind,
+                metric_series.aggregation_temporality, metric_series.unit,
+                metric_series.attributes, resource.attributes, summary.start_at, {}
          FROM metric_series
          JOIN {} summary ON summary.metric_series_id = metric_series.id
          JOIN resources resource ON resource.id = metric_series.resource_id
@@ -341,29 +352,26 @@ fn read_buckets_of_summaries(
         table.name(),
         where_clause.sql()
     );
-    let mut summaries_by_series: BTreeMap<SeriesKey, BTreeMap<i64, StepSummary>> = BTreeMap::new();
+    let mut summaries_by_series: BTreeMap<
+        MetricSeriesId,
+        (SeriesDescription, BTreeMap<i64, StepSummary>),
+    > = BTreeMap::new();
     let mut has_more_series_than_read = false;
     reader.scan_rows(&sql, &where_clause, |row| {
-        let kind: String = row.get(1)?;
-        let aggregation_temporality: Option<String> = row.get(2)?;
-        let kind = metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?;
-        let series_key = SeriesKey {
-            service: row.get(0)?,
-            kind: convert_to_summary_kind(kind),
-            unit: row.get(3)?,
-            attributes_json: row.get(4)?,
-            resource_attributes_json: row.get(5)?,
-        };
-        let summary_start_at: i64 = row.get(6)?;
-        let summary = read_summary(row, 7)?;
+        let summary_start_at: i64 = row.get(7)?;
+        let summary = read_summary(row, 8)?;
         let series_count = summaries_by_series.len();
-        let summaries_by_step = match summaries_by_series.entry(series_key) {
+        let (_, summaries_by_step) = match summaries_by_series.entry(row.get(0)?) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(_) if series_count == MAX_SERIES_IN_A_METRIC_QUERY => {
                 has_more_series_than_read = true;
                 return Ok(ControlFlow::Continue(()));
             }
-            Entry::Vacant(entry) => entry.insert(BTreeMap::new()),
+            Entry::Vacant(entry) => {
+                let mut description = SeriesDescription::read_from_row(row, 1)?;
+                description.kind = convert_to_summary_kind(description.kind);
+                entry.insert((description, BTreeMap::new()))
+            }
         };
         match summaries_by_step.entry(summary_start_at.div_euclid(step_ns) * step_ns) {
             Entry::Occupied(entry) => entry.into_mut().add_later_summary(summary),
@@ -374,8 +382,10 @@ fn read_buckets_of_summaries(
         Ok(ControlFlow::Continue(()))
     })?;
     let series = summaries_by_series
-        .into_iter()
-        .map(|(series_key, summaries_by_step)| series_key.into_summarized_series(summaries_by_step))
+        .into_values()
+        .map(|(description, summaries_by_step)| {
+            description.into_summarized_series(summaries_by_step)
+        })
         .collect::<anyhow::Result<_>>()?;
     Ok(group_summarized_series(
         reader.range(),

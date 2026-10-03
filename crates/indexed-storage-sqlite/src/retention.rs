@@ -5,7 +5,8 @@ use rusqlite::params;
 
 use crate::catalog::AttributeOwner;
 use crate::day::Day;
-use crate::rollup::{Progress, SummaryTable};
+use crate::progress::Progress;
+use crate::rollup::SummaryTable;
 use crate::series::{MetricSeriesId, ResourceId};
 use crate::telemetry_file::TelemetryFile;
 
@@ -17,7 +18,7 @@ const PAGES_PER_INCREMENTAL_VACUUM: i64 = 2_048;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OldestRetainedDays {
     pub logs: Day,
-    pub spans: Day,
+    pub traces: Day,
     pub metrics: Day,
 }
 
@@ -26,7 +27,7 @@ impl OldestRetainedDays {
     pub const fn of_signal(self, signal: Signal) -> Day {
         match signal {
             Signal::Logs => self.logs,
-            Signal::Spans => self.spans,
+            Signal::Spans => self.traces,
             Signal::Metrics => self.metrics,
         }
     }
@@ -35,11 +36,18 @@ impl OldestRetainedDays {
     fn of_attribute_owner(self, owner: AttributeOwner) -> Day {
         match owner {
             AttributeOwner::Log => self.logs,
-            AttributeOwner::Span => self.spans,
+            AttributeOwner::Span => self.traces,
             AttributeOwner::MetricSeries => self.metrics,
-            AttributeOwner::Resource => self.logs.min(self.spans).min(self.metrics),
+            AttributeOwner::Resource => self.logs.min(self.traces).min(self.metrics),
         }
     }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum RetentionStage {
+    #[default]
+    DeletingRows,
+    VacuumingFreePages,
 }
 
 impl TelemetryFile {
@@ -47,6 +55,9 @@ impl TelemetryFile {
         &mut self,
         oldest_retained_days: OldestRetainedDays,
     ) -> anyhow::Result<Progress> {
+        if self.retention_stage == RetentionStage::VacuumingFreePages {
+            return self.vacuum_next_free_pages();
+        }
         let deleted_logs =
             self.delete_records_before("logs", "logged_at", oldest_retained_days.logs.start_at())?;
         if deleted_logs == MAX_DELETED_ROWS_PER_TRANSACTION {
@@ -55,7 +66,7 @@ impl TelemetryFile {
         let deleted_spans = self.delete_records_before(
             "spans",
             "started_at",
-            oldest_retained_days.spans.start_at(),
+            oldest_retained_days.traces.start_at(),
         )?;
         if deleted_spans == MAX_DELETED_ROWS_PER_TRANSACTION {
             return Ok(Progress::MoreIsDue);
@@ -66,6 +77,7 @@ impl TelemetryFile {
             return Ok(Progress::MoreIsDue);
         }
         self.delete_unreferenced_rows_and_old_counts(oldest_retained_days)?;
+        self.retention_stage = RetentionStage::VacuumingFreePages;
         self.vacuum_next_free_pages()
     }
 
@@ -77,12 +89,12 @@ impl TelemetryFile {
     ) -> anyhow::Result<usize> {
         let deleted_rows = self.connection().execute(
             &format!(
-                "DELETE FROM {table} WHERE rowid IN
-                   (SELECT rowid
-                    FROM {table}
-                    WHERE {instant_column} < ?1
-                    ORDER BY {instant_column}
-                    LIMIT {MAX_DELETED_ROWS_PER_TRANSACTION})"
+                "DELETE FROM {table}
+                 WHERE rowid IN (SELECT rowid
+                                 FROM {table}
+                                 WHERE {instant_column} < ?1
+                                 ORDER BY {instant_column}
+                                 LIMIT {MAX_DELETED_ROWS_PER_TRANSACTION})"
             ),
             [oldest_retained_at],
         )?;
@@ -104,13 +116,15 @@ impl TelemetryFile {
         for series_id in series_ids {
             deleted_rows += transaction
                 .prepare_cached(
-                    "DELETE FROM metric_points WHERE metric_series_id = ?1 AND recorded_at < ?2",
+                    "DELETE FROM metric_points
+                     WHERE metric_series_id = ?1 AND recorded_at < ?2",
                 )?
                 .execute(params![series_id, oldest_retained_at])?;
             for table in [SummaryTable::Minute, SummaryTable::Hour] {
                 deleted_rows += transaction
                     .prepare_cached(&format!(
-                        "DELETE FROM {} WHERE metric_series_id = ?1 AND start_at < ?2",
+                        "DELETE FROM {}
+                         WHERE metric_series_id = ?1 AND start_at < ?2",
                         table.name()
                     ))?
                     .execute(params![series_id, oldest_retained_at])?;
@@ -132,27 +146,31 @@ impl TelemetryFile {
         let deleted_series_ids: HashSet<MetricSeriesId> = transaction
             .prepare(
                 "DELETE FROM metric_series
-             WHERE NOT EXISTS (SELECT 1
-                               FROM metric_points point
-                               WHERE point.metric_series_id = metric_series.id)
-               AND NOT EXISTS (SELECT 1
-                               FROM metric_minute_summaries summary
-                               WHERE summary.metric_series_id = metric_series.id)
-               AND NOT EXISTS (SELECT 1
-                               FROM metric_hour_summaries summary
-                               WHERE summary.metric_series_id = metric_series.id)
-             RETURNING id",
+                 WHERE NOT EXISTS (SELECT 1
+                                   FROM metric_points metric_point
+                                   WHERE metric_point.metric_series_id = metric_series.id)
+                   AND NOT EXISTS (SELECT 1
+                                   FROM metric_minute_summaries summary
+                                   WHERE summary.metric_series_id = metric_series.id)
+                   AND NOT EXISTS (SELECT 1
+                                   FROM metric_hour_summaries summary
+                                   WHERE summary.metric_series_id = metric_series.id)
+                 RETURNING id",
             )?
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
         let deleted_resource_ids: HashSet<ResourceId> = transaction
             .prepare(
-                "DELETE FROM resources
+                "DELETE FROM resources AS resource
                  WHERE NOT EXISTS (SELECT 1
                                    FROM metric_series
-                                   WHERE metric_series.resource_id = resources.id)
-                   AND NOT EXISTS (SELECT 1 FROM logs log WHERE log.resource_id = resources.id)
-                   AND NOT EXISTS (SELECT 1 FROM spans span WHERE span.resource_id = resources.id)
+                                   WHERE metric_series.resource_id = resource.id)
+                   AND NOT EXISTS (SELECT 1
+                                   FROM logs log
+                                   WHERE log.resource_id = resource.id)
+                   AND NOT EXISTS (SELECT 1
+                                   FROM spans span
+                                   WHERE span.resource_id = resource.id)
                  RETURNING id",
             )?
             .query_map([], |row| row.get(0))?
@@ -174,7 +192,7 @@ impl TelemetryFile {
         }
         transaction.execute(
             "DELETE FROM span_name_counts WHERE day < ?1",
-            [oldest_retained_days.spans],
+            [oldest_retained_days.traces],
         )?;
         transaction.commit()?;
         if !deleted_series_ids.is_empty() || !deleted_resource_ids.is_empty() {
@@ -193,19 +211,32 @@ impl TelemetryFile {
     }
 
     // New rows reuse the free pages, so the file only gives back what a lowered retention freed.
-    fn vacuum_next_free_pages(&self) -> anyhow::Result<Progress> {
+    fn vacuum_next_free_pages(&mut self) -> anyhow::Result<Progress> {
+        let free_page_count_before = self.read_free_page_count()?;
         let page_count: i64 = self
             .connection()
             .pragma_query_value(None, "page_count", |row| row.get(0))?;
-        let free_page_count: i64 =
-            self.connection()
-                .pragma_query_value(None, "freelist_count", |row| row.get(0))?;
-        if free_page_count * 4 <= page_count {
-            return Ok(Progress::CaughtUp);
+        if free_page_count_before * 4 > page_count {
+            // The pragma frees a page each time it steps, so it steps to its end.
+            let mut statement = self.connection().prepare(&format!(
+                "PRAGMA incremental_vacuum({PAGES_PER_INCREMENTAL_VACUUM})"
+            ))?;
+            let mut rows = statement.query([])?;
+            while rows.next()?.is_some() {}
+            drop(rows);
+            drop(statement);
+            // A file made without auto_vacuum frees nothing.
+            if self.read_free_page_count()? < free_page_count_before {
+                return Ok(Progress::MoreIsDue);
+            }
         }
-        self.connection().execute_batch(&format!(
-            "PRAGMA incremental_vacuum({PAGES_PER_INCREMENTAL_VACUUM})"
-        ))?;
-        Ok(Progress::MoreIsDue)
+        self.retention_stage = RetentionStage::DeletingRows;
+        Ok(Progress::CaughtUp)
+    }
+
+    fn read_free_page_count(&self) -> anyhow::Result<i64> {
+        Ok(self
+            .connection()
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))?)
     }
 }

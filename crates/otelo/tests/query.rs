@@ -30,13 +30,13 @@ fn write_telemetry(data: &Path) {
         kind: SpanKind::Server,
         started_at: written_at + i64::from(id) * SECOND_NS,
         duration_ns: 20_000_000,
-        status,
+        status_code: status,
         attributes: Attributes::new(),
         events: Vec::new(),
     };
     let build_log = |offset: i64, severity: Severity, body: &str, user_id: Option<i64>| Log {
         logged_at: written_at + offset * SECOND_NS,
-        severity,
+        severity_number: severity,
         body: body.into(),
         trace_context: match user_id {
             Some(_) => TraceContext::None,

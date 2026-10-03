@@ -8,9 +8,9 @@ use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
-use crate::Api;
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
+use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 
 /// The series that have points in the range and that the query keeps, by
 /// name. The query reads `name`, `service`, `kind`, `unit`, the attributes, and
@@ -29,9 +29,13 @@ pub async fn list_metrics(
     Query(params): Query<QueryParams>,
 ) -> ApiResult<MetricList> {
     let query = parse_query(params.query.as_deref(), Signal::Metrics)?;
-    api.run_limited_metric_range_query(
-        params.since,
-        params.until,
+    api.run_limited_range_query(
+        RequestedRange {
+            signals: RangeSignals::One(Signal::Metrics),
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         100,
         move |opened, limit| {
@@ -115,9 +119,13 @@ pub async fn get_metric_series(
         by: parse_grouping_fields(params.by.as_deref())?,
         top: params.top,
     };
-    api.run_limited_metric_range_query(
-        params.since,
-        params.until,
+    api.run_limited_range_query(
+        RequestedRange {
+            signals: RangeSignals::One(Signal::Metrics),
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         20,
         move |opened, limit| {

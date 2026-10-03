@@ -40,7 +40,7 @@ fn child_span(
         kind,
         started_at,
         duration_ns: duration_ms * MILLISECOND,
-        status: SpanStatus::Unset,
+        status_code: SpanStatus::Unset,
         attributes: serde_json::from_value(attributes.clone()).unwrap(),
         events: Vec::new(),
     }
@@ -102,7 +102,7 @@ fn api_spans(started_at: i64) -> Vec<Span> {
             &postgres_attributes("SELECT * FROM users WHERE id = 1"),
         ),
         Span {
-            status: SpanStatus::Error,
+            status_code: SpanStatus::Error,
             ..child_span(
                 3,
                 SpanKind::Client,

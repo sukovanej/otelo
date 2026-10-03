@@ -11,8 +11,9 @@ use rusqlite::{Connection, Transaction, params};
 use crate::catalog::{AttributeOwner, CatalogCache, CatalogDelta};
 use crate::day::Day;
 use crate::indexes::apply_indexes_to_telemetry_file;
+use crate::retention::RetentionStage;
 use crate::series::{
-    MetricSeriesId, ResourceId, SeriesCache, SeriesIdentity, StoredResource, StoredSeries,
+    MetricSeriesId, ResourceId, SeriesCache, SeriesIdentity, StoredSeries,
     find_or_insert_resource_id, find_or_insert_series_id,
 };
 
@@ -81,6 +82,7 @@ impl ResourceRecords<'_> {
 pub struct TelemetryFile {
     connection: Connection,
     cached_rows: CachedRows,
+    pub(crate) retention_stage: RetentionStage,
 }
 
 #[derive(Default)]
@@ -107,6 +109,7 @@ impl TelemetryFile {
         Ok(Self {
             connection,
             cached_rows: CachedRows::default(),
+            retention_stage: RetentionStage::default(),
         })
     }
 
@@ -191,8 +194,7 @@ impl CachedRows {
                 &mut self.resource_ids_by_identity_hash,
                 &records.resource.service,
                 &records.resource.attributes.to_json(),
-            )
-            .map(StoredResource::id)?;
+            )?;
             for &day in &days {
                 if self.counted_resource_days.insert((day, resource_id)) {
                     self.catalog.count_attributes(
@@ -218,7 +220,7 @@ impl CachedRows {
                 insert_log.execute(params![
                     log.logged_at,
                     resource_id,
-                    log.severity.number(),
+                    log.severity_number.number(),
                     log.body,
                     log.trace_context.trace_id().map(|trace_id| trace_id.0),
                     log.trace_context.span_id().map(|span_id| span_id.0),
@@ -249,7 +251,7 @@ impl CachedRows {
                     span.kind.number(),
                     span.started_at,
                     span.duration_ns,
-                    span.status.number(),
+                    span.status_code.number(),
                     span.attributes.to_json(),
                     serde_json::to_string(&span.events)?,
                 ])?;
@@ -291,9 +293,7 @@ impl CachedRows {
                     attributes_json: &metric.attributes.to_json(),
                 },
             )?;
-            let (StoredSeries::Found(series_id) | StoredSeries::Inserted(series_id)) =
-                stored_series
-            else {
+            let StoredSeries::Stored(series_id) = stored_series else {
                 rejected_points += point_rows.len() as u64;
                 continue;
             };

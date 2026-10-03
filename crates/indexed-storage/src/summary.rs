@@ -31,45 +31,45 @@ impl SeriesPoint {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Level {
-    pub count: u64,
-    pub min: f64,
-    pub max: f64,
-    pub sum: f64,
-    pub last: f64,
+    pub point_count: u64,
+    pub min_value: f64,
+    pub max_value: f64,
+    pub value_sum: f64,
+    pub last_value: f64,
 }
 
 impl Level {
     #[must_use]
     pub const fn from_value(value: f64) -> Self {
         Self {
-            count: 1,
-            min: value,
-            max: value,
-            sum: value,
-            last: value,
+            point_count: 1,
+            min_value: value,
+            max_value: value,
+            value_sum: value,
+            last_value: value,
         }
     }
 
     pub const fn add_value(&mut self, value: f64) {
-        self.count += 1;
-        self.min = self.min.min(value);
-        self.max = self.max.max(value);
-        self.sum += value;
-        self.last = value;
+        self.point_count += 1;
+        self.min_value = self.min_value.min(value);
+        self.max_value = self.max_value.max(value);
+        self.value_sum += value;
+        self.last_value = value;
     }
 
     pub const fn add_later_level(&mut self, later: Self) {
-        self.count += later.count;
-        self.min = self.min.min(later.min);
-        self.max = self.max.max(later.max);
-        self.sum += later.sum;
-        self.last = later.last;
+        self.point_count += later.point_count;
+        self.min_value = self.min_value.min(later.min_value);
+        self.max_value = self.max_value.max(later.max_value);
+        self.value_sum += later.value_sum;
+        self.last_value = later.last_value;
     }
 
     #[must_use]
     #[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
     pub fn average(self) -> f64 {
-        self.sum / self.count as f64
+        self.value_sum / self.point_count as f64
     }
 }
 

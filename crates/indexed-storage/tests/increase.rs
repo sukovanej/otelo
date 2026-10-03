@@ -20,8 +20,8 @@ fn increases(
 
 const fn increase(amount: f64, elapsed_seconds: f64) -> Increase {
     Increase {
-        amount,
-        elapsed_seconds,
+        counter_increase: amount,
+        counter_increase_seconds: elapsed_seconds,
     }
 }
 
