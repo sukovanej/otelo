@@ -42,4 +42,4 @@ Service metrics on Linux need cgroup v2, which Ubuntu 24.04 mounts by default. O
 
 - macOS: `mise check` runs every test natively.
 - Linux: a Lima VM with Ubuntu 24.04, the same system as the droplet. Lima forwards the VM's ports to the Mac's `localhost`, so an otelo in the VM receives OTLP from apps on the Mac.
-- CI, once it exists: an `ubuntu-24.04` and a `macos` runner, each running the whole suite.
+- CI: `.github/workflows/ci.yml` runs the Rust checks and tests on an `ubuntu-24.04` and a `macos-15` runner, and the web checks once, on Linux.
