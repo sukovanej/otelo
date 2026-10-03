@@ -4,6 +4,8 @@ created: 2026-10-03T14:55:04Z
 parent: ./00021-rebuild-the-index-from-a-journal.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/33
 ---
 # Keep the index in one SQLite file
 
