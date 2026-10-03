@@ -22,7 +22,7 @@ flowchart LR
 ## The indexer
 
 - A thread reads the frames of each signal after its position, maps them with `otelo-otlp/src/map.rs`, and writes them as the writer does now. It takes up to 64 frames per transaction.
-- `telemetry.sqlite` gets a table `journal_positions` with the hour and the offset of each signal. The indexer writes it in the transaction of the rows, so a crash neither loses a frame nor writes it twice.
+- `telemetry.sqlite` gets a table `indexed_journal_positions`: per `signal`, the `segment_hour` and the `byte_offset` in the segment before compression, up to which the frames are indexed. The indexer writes it in the transaction of the rows, so a crash neither loses a frame nor writes it twice.
 - Frames older than the retention of their signal are skipped.
 - The batch channel goes away, with `dropped_batches` and `otelo.telemetry.dropped_batches`. A burst makes the indexer lag. Nothing drops it.
 - `otelo.telemetry.index_lag` is a gauge of the seconds between the newest frame of the journal and the newest frame indexed.
