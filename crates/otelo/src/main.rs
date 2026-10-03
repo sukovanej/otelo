@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use otelo::{cli, init, serve};
+use otelo::{cli, init, reindex, serve};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]
@@ -14,6 +14,8 @@ enum Command {
     Init(init::InitArgs),
     /// Run the daemon
     Serve(serve::ServeArgs),
+    /// Build telemetry.sqlite again from the journal, with the daemon stopped
+    Reindex(reindex::ReindexArgs),
     /// Print log lines, grouped by message template unless --raw
     Logs(cli::LogsArgs),
     /// List spans, newest first
@@ -46,6 +48,7 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Init(args) => init::init_data_directory(&args),
         Command::Serve(args) => serve::run_daemon(args),
+        Command::Reindex(args) => reindex::reindex_telemetry(&args),
         Command::Logs(args) => cli::print_logs(&args),
         Command::Spans(args) => cli::print_spans(&args),
         Command::Traces(args) => cli::print_traces(&args),

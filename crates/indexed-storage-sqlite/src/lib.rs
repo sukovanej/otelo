@@ -20,6 +20,6 @@ pub use lock::TelemetryLock;
 pub use progress::Progress;
 pub use reader::Reader;
 pub use retention::OldestRetainedDays;
-pub use sqlite::Sqlite;
+pub use sqlite::{ReindexProgress, Sqlite, reindex_from_journal};
 pub use telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
 pub use version::{OtherStorageVersion, SCHEMA_HASH_AT_STORAGE_VERSION, STORAGE_VERSION};
