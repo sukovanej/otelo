@@ -126,7 +126,7 @@ impl Reader {
             })
         })?;
         let listed = rows.collect::<Result<_, _>>()?;
-        // The writer stops at this many names a day, so a day that reached it may have more.
+        // The indexer stops at this many names a day, so a day that reached it may have more.
         let has_more_values_than_listed = self.connection().query_row(
             &format!(
                 "SELECT EXISTS (SELECT 1

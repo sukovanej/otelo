@@ -70,7 +70,7 @@ export interface paths {
         get?: never;
         /**
          * Indexes an attribute of the logs or of the spans, so a query that
-         *     compares it reads only the matching records. The writer builds
+         *     compares it reads only the matching records. The indexer builds
          *     the index within seconds.
          */
         put: operations["add_index"];

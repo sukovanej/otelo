@@ -283,7 +283,7 @@ struct MetricDescriptor<'a> {
 }
 
 impl MetricDescriptor<'_> {
-    // The writer merges the metrics of equal attributes into one series.
+    // The indexer merges the metrics of equal attributes into one series.
     fn wrap_points_in_metric(&self, attributes: Vec<KeyValue>, points: Points) -> Metric {
         Metric {
             name: self.name.clone(),

@@ -15,7 +15,7 @@ use crate::telemetry_file::TelemetryFile;
 pub const MINUTE_NS: i64 = 60 * 1_000_000_000;
 pub const HOUR_NS: i64 = 60 * MINUTE_NS;
 
-// A batch may reach the writer a while after its points were recorded.
+// A frame may reach the indexer a while after its points were recorded.
 const LATE_BATCH_WAIT_NS: i64 = 2 * MINUTE_NS;
 
 const SUMMARY_COLUMNS: &str = "point_count, min_value, max_value, value_sum, last_value, \
@@ -52,7 +52,7 @@ impl SummaryTable {
 }
 
 impl TelemetryFile {
-    // At most an hour of minutes and one hour at a time, so the writer takes batches in between.
+    // At most an hour of minutes and one hour at a time, so the indexer takes frames in between.
     pub fn roll_up_next_due(&mut self, now: i64, oldest_point_at: i64) -> anyhow::Result<Progress> {
         let minutes_due_until = (now - LATE_BATCH_WAIT_NS).div_euclid(MINUTE_NS) * MINUTE_NS;
         let Some(minutes_summarized_until) = self.read_minutes_summarized_until(oldest_point_at)?

@@ -119,7 +119,7 @@ pub async fn list_indexes(State(api): State<Api>) -> Json<IndexList> {
 }
 
 /// Indexes an attribute of the logs or of the spans, so a query that
-/// compares it reads only the matching records. The writer builds
+/// compares it reads only the matching records. The indexer builds
 /// the index within seconds.
 #[utoipa::path(
     put,
