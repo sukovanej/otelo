@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
-use otelo_storage::{
+use otelo_indexed_storage::{
     Attributes, Batch, Metric, NumberPoint, Points, Records, StorageSize, Temporality,
 };
 

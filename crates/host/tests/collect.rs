@@ -1,5 +1,5 @@
 use otelo_host::{Collector, HostIdentity};
-use otelo_storage::{Batch, Points, StorageSize};
+use otelo_indexed_storage::{Batch, Points, StorageSize};
 
 fn newest_value(batch: &Batch, service: &str, name: &str) -> Option<f64> {
     batch

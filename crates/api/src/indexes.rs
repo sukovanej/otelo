@@ -2,7 +2,7 @@ use std::fmt;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use otelo_storage::{IndexedAttribute, IndexedSignal};
+use otelo_indexed_storage::{IndexedAttribute, IndexedSignal};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

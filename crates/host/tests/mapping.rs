@@ -4,7 +4,7 @@ use otelo_host::{
     CgroupMemory, Cpu, CpuTicks, Filesystem, HostIdentity, Interface, LaunchdJob, LoadAverage,
     Memory, Pid, Process, ProcessUsage, Services, Snapshot, SnapshotMapper, Swap, Unit,
 };
-use otelo_storage::{Batch, Points, StorageSize, Temporality};
+use otelo_indexed_storage::{Batch, Points, StorageSize, Temporality};
 use serde_json::{Value, json};
 
 const TICK_AT: i64 = 1_790_769_600_000_000_000;

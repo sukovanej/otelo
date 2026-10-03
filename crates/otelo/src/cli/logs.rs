@@ -1,5 +1,5 @@
+use otelo_indexed_storage::query::{LogGroups, Logs, MAX_GROUPED_LOG_LINES};
 use otelo_query::Signal;
-use otelo_storage::query::{LogGroups, Logs, MAX_GROUPED_LOG_LINES};
 
 use super::client::{Client, OutputFormat, note_truncation, print_json};
 use super::table::{self, Table};

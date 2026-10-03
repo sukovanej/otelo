@@ -21,8 +21,8 @@ otelo-api = { workspace = true }
 otelo-host = { workspace = true }
 otelo-otlp = { workspace = true }
 otelo-query = { workspace = true }
-otelo-storage = { workspace = true }
-otelo-storage-sqlite = { workspace = true }
+otelo-indexed-storage = { workspace = true }
+otelo-indexed-storage-sqlite = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

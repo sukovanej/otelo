@@ -33,18 +33,18 @@ impl ApiError {
     }
 }
 
-impl From<otelo_storage::Error> for ApiError {
-    fn from(error: otelo_storage::Error) -> Self {
+impl From<otelo_indexed_storage::Error> for ApiError {
+    fn from(error: otelo_indexed_storage::Error) -> Self {
         match error {
-            otelo_storage::Error::InvalidQuery(message) => Self::bad_request(&message),
-            otelo_storage::Error::TimedOut => Self {
+            otelo_indexed_storage::Error::InvalidQuery(message) => Self::bad_request(&message),
+            otelo_indexed_storage::Error::TimedOut => Self {
                 status: StatusCode::BAD_REQUEST,
                 message: format!(
                     "the query ran longer than {} s; narrow the range or the query",
                     QUERY_TIME_LIMIT.as_secs()
                 ),
             },
-            otelo_storage::Error::Backend(error) => error.into(),
+            otelo_indexed_storage::Error::Backend(error) => error.into(),
         }
     }
 }

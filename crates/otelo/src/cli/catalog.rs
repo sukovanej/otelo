@@ -1,6 +1,6 @@
 use otelo_api::{Completions, IndexList};
+use otelo_indexed_storage::query::AttributeKeys;
 use otelo_query::Signal;
-use otelo_storage::query::AttributeKeys;
 
 use super::client::{Client, OutputFormat, escape_path_segment, print_json};
 use super::table::Table;

@@ -5,12 +5,12 @@ description: How otelo writes SQL. A column has the name of the Rust field that 
 
 # Writing the SQL
 
-The schema is `schema.sql` and `rollup.sql` in `crates/storage-sqlite/src/`. The statements
+The schema is `schema.sql` and `rollup.sql` in `crates/indexed-storage-sqlite/src/`. The statements
 are strings in the Rust sources of that crate.
 
 ## Names
 
-- The names are private to `otelo-storage-sqlite`. No command runs SQL that a user wrote,
+- The names are private to `otelo-indexed-storage-sqlite`. No command runs SQL that a user wrote,
   and no other crate reads the tables. Keep it so.
 - A table is a plural noun: `resources`, `attribute_keys`. A column is singular. Both are
   snake_case and spelled in full: `attribute`, not `attr`.

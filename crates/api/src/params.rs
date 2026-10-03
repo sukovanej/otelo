@@ -1,5 +1,5 @@
+use otelo_indexed_storage::{TimeRange, query};
 use otelo_query::Signal;
-use otelo_storage::{TimeRange, query};
 use serde::Deserialize;
 use utoipa::IntoParams;
 

@@ -5,7 +5,7 @@ use std::io::Write;
 use common::{Receiver, open_todays_day_file, query_first_column};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use otelo_storage::now_unix_nanos;
+use otelo_indexed_storage::now_unix_nanos;
 use serde_json::{Value, json};
 
 fn post_body(

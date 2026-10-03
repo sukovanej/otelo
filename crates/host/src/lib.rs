@@ -5,7 +5,7 @@ mod mapping;
 mod reader;
 mod snapshot;
 
-use otelo_storage::{Batch, StorageSize};
+use otelo_indexed_storage::{Batch, StorageSize};
 
 pub use identity::{HostIdentity, find_platform_uuid_in_ioreg_output};
 pub use launchd::find_running_jobs_in_launchctl_list;

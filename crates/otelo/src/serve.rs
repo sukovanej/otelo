@@ -14,8 +14,8 @@ use crate::own::{self, Destination};
 use crate::ui;
 use otelo_api::{self as api, Api};
 use otelo_host::{Collector, HostIdentity};
-use otelo_storage::{BatchSender, Storage, now_unix_nanos};
-use otelo_storage_sqlite::Sqlite;
+use otelo_indexed_storage::{BatchSender, Storage, now_unix_nanos};
+use otelo_indexed_storage_sqlite::Sqlite;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
@@ -122,7 +122,7 @@ async fn serve_until_shutdown(
     std::fs::create_dir_all(&args.data_dir)
         .with_context(|| format!("make the data directory {}", args.data_dir.display()))?;
     let storage = Sqlite::open(&args.data_dir)?;
-    let (batch_sender, inbox) = otelo_storage::open_batch_channel(TELEMETRY_QUEUE_BATCHES);
+    let (batch_sender, inbox) = otelo_indexed_storage::open_batch_channel(TELEMETRY_QUEUE_BATCHES);
     let writer = storage.spawn_writer(inbox)?;
     let storage: Arc<dyn Storage> = Arc::new(storage);
     let api = Api {

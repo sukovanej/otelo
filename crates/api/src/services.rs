@@ -1,6 +1,6 @@
 use axum::extract::{Path, Query, State};
-use otelo_storage::SpanKind;
-use otelo_storage::query::{
+use otelo_indexed_storage::SpanKind;
+use otelo_indexed_storage::query::{
     CallDetail, Calls, OperationDetail, Service, Services, TargetKey, TargetType,
 };
 use serde::Deserialize;

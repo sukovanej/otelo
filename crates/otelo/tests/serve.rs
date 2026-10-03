@@ -55,7 +55,7 @@ fn receives_otlp_on_its_own_ports() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
     std::net::TcpStream::connect(&daemon.otlp_grpc_addr).unwrap();
-    let logged_at = otelo_storage::now_unix_nanos().to_string();
+    let logged_at = otelo_indexed_storage::now_unix_nanos().to_string();
     let body = format!(
         r#"{{"resourceLogs": [{{"scopeLogs": [{{"logRecords": [
             {{"timeUnixNano": "{logged_at}", "body": {{"stringValue": "cart is empty"}}}}
@@ -67,7 +67,7 @@ fn receives_otlp_on_its_own_ports() {
         .unwrap();
     assert_eq!(response.status(), 200);
     stop_daemon(daemon, StopSignal::Term);
-    let day = otelo_storage_sqlite::Day::today().file_name();
+    let day = otelo_indexed_storage_sqlite::Day::today().file_name();
     let connection = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
     let body: String = connection
         .query_row("SELECT body FROM logs", [], |row| row.get(0))
@@ -84,7 +84,7 @@ fn traces_itself() {
     let response = send_get_request(&daemon.api_addr, "/api/logs?q=level%20%3E%3D%20warn");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     stop_daemon(daemon, StopSignal::Term);
-    let day = otelo_storage_sqlite::Day::today().file_name();
+    let day = otelo_indexed_storage_sqlite::Day::today().file_name();
     let connection = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
     let request: (Vec<u8>, Vec<u8>, String) = connection
         .query_row(
@@ -135,7 +135,7 @@ fn traces_itself() {
 fn collects_the_metrics_of_its_host_when_it_starts() {
     let directory = tempfile::tempdir().unwrap();
     let daemon = start_daemon_with_args(directory.path(), &["--own-telemetry", "self"]);
-    let day = otelo_storage_sqlite::Day::today().file_name();
+    let day = otelo_indexed_storage_sqlite::Day::today().file_name();
     let day_file_path = directory.path().join("telemetry").join(day);
     let select_host_metrics = "SELECT series.name, series.kind, resource.attributes
          FROM points point

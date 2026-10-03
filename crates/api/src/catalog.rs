@@ -1,8 +1,8 @@
 use std::fmt;
 
 use axum::extract::{Query, State};
+use otelo_indexed_storage::query::AttributeKeys;
 use otelo_query::{FieldHelp, FieldOrigin, Signal, SuggestionKind, ValueType};
-use otelo_storage::query::AttributeKeys;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 

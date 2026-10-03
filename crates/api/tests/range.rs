@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use jiff::Timestamp;
 use otelo_api::{Api, DefaultSince, convert_to_unix_nanos, parse_duration, parse_time};
-use otelo_storage_sqlite::{Day, Sqlite};
+use otelo_indexed_storage_sqlite::{Day, Sqlite};
 
 const HOUR_NS: i64 = 3600 * 1_000_000_000;
 

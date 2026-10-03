@@ -30,8 +30,8 @@ otelo-api = { path = "crates/api" }
 otelo-host = { path = "crates/host" }
 otelo-otlp = { path = "crates/otlp" }
 otelo-query = { path = "crates/query" }
-otelo-storage = { path = "crates/storage" }
-otelo-storage-sqlite = { path = "crates/storage-sqlite" }
+otelo-indexed-storage = { path = "crates/indexed-storage" }
+otelo-indexed-storage-sqlite = { path = "crates/indexed-storage-sqlite" }
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-util = "0.7.19"

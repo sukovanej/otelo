@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
+use otelo_indexed_storage::TraceId;
+use otelo_indexed_storage::query::{Spans, Trace, Traces};
 use otelo_query::Signal;
-use otelo_storage::TraceId;
-use otelo_storage::query::{Spans, Trace, Traces};
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{LookupParams, QueryParams, parse_query};
