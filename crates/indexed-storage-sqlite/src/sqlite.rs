@@ -1,17 +1,19 @@
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    BatchInbox, IndexedAttribute, RangeQueries, Result, Storage, TimeRange,
+    IndexedAttribute, PipelineMeters, RangeQueries, Result, Storage, TimeRange,
 };
+use otelo_journal::{Journal, SyncedEndInbox};
 use otelo_query::Signal;
 
 use crate::day::Day;
 use crate::indexes::Indexes;
 use crate::telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
-use crate::{Config, Reader, Writer};
+use crate::{Config, FrameMapper, Indexer, Reader};
 
 // The daemon has about 50 MB, and SQLite fails an allocation past this rather than grow.
 const SQLITE_HEAP_LIMIT_BYTES: i64 = 16 * 1024 * 1024;
@@ -31,13 +33,19 @@ impl Sqlite {
         }
         let mut config = Config::new(data_directory.join("telemetry"));
         config.indexes = Indexes::new(indexed_attributes);
-        // A reader needs the file, and opens it before the writer has written to it.
+        // A reader needs the file, and opens it before the indexer has written to it.
         TelemetryFile::open(&config.directory)?;
         Ok(Self { config })
     }
 
-    pub fn spawn_writer(&self, inbox: BatchInbox) -> anyhow::Result<Writer> {
-        Writer::spawn(self.config.clone(), inbox)
+    pub fn spawn_indexer(
+        &self,
+        journal: Arc<dyn Journal>,
+        synced_ends: SyncedEndInbox,
+        map_frame: FrameMapper,
+        meters: Arc<PipelineMeters>,
+    ) -> anyhow::Result<Indexer> {
+        Indexer::spawn(self.config.clone(), journal, synced_ends, map_frame, meters)
     }
 }
 

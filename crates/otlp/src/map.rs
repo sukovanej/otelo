@@ -19,6 +19,8 @@ use otelo_indexed_storage::{
     Span, SpanEvent, SpanId, SpanKind, SpanStatus, Temporality, TraceContext, TraceId,
     now_unix_nanos,
 };
+use otelo_query::Signal;
+use prost::Message;
 
 // The name the OpenTelemetry SDKs give a resource without `service.name`.
 const UNKNOWN_SERVICE_NAME: &str = "unknown_service";
@@ -53,6 +55,15 @@ impl MappedExport {
     pub fn rejected_count(&self) -> i64 {
         self.rejected_count_by_reason.values().sum()
     }
+}
+
+pub fn map_journal_frame(signal: Signal, request: &[u8]) -> anyhow::Result<Batch> {
+    let mapped = match signal {
+        Signal::Logs => map_logs_request(ExportLogsServiceRequest::decode(request)?),
+        Signal::Spans => map_trace_request(ExportTraceServiceRequest::decode(request)?),
+        Signal::Metrics => map_metrics_request(ExportMetricsServiceRequest::decode(request)?),
+    };
+    Ok(mapped.batch)
 }
 
 #[must_use]

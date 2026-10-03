@@ -1,3 +1,5 @@
+mod common;
+
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -11,9 +13,8 @@ use otelo_indexed_storage::{
     ExponentialBuckets, Histogram, HistogramPoint, IndexedAttribute, IndexedCounts, IndexedSignal,
     Log, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource, Severity, Span,
     SpanId, SpanKind, SpanStatus, Temporality, TimeRange, TraceContext, TraceId,
-    open_batch_channel,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Indexes, Reader, TELEMETRY_FILE_NAME, Writer};
+use otelo_indexed_storage_sqlite::{Config, Day, Indexes, Reader, TELEMETRY_FILE_NAME};
 use otelo_query::{FieldOrigin, MAX_HELP_VALUES, Signal, ValueType, complete_query, parse_query};
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -109,15 +110,9 @@ const fn rate_of(bucket: &Bucket) -> Option<f64> {
 }
 
 fn write_batch(directory: &Path, batch: Batch, indexes: &Indexes) {
-    let (sender, inbox) = open_batch_channel(1);
-    if !batch.is_empty() {
-        assert!(sender.send_batch(batch));
-    }
     let mut config = Config::new(directory.to_owned());
     config.indexes = indexes.clone();
-    let writer = Writer::spawn(config, inbox).unwrap();
-    drop(sender);
-    writer.join().unwrap();
+    common::index_batches(config, vec![batch]);
 }
 
 fn indexed_attributes(keys: &[(IndexedSignal, &str)]) -> BTreeSet<IndexedAttribute> {

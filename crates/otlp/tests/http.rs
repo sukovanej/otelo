@@ -10,7 +10,7 @@ use flate2::write::GzEncoder;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-use otelo_indexed_storage::now_unix_nanos;
+use otelo_indexed_storage::{RequestCounts, now_unix_nanos};
 use otelo_journal::{Frames, Journal, Position, SyncTicket};
 use otelo_query::Signal;
 use prost::Message;
@@ -93,7 +93,7 @@ fn takes_a_gzip_json_body_and_answers_in_json() {
         &gzip_encoder.finish().unwrap(),
     );
     assert_eq!((status, response), (200, json!({"partialSuccess": null})));
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
     let names: Vec<String> = query_first_column(
         &open_telemetry_file(directory.path()),
         "SELECT name FROM spans",
@@ -120,7 +120,7 @@ fn refuses_another_content_type() {
     );
     assert_eq!(status, 400);
     assert_eq!(response["code"], 3, "{response}");
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn rejects_a_span_without_ids_and_keeps_the_rest() {
     let (status, response) = post_json(&receiver, "/v1/traces", &body);
     assert_eq!(status, 200);
     assert_eq!(response["partialSuccess"]["rejectedSpans"], 1, "{response}");
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
     let spans: Vec<String> = query_first_column(
         &open_telemetry_file(directory.path()),
         "SELECT resource.service || ' ' || span.name
@@ -162,13 +162,12 @@ fn rejects_the_metric_types_the_store_lacks() {
         response["partialSuccess"],
         json!({"rejectedDataPoints": 2, "errorMessage": "otelo does not store summaries"})
     );
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
     let points: Vec<String> = query_first_column(
         &open_telemetry_file(directory.path()),
         "SELECT metric_series.name || ' ' || metric_point.value
          FROM metric_points metric_point
-         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
-         WHERE metric_series.name NOT LIKE 'otelo.%'",
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id",
     );
     assert_eq!(points, ["queue.depth 4.0"]);
 }
@@ -218,7 +217,7 @@ fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
                              otelo does not store delta sums that are not monotonic",
         })
     );
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
     let series: Vec<String> = query_first_column(
         &open_telemetry_file(directory.path()),
         "SELECT json_object('name', metric_series.name, 'kind', metric_series.kind,
@@ -229,7 +228,6 @@ fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
                             'negative', metric_point.histogram -> 'negative')
          FROM metric_points metric_point
          JOIN metric_series ON metric_series.id = metric_point.metric_series_id
-         WHERE metric_series.name NOT LIKE 'otelo.%'
          ORDER BY metric_series.name",
     );
     assert_eq!(
@@ -241,27 +239,6 @@ fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
             r#"{"name":"requests.active","kind":"updown","temporality":null,"value":7.0,"scale":null,"zero":null,"positive":null,"negative":null}"#,
         ]
     );
-}
-
-#[test]
-fn a_full_queue_rejects_the_whole_request() {
-    let (receiver, _inbox) = Receiver::start_with_full_queue();
-    let body = traces_request(
-        &json!([]),
-        &json!([
-            span_json("a", TRACE_ID_HEX, SPAN_ID_HEX),
-            span_json("b", TRACE_ID_HEX, SPAN_ID_HEX)
-        ]),
-    );
-    let (_, first_response) = post_json(&receiver, "/v1/traces", &body);
-    assert_eq!(first_response["partialSuccess"], Value::Null);
-    let (status, second_response) = post_json(&receiver, "/v1/traces", &body);
-    assert_eq!(status, 200);
-    assert_eq!(
-        second_response["partialSuccess"]["rejectedSpans"], 2,
-        "{second_response}"
-    );
-    receiver.stop_and_wait_for_writer();
 }
 
 const fn any_value(value: any_value::Value) -> AnyValue {
@@ -316,7 +293,7 @@ fn json_and_protobuf_of_one_request_give_the_same_frame() {
         .unwrap()
         .map(Result::unwrap)
         .collect();
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
 
     assert_eq!((json_status, protobuf_status), (200, 200));
     assert_eq!(frames.len(), 2);
@@ -351,15 +328,16 @@ impl Journal for FailingJournal {
 }
 
 #[test]
-fn a_request_the_journal_cannot_keep_is_unavailable_and_stays_out_of_the_store() {
-    let (receiver, inbox) = Receiver::start_with_journal(TestJournal::of(Arc::new(FailingJournal)));
+fn a_request_the_journal_cannot_keep_is_unavailable_and_counted_as_refused() {
+    let receiver = Receiver::start_with_journal(TestJournal::of(Arc::new(FailingJournal)));
+    let meters = Arc::clone(&receiver.meters);
     let body = traces_request(
         &json!([]),
         &json!([span_json("a", TRACE_ID_HEX, SPAN_ID_HEX)]),
     );
 
     let (status, response) = post_json(&receiver, "/v1/traces", &body);
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
 
     assert_eq!(status, 503);
     assert_eq!(response["code"], 14, "{response}");
@@ -370,5 +348,12 @@ fn a_request_the_journal_cannot_keep_is_unavailable_and_stays_out_of_the_store()
             .contains("the disk is full"),
         "{response}"
     );
-    assert_eq!(inbox.take_queued_batches().count(), 0);
+    let spans_reading = meters.read_pipeline().signals[1];
+    assert_eq!(
+        spans_reading.requests,
+        RequestCounts {
+            journaled: 0,
+            refused: 1,
+        }
+    );
 }

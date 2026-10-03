@@ -12,8 +12,9 @@ use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
 use std::sync::Arc;
+use std::time::Instant;
 
-use otelo_indexed_storage::{BatchSender, now_unix_nanos};
+use otelo_indexed_storage::{PipelineMeters, now_unix_nanos};
 use otelo_journal::Journal;
 use otelo_query::Signal;
 use serde::Serialize;
@@ -32,28 +33,42 @@ pub trait ExportRequest: prost::Message + DeserializeOwned + Default + 'static {
 
     type Response: prost::Message + Serialize;
 
-    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response;
+    fn respond_with_rejections(self) -> Self::Response;
 }
 
 #[derive(Clone)]
 pub struct Intake {
     journal: Arc<dyn Journal>,
-    sender: BatchSender,
+    meters: Arc<PipelineMeters>,
 }
 
 impl Intake {
     #[must_use]
-    pub fn new(journal: Arc<dyn Journal>, sender: BatchSender) -> Self {
-        Self { journal, sender }
+    pub fn new(journal: Arc<dyn Journal>, meters: Arc<PipelineMeters>) -> Self {
+        Self { journal, meters }
     }
 
     pub async fn accept_export<R: ExportRequest>(&self, request: R) -> anyhow::Result<R::Response> {
-        self.journal
-            .append_frame(R::SIGNAL, now_unix_nanos(), &request.encode_to_vec())?
-            .wait_until_synced()
-            .await
-            .inspect_err(|error| tracing::warn!("journal an export request: {error:#}"))?;
-        Ok(request.send_to_writer_and_respond(&self.sender))
+        let encoded_request = request.encode_to_vec();
+        let appended_at = Instant::now();
+        let journaled =
+            match self
+                .journal
+                .append_frame(R::SIGNAL, now_unix_nanos(), &encoded_request)
+            {
+                Ok(ticket) => ticket.wait_until_synced().await,
+                Err(error) => Err(error),
+            };
+        if let Err(error) = journaled {
+            self.meters.count_refused_request(R::SIGNAL);
+            tracing::warn!("journal an export request: {error:#}");
+            return Err(error);
+        }
+        self.meters
+            .record_journal_sync_wait(R::SIGNAL, appended_at.elapsed());
+        self.meters
+            .count_journaled_request(R::SIGNAL, encoded_request.len() as u64);
+        Ok(request.respond_with_rejections())
     }
 }
 
@@ -62,14 +77,14 @@ impl ExportRequest for ExportLogsServiceRequest {
 
     type Response = ExportLogsServiceResponse;
 
-    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response {
+    fn respond_with_rejections(self) -> Self::Response {
         ExportLogsServiceResponse {
-            partial_success: send_batch_to_writer(sender, map_logs_request(self)).map(
-                |rejection| ExportLogsPartialSuccess {
+            partial_success: find_rejection(&map_logs_request(self)).map(|rejection| {
+                ExportLogsPartialSuccess {
                     rejected_log_records: rejection.rejected_count,
                     error_message: rejection.error_message,
-                },
-            ),
+                }
+            }),
         }
     }
 }
@@ -79,14 +94,14 @@ impl ExportRequest for ExportTraceServiceRequest {
 
     type Response = ExportTraceServiceResponse;
 
-    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response {
+    fn respond_with_rejections(self) -> Self::Response {
         ExportTraceServiceResponse {
-            partial_success: send_batch_to_writer(sender, map_trace_request(self)).map(
-                |rejection| ExportTracePartialSuccess {
+            partial_success: find_rejection(&map_trace_request(self)).map(|rejection| {
+                ExportTracePartialSuccess {
                     rejected_spans: rejection.rejected_count,
                     error_message: rejection.error_message,
-                },
-            ),
+                }
+            }),
         }
     }
 }
@@ -96,14 +111,14 @@ impl ExportRequest for ExportMetricsServiceRequest {
 
     type Response = ExportMetricsServiceResponse;
 
-    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response {
+    fn respond_with_rejections(self) -> Self::Response {
         ExportMetricsServiceResponse {
-            partial_success: send_batch_to_writer(sender, map_metrics_request(self)).map(
-                |rejection| ExportMetricsPartialSuccess {
+            partial_success: find_rejection(&map_metrics_request(self)).map(|rejection| {
+                ExportMetricsPartialSuccess {
                     rejected_data_points: rejection.rejected_count,
                     error_message: rejection.error_message,
-                },
-            ),
+                }
+            }),
         }
     }
 }
@@ -113,24 +128,14 @@ struct Rejection {
     error_message: String,
 }
 
-fn send_batch_to_writer(sender: &BatchSender, mapped: MappedExport) -> Option<Rejection> {
+fn find_rejection(mapped: &MappedExport) -> Option<Rejection> {
     let rejected_count = mapped.rejected_count();
-    let MappedExport {
-        batch,
-        item_count,
-        rejected_count_by_reason,
-    } = mapped;
-    if !batch.is_empty() && !sender.send_batch(batch) {
-        return Some(Rejection {
-            rejected_count: item_count,
-            error_message: "the telemetry queue of otelo is full, so it dropped the whole request"
-                .into(),
-        });
-    }
     (rejected_count > 0).then(|| Rejection {
         rejected_count,
-        error_message: rejected_count_by_reason
-            .into_keys()
+        error_message: mapped
+            .rejected_count_by_reason
+            .keys()
+            .cloned()
             .collect::<Vec<_>>()
             .join("; "),
     })

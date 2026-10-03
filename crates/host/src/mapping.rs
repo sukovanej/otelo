@@ -3,10 +3,12 @@ use std::time::Duration;
 
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::metrics::v1::{
-    AggregationTemporality, Gauge, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
-    metric, number_data_point,
+    AggregationTemporality, Gauge, Histogram, HistogramDataPoint, Metric, NumberDataPoint,
+    ResourceMetrics, ScopeMetrics, Sum, metric, number_data_point,
 };
-use otelo_indexed_storage::StorageSize;
+use otelo_indexed_storage::{
+    DURATION_BUCKET_BOUNDS_SECONDS, DurationCounts, PipelineReading, SignalReading, StorageSize,
+};
 
 use crate::identity::{HostIdentity, string_key_value};
 use crate::snapshot::{
@@ -19,6 +21,9 @@ const OTELO_SERVICE_NAME: &str = "otelo";
 const BYTES_UNIT: &str = "By";
 const SECONDS_UNIT: &str = "s";
 const RATIO_UNIT: &str = "1";
+const REQUESTS_UNIT: &str = "{request}";
+const FRAMES_UNIT: &str = "{frame}";
+const RECORDS_UNIT: &str = "{record}";
 // The OpenTelemetry Collector gives the load averages this unit.
 const THREADS_UNIT: &str = "{thread}";
 
@@ -58,6 +63,7 @@ impl SnapshotMapper {
         recorded_at: i64,
         snapshot: &Snapshot,
         storage_size: Option<StorageSize>,
+        pipeline: Option<&PipelineReading>,
     ) -> ExportMetricsServiceRequest {
         let mut otelo_metrics = TickMetrics::new(recorded_at);
         self.push_cpu_utilization(&mut otelo_metrics, snapshot.cpu);
@@ -69,6 +75,9 @@ impl SnapshotMapper {
         push_process_usage(&mut otelo_metrics, snapshot.otelo_process);
         if let Some(storage_size) = storage_size {
             push_storage_size(&mut otelo_metrics, storage_size);
+        }
+        for signal_reading in pipeline.iter().flat_map(|pipeline| &pipeline.signals) {
+            push_pipeline_of_signal(&mut otelo_metrics, signal_reading);
         }
         let mut resource_metrics =
             vec![self.resource_metrics_of_service(OTELO_SERVICE_NAME, otelo_metrics)];
@@ -334,6 +343,37 @@ impl TickMetrics {
     }
 }
 
+impl TickMetrics {
+    fn push_durations(
+        &mut self,
+        name: &str,
+        attribute_pairs: &[(&str, &str)],
+        durations: &DurationCounts,
+    ) {
+        let point = HistogramDataPoint {
+            attributes: attribute_pairs
+                .iter()
+                .map(|&(key, value)| string_key_value(key, value.to_owned()))
+                .collect(),
+            time_unix_nano: u64::try_from(self.recorded_at).unwrap_or(0),
+            count: durations.count(),
+            sum: Some(durations.sum.as_secs_f64()),
+            bucket_counts: durations.bucket_counts.to_vec(),
+            explicit_bounds: DURATION_BUCKET_BOUNDS_SECONDS.to_vec(),
+            ..HistogramDataPoint::default()
+        };
+        self.metrics.push(Metric {
+            name: name.into(),
+            unit: SECONDS_UNIT.into(),
+            data: Some(metric::Data::Histogram(Histogram {
+                data_points: vec![point],
+                aggregation_temporality: AggregationTemporality::Cumulative as i32,
+            })),
+            ..Metric::default()
+        });
+    }
+}
+
 const fn cumulative_sum(data_points: Vec<NumberDataPoint>, is_monotonic: bool) -> metric::Data {
     metric::Data::Sum(Sum {
         data_points,
@@ -555,4 +595,67 @@ fn push_storage_size(metrics: &mut TickMetrics, storage_size: StorageSize) {
             bytes,
         );
     }
+}
+
+#[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
+fn push_pipeline_of_signal(metrics: &mut TickMetrics, reading: &SignalReading) {
+    let signal = ("otelo.signal", reading.signal.name());
+    let with_outcome = |outcome| [signal, ("otelo.telemetry.outcome", outcome)];
+    for (outcome, total) in [
+        ("journaled", reading.requests.journaled),
+        ("refused", reading.requests.refused),
+    ] {
+        metrics.push_counter(
+            "otelo.telemetry.received_requests",
+            REQUESTS_UNIT,
+            &with_outcome(outcome),
+            total as f64,
+        );
+    }
+    metrics.push_counter(
+        "otelo.telemetry.journaled_bytes",
+        BYTES_UNIT,
+        &[signal],
+        reading.journaled_bytes as f64,
+    );
+    metrics.push_durations(
+        "otelo.telemetry.journal_sync.duration",
+        &[signal],
+        &reading.journal_sync_waits,
+    );
+    for (outcome, total) in [
+        ("indexed", reading.frames.indexed),
+        ("skipped", reading.frames.skipped),
+        ("undecodable", reading.frames.undecodable),
+    ] {
+        metrics.push_counter(
+            "otelo.telemetry.indexed_frames",
+            FRAMES_UNIT,
+            &with_outcome(outcome),
+            total as f64,
+        );
+    }
+    for (outcome, total) in [
+        ("written", reading.records.written),
+        ("skipped", reading.records.skipped),
+        ("rejected", reading.records.rejected),
+    ] {
+        metrics.push_counter(
+            "otelo.telemetry.indexed_records",
+            RECORDS_UNIT,
+            &with_outcome(outcome),
+            total as f64,
+        );
+    }
+    metrics.push_durations(
+        "otelo.telemetry.index_transaction.duration",
+        &[signal],
+        &reading.index_transactions,
+    );
+    metrics.push_gauge(
+        "otelo.telemetry.index_lag",
+        SECONDS_UNIT,
+        &[signal],
+        reading.index_lag.as_secs_f64(),
+    );
 }

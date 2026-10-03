@@ -1,11 +1,13 @@
+mod common;
+
 use std::path::Path;
 
 use otelo_indexed_storage::query::{TargetKey, TargetType};
 use otelo_indexed_storage::{
     Attributes, Batch, RangeQueries, Records, Resource, Span, SpanId, SpanKind, SpanStatus,
-    TimeRange, TraceId, open_batch_channel,
+    TimeRange, TraceId,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Reader, Writer};
+use otelo_indexed_storage_sqlite::{Config, Day, Reader};
 use serde_json::{Value, json};
 
 const SECOND: i64 = 1_000_000_000;
@@ -47,11 +49,7 @@ fn child_span(
 }
 
 fn write_batch(directory: &Path, batch: Batch) {
-    let (sender, inbox) = open_batch_channel(1);
-    assert!(sender.send_batch(batch));
-    let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-    drop(sender);
-    writer.join().unwrap();
+    common::index_batches(Config::new(directory.to_owned()), vec![batch]);
 }
 
 fn target_key(target_type: TargetType, system: Option<&str>, name: Option<&str>) -> TargetKey {

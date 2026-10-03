@@ -1,3 +1,5 @@
+mod common;
+
 use std::path::Path;
 
 use otelo_indexed_storage::query::{
@@ -6,10 +8,10 @@ use otelo_indexed_storage::query::{
 use otelo_indexed_storage::{
     Attributes, Batch, Buckets, ExplicitBuckets, ExponentialBuckets, Histogram, HistogramPoint,
     IndexedCounts, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource,
-    Temporality, TimeRange, open_batch_channel,
+    Temporality, TimeRange,
 };
 use otelo_indexed_storage_sqlite::{
-    Config, Day, Progress, Reader, TELEMETRY_FILE_NAME, TelemetryFile, Writer,
+    Config, Day, Progress, Reader, TELEMETRY_FILE_NAME, TelemetryFile,
 };
 use otelo_query::{Signal, parse_query};
 use rusqlite::Connection;
@@ -38,11 +40,7 @@ fn write_metrics(directory: &Path, metrics: Vec<Metric>) {
         spans: Vec::new(),
         metrics,
     }];
-    let (sender, inbox) = open_batch_channel(1);
-    assert!(sender.send_batch(batch));
-    let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-    drop(sender);
-    writer.join().unwrap();
+    common::index_batches(Config::new(directory.to_owned()), vec![batch]);
 }
 
 fn roll_up_all_due(directory: &Path, now: i64) -> usize {
@@ -380,7 +378,6 @@ fn query_summary_rows(directory: &Path, table: &str) -> Vec<String> {
                            summary.counter_increase_seconds, summary.merged_histogram)
          FROM {table} summary
          JOIN metric_series ON metric_series.id = summary.metric_series_id
-         WHERE metric_series.name NOT LIKE 'otelo.%'
          ORDER BY metric_series.name, summary.start_at"
     );
     connection

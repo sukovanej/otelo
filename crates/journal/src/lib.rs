@@ -1,15 +1,17 @@
 mod hour;
 mod sync;
+mod synced_end;
 
 use otelo_query::Signal;
 
 pub use hour::Hour;
 pub use sync::{SyncPublisher, SyncSubscription, SyncTicket, open_sync_channel};
+pub use synced_end::{SyncedEnd, SyncedEndInbox, SyncedEndSender, open_synced_end_queue};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position {
-    pub hour: Hour,
-    pub offset: u64,
+    pub segment_hour: Hour,
+    pub byte_offset: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

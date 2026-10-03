@@ -1,5 +1,5 @@
 use otelo_host::{Collector, HostIdentity};
-use otelo_indexed_storage::{Batch, Points, StorageSize};
+use otelo_indexed_storage::{Batch, PipelineMeters, Points, StorageSize};
 use otelo_otlp::map::map_metrics_request;
 
 fn newest_value(batch: &Batch, service: &str, name: &str) -> Option<f64> {
@@ -29,7 +29,11 @@ fn reads_the_machine_the_test_runs_on() {
     let mut collect_batch = |recorded_at| {
         map_metrics_request(
             collector
-                .collect_request(recorded_at, Some(storage_size))
+                .collect_request(
+                    recorded_at,
+                    Some(storage_size),
+                    Some(&PipelineMeters::default().read_pipeline()),
+                )
                 .unwrap(),
         )
         .batch

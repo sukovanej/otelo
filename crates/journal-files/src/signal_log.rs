@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use otelo_journal::{
-    Frames, Hour, Position, SyncPublisher, SyncSubscription, SyncTicket, open_sync_channel,
+    Frames, Hour, Position, SyncPublisher, SyncSubscription, SyncTicket, SyncedEnd,
+    SyncedEndSender, open_sync_channel,
 };
 use otelo_query::Signal;
 
@@ -39,6 +40,7 @@ struct Appending {
     open_segment: Option<OpenSegment>,
     newest_closed_hour: Option<Hour>,
     appended_frames: u64,
+    newest_received_at: i64,
     sync_failure: Option<String>,
     stopping: bool,
 }
@@ -68,8 +70,8 @@ impl SignalLog {
             .as_ref()
             .map_or(ReadableEnd::EveryHour, |open| {
                 ReadableEnd::OpenSegment(Position {
-                    hour: open.hour,
-                    offset: open.length,
+                    segment_hour: open.hour,
+                    byte_offset: open.length,
                 })
             });
         let (sync_publisher, sync_subscription) = open_sync_channel();
@@ -80,6 +82,7 @@ impl SignalLog {
                 open_segment,
                 newest_closed_hour,
                 appended_frames: 0,
+                newest_received_at: 0,
                 sync_failure: None,
                 stopping: false,
             }),
@@ -119,7 +122,10 @@ impl SignalLog {
         {
             self.close_open_segment(&mut appending)?;
             appending.open_segment = Some(self.create_segment(hour)?);
-            self.publish_readable_end(Position { hour, offset: 0 });
+            self.publish_readable_end(Position {
+                segment_hour: hour,
+                byte_offset: 0,
+            });
         }
         let open_segment = appending
             .open_segment
@@ -139,6 +145,7 @@ impl SignalLog {
         }
         open_segment.length += frame.len() as u64;
         appending.appended_frames += 1;
+        appending.newest_received_at = received_at;
         let frame_number = appending.appended_frames;
         drop(appending);
         self.frame_appended.notify_one();
@@ -157,11 +164,11 @@ impl SignalLog {
         )))
     }
 
-    pub fn sync_frames_until_stopped(&self) {
+    pub fn sync_frames_until_stopped(&self, synced_end_sender: &SyncedEndSender) {
         let mut synced_frames = 0;
         loop {
             let started_at = Instant::now();
-            let (file, appended_frames, end) = {
+            let (file, appended_frames, synced_end) = {
                 let mut appending = lock(&self.appending);
                 while appending.appended_frames == synced_frames
                     && !appending.stopping
@@ -182,22 +189,29 @@ impl SignalLog {
                 (
                     Arc::clone(&open_segment.file),
                     appending.appended_frames,
-                    Position {
-                        hour: open_segment.hour,
-                        offset: open_segment.length,
+                    SyncedEnd {
+                        signal: self.signal,
+                        end: Position {
+                            segment_hour: open_segment.hour,
+                            byte_offset: open_segment.length,
+                        },
+                        newest_received_at: appending.newest_received_at,
                     },
                 )
             };
             match file.sync_data() {
                 Ok(()) => {
                     synced_frames = appended_frames;
-                    self.publish_readable_end(end);
+                    self.publish_readable_end(synced_end.end);
                     self.sync_publisher.publish_synced_frames(synced_frames);
+                    synced_end_sender.send_synced_end(synced_end);
                 }
                 Err(error) => {
                     let sync_failure = format!(
                         "sync {}: {error}",
-                        self.segments.uncompressed_segment_path(end.hour).display()
+                        self.segments
+                            .uncompressed_segment_path(synced_end.end.segment_hour)
+                            .display()
                     );
                     tracing::error!(signal = self.signal.name(), "{sync_failure}");
                     self.sync_publisher.publish_failure(&sync_failure);

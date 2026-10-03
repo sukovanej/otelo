@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
 
 use anyhow::{Context, anyhow};
-use otelo_journal::{Frames, Journal, Position, SyncTicket};
+use otelo_journal::{Frames, Journal, Position, SyncTicket, SyncedEndInbox, open_synced_end_queue};
 use otelo_query::Signal;
 
 use crate::maintenance::{
@@ -45,8 +45,14 @@ pub struct JournalFiles {
     metrics: SignalLog,
 }
 
+pub struct OpenedJournal {
+    pub journal: Arc<JournalFiles>,
+    pub threads: JournalThreads,
+    pub synced_ends: SyncedEndInbox,
+}
+
 impl JournalFiles {
-    pub fn open(config: Config) -> anyhow::Result<(Arc<Self>, JournalThreads)> {
+    pub fn open(config: Config) -> anyhow::Result<OpenedJournal> {
         let now = now_unix_nanos();
         let (maintenance_tasks, maintenance_inbox) = mpsc::channel();
         let open_signal_log = |signal: Signal| -> anyhow::Result<SignalLog> {
@@ -66,12 +72,18 @@ impl JournalFiles {
             metrics: open_signal_log(Signal::Metrics)?,
             config,
         });
+        let (synced_end_sender, synced_ends) = open_synced_end_queue();
         let mut sync_threads = Vec::new();
         for signal in Signal::ALL {
             let journal = Arc::clone(&journal);
+            let synced_end_sender = synced_end_sender.clone();
             let thread = thread::Builder::new()
                 .name(format!("journal-sync-{}", signal.name()))
-                .spawn(move || journal.signal_log(signal).sync_frames_until_stopped())
+                .spawn(move || {
+                    journal
+                        .signal_log(signal)
+                        .sync_frames_until_stopped(&synced_end_sender);
+                })
                 .context("start the sync of the journal")?;
             sync_threads.push(thread);
         }
@@ -88,7 +100,11 @@ impl JournalFiles {
             maintenance_thread,
             maintenance_tasks,
         };
-        Ok((journal, threads))
+        Ok(OpenedJournal {
+            journal,
+            threads,
+            synced_ends,
+        })
     }
 
     pub(crate) const fn signal_log(&self, signal: Signal) -> &SignalLog {

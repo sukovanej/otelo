@@ -1,5 +1,6 @@
 mod catalog;
 mod day;
+mod indexer;
 mod indexes;
 mod progress;
 mod query;
@@ -9,13 +10,12 @@ mod rollup;
 mod series;
 mod sqlite;
 mod telemetry_file;
-mod writer;
 
 pub use day::Day;
+pub use indexer::{Config, FrameMapper, Indexer, index_journal_until_caught_up};
 pub use indexes::Indexes;
 pub use progress::Progress;
 pub use reader::Reader;
 pub use retention::OldestRetainedDays;
 pub use sqlite::Sqlite;
 pub use telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
-pub use writer::{Config, Writer};

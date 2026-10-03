@@ -1,10 +1,10 @@
 mod attributes;
-mod channel;
 mod error;
 mod grouping;
 mod histogram;
 mod increase;
 mod indexes;
+mod meters;
 mod metric;
 mod otel;
 pub mod query;
@@ -13,7 +13,6 @@ mod storage;
 mod summary;
 
 pub use attributes::{AttributeValue, Attributes, SpanEvent};
-pub use channel::{BatchInbox, BatchSender, open_batch_channel};
 pub use error::{Error, Result};
 pub use grouping::{SummarizedSeries, group_series};
 pub use histogram::{
@@ -22,6 +21,10 @@ pub use histogram::{
 };
 pub use increase::{Increase, StepIncreases};
 pub use indexes::{IndexedAttribute, IndexedSignal};
+pub use meters::{
+    DURATION_BUCKET_BOUNDS_SECONDS, DurationCounts, FrameCounts, PipelineMeters, PipelineReading,
+    RecordCounts, RequestCounts, SignalReading,
+};
 pub use metric::{HistogramPoint, Metric, MetricKind, NumberPoint, Points, Temporality};
 pub use otel::{Severity, SpanId, SpanKind, SpanStatus, TraceContext, TraceId};
 pub use range::TimeRange;

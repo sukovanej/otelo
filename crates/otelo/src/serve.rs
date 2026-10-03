@@ -14,10 +14,10 @@ use crate::own::{self, Destination};
 use crate::ui;
 use otelo_api::{self as api, Api};
 use otelo_host::{Collector, HostIdentity};
-use otelo_indexed_storage::{Storage, StorageSize, now_unix_nanos};
-use otelo_indexed_storage_sqlite::Sqlite;
+use otelo_indexed_storage::{PipelineMeters, Storage, StorageSize, now_unix_nanos};
+use otelo_indexed_storage_sqlite::{FrameMapper, Sqlite};
 use otelo_journal::Journal;
-use otelo_journal_files::JournalFiles;
+use otelo_journal_files::{JournalFiles, OpenedJournal};
 use otelo_otlp::Intake;
 use otelo_state::StateFile;
 
@@ -25,9 +25,6 @@ use otelo_state::StateFile;
 pub const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
 #[cfg(not(target_os = "macos"))]
 pub const DEFAULT_DATA_DIR: &str = "/var/lib/otelo";
-
-// An OTLP batch can hold a few hundred kilobytes, so the queue stays at tens of megabytes.
-const TELEMETRY_QUEUE_BATCHES: usize = 64;
 
 const JOURNAL_DIRECTORY_NAME: &str = "journal";
 
@@ -149,13 +146,23 @@ async fn serve_until_shutdown(
         );
     }
     let storage = Sqlite::open(&args.data_dir, state.indexed_attributes()?)?;
-    let (journal, journal_threads) = JournalFiles::open(otelo_journal_files::Config::new(
+    let OpenedJournal {
+        journal,
+        threads: journal_threads,
+        synced_ends,
+    } = JournalFiles::open(otelo_journal_files::Config::new(
         args.data_dir.join(JOURNAL_DIRECTORY_NAME),
     ))?;
     let journal: Arc<dyn Journal> = journal;
-    let (batch_sender, inbox) = otelo_indexed_storage::open_batch_channel(TELEMETRY_QUEUE_BATCHES);
-    let writer = storage.spawn_writer(inbox)?;
-    let intake = Intake::new(Arc::clone(&journal), batch_sender);
+    let meters = Arc::new(PipelineMeters::default());
+    let map_frame: FrameMapper = Arc::new(otelo_otlp::map::map_journal_frame);
+    let indexer = storage.spawn_indexer(
+        Arc::clone(&journal),
+        synced_ends,
+        map_frame,
+        Arc::clone(&meters),
+    )?;
+    let intake = Intake::new(Arc::clone(&journal), Arc::clone(&meters));
     let storage: Arc<dyn Storage> = Arc::new(storage);
     let api = Api::new(Arc::clone(&storage), Arc::clone(&state));
     let Listeners {
@@ -182,32 +189,39 @@ async fn serve_until_shutdown(
         otelo_otlp::serve_grpc(otlp_grpc, intake.clone(), shutdown.clone()),
         collect_host_metrics(
             host,
-            storage,
-            state,
-            journal,
-            intake.clone(),
-            shutdown.clone()
+            HostReadings {
+                storage,
+                state,
+                journal,
+                meters,
+            },
+            intake,
+            shutdown.clone(),
         ),
     )?;
-    // The writer ends once the last sender is gone.
-    drop(intake);
-    tokio::task::spawn_blocking(|| writer.join())
-        .await
-        .context("wait for the telemetry writer")??;
+    // The indexer ends once the sync threads of the journal are gone.
     tokio::task::spawn_blocking(|| journal_threads.stop_and_join())
         .await
         .context("wait for the journal")??;
+    tokio::task::spawn_blocking(|| indexer.join())
+        .await
+        .context("wait for the telemetry indexer")??;
     tracing::info!("stopped");
     Ok(())
 }
 
 // The readers of the collector block, and the runtime of a machine with one CPU has one worker
 // thread, so every read runs on a thread that may block.
-async fn collect_host_metrics(
-    host: HostIdentity,
+struct HostReadings {
     storage: Arc<dyn Storage>,
     state: Arc<StateFile>,
     journal: Arc<dyn Journal>,
+    meters: Arc<PipelineMeters>,
+}
+
+async fn collect_host_metrics(
+    host: HostIdentity,
+    readings: HostReadings,
     intake: Intake,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
@@ -225,22 +239,22 @@ async fn collect_host_metrics(
     // the points of all series line up.
     let mut recorded_at = now_unix_nanos();
     loop {
-        let storage = Arc::clone(&storage);
-        let state = Arc::clone(&state);
-        let journal = Arc::clone(&journal);
+        let storage = Arc::clone(&readings.storage);
+        let state = Arc::clone(&readings.state);
+        let journal = Arc::clone(&readings.journal);
+        let pipeline = readings.meters.read_pipeline();
         let (collector_after_reading, request) = tokio::task::spawn_blocking(move || {
             let storage_size = read_storage_size(storage.as_ref(), &state, journal.as_ref())
                 .inspect_err(|error| tracing::warn!("read the size of the storage: {error:#}"))
                 .ok();
-            let request = collector.collect_request(recorded_at, storage_size);
+            let request = collector.collect_request(recorded_at, storage_size, Some(&pipeline));
             (collector, request)
         })
         .await
         .context("collect the host metrics")?;
         collector = collector_after_reading;
         match request {
-            // The intake logs a request the journal could not keep, and the writer reports the
-            // batches a full channel dropped.
+            // The intake logs and counts a request the journal could not keep.
             Ok(request) => drop(intake.accept_export(request).await),
             Err(error) => tracing::warn!("collect the host metrics: {error:#}"),
         }
