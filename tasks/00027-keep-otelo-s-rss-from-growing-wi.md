@@ -58,3 +58,9 @@ Sources:
 3. Allocate less per query. A 5000-span response peaks at about 4 KB per span.
 
 Until this lands, the droplet can take `Environment=MALLOC_ARENA_MAX=1` in mudro's `deploy/otelo.service`.
+
+## Comments
+
+### 2026-10-03T22:56:52Z by Milan Suk via claude-code
+
+> The blocking pool is capped at 2 threads (#46): 33 MB instead of 50 MB after 100 page loads in the replay. The allocator comparison is still to do.
