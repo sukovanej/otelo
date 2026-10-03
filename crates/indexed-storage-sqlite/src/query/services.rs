@@ -373,8 +373,7 @@ impl Reader {
         }
         where_clause.push_param(":no_attributes", Attributes::new().to_json());
         let mut resources = HashMap::new();
-        // A resource with attributes wins over one without, such as the writer's own, and a
-        // newer one over an older one.
+        // A resource with attributes wins over one without, and a newer one over an older one.
         let sql = format!(
             "SELECT service, attributes, attributes != :no_attributes AS has_attributes
              FROM resources

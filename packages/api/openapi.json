@@ -124,7 +124,7 @@
     },
     "/api/indexes/{signal}/{key}": {
       "put": {
-        "summary": "Indexes an attribute of the logs or of the spans, so a query that\ncompares it reads only the matching records. The writer builds\nthe index within seconds.",
+        "summary": "Indexes an attribute of the logs or of the spans, so a query that\ncompares it reads only the matching records. The indexer builds\nthe index within seconds.",
         "operationId": "add_index",
         "parameters": [
           {
