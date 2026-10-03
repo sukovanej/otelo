@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onSettled, Show } from "solid-js";
+import { createMemo, createSignal, flush, For, onSettled, Show } from "solid-js";
 
 import { pickDefaultColor, toCssColor } from "../color";
 import { formatInstant, formatTick, pickTimeTicks, pickValueTicks } from "../scale";
@@ -206,6 +206,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   const onPointerUp = () => {
     const drag = zoomDrag();
     setZoomDrag(undefined);
+    flush();
     if (!drag || Math.abs(drag.toX - drag.fromX) < MIN_ZOOM_DRAG_PX) return;
     props.onZoom(
       xToTimeMs(Math.min(drag.fromX, drag.toX)),
