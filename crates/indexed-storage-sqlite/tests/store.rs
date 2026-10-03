@@ -3,9 +3,9 @@ use std::path::Path;
 
 use otelo_indexed_storage::{
     Attributes, Batch, BatchInbox, BatchSender, Buckets, ExplicitBuckets, Histogram,
-    HistogramPoint, Log, LogSource, Metric, NumberPoint, Points, Records, Resource, Severity, Span,
-    SpanEvent, SpanId, SpanKind, SpanStatus, Storage, StorageSize, Temporality, TimeRange,
-    TraceContext, TraceId, open_batch_channel,
+    HistogramPoint, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanEvent,
+    SpanId, SpanKind, SpanStatus, Storage, StorageSize, Temporality, TimeRange, TraceContext,
+    TraceId, open_batch_channel,
 };
 use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, Writer};
 use rusqlite::Connection;
@@ -34,7 +34,6 @@ fn log(logged_at: i64, body: &str) -> Log {
             span_id: SpanId([2; 8]),
         },
         attributes: attributes_from_json(json!({"user": 7})),
-        source: LogSource::Otlp,
     }
 }
 

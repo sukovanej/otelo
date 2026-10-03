@@ -666,16 +666,9 @@ export interface components {
              *     when the source set none.
              */
             severity: number;
-            /** @description `otlp`, or the service log source that read the line. */
-            source: components["schemas"]["LogSource"];
             span_id: string | null;
             trace_id: string | null;
         };
-        /**
-         * @description How a log line arrived.
-         * @enum {string}
-         */
-        LogSource: "otlp";
         /** @description Log lines, newest first. */
         Logs: {
             logs: components["schemas"]["LogLine"][];

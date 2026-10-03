@@ -9,7 +9,6 @@ level                          field    built-in, string   replaces "" at 0..0
 body                           field    built-in, string   replaces "" at 0..0
 trace_id                       field    built-in, string   replaces "" at 0..0
 span_id                        field    built-in, string   replaces "" at 0..0
-source                         field    built-in, string   replaces "" at 0..0
 http.route                     field    string, 90         replaces "" at 0..0
 http.response.status_code      field    int, 80            replaces "" at 0..0
 user.id                        field    mixed, 40          replaces "" at 0..0
@@ -47,7 +46,6 @@ level                          field    built-in, string   replaces "" at 4..4
 body                           field    built-in, string   replaces "" at 4..4
 trace_id                       field    built-in, string   replaces "" at 4..4
 span_id                        field    built-in, string   replaces "" at 4..4
-source                         field    built-in, string   replaces "" at 4..4
 http.route                     field    string, 90         replaces "" at 4..4
 http.response.status_code      field    int, 80            replaces "" at 4..4
 user.id                        field    mixed, 40          replaces "" at 4..4

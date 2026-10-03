@@ -7,8 +7,8 @@ use std::process::{Command, Output};
 
 use common::{StopSignal, send_get_request, start_daemon, stop_daemon};
 use otelo_indexed_storage::{
-    Attributes, Log, LogSource, Metric, NumberPoint, Points, Records, Resource, Severity, Span,
-    SpanId, SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos, open_batch_channel,
+    Attributes, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanId,
+    SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos, open_batch_channel,
 };
 use otelo_indexed_storage_sqlite::{Config, Writer};
 use serde_json::{Value, json};
@@ -48,7 +48,6 @@ fn write_telemetry(data: &Path) {
         attributes: user_id.map_or_else(Attributes::new, |id| {
             parse_attributes(json!({"user.id": id, "http.route": "/login"}))
         }),
-        source: LogSource::Otlp,
     };
     let build_queue_depth = |queue: &str, depth: f64| Metric {
         name: "queue.depth".into(),

@@ -9,8 +9,8 @@ use otelo_indexed_storage::query::{
 use otelo_indexed_storage::{
     AttributeValue, Attributes, Batch, Buckets, Distribution, Error, ExplicitBuckets,
     ExponentialBuckets, Histogram, HistogramPoint, IndexedAttribute, IndexedCounts, IndexedSignal,
-    Log, LogSource, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource,
-    Severity, Span, SpanId, SpanKind, SpanStatus, Temporality, TimeRange, TraceContext, TraceId,
+    Log, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource, Severity, Span,
+    SpanId, SpanKind, SpanStatus, Temporality, TimeRange, TraceContext, TraceId,
     open_batch_channel,
 };
 use otelo_indexed_storage_sqlite::{Config, Day, Indexes, Reader, Writer};
@@ -33,7 +33,6 @@ fn log(logged_at: i64, severity: Severity, body: &str, attributes: &Value) -> Lo
         body: body.into(),
         trace_context: TraceContext::None,
         attributes: attributes_from_json(attributes.clone()),
-        source: LogSource::Otlp,
     }
 }
 

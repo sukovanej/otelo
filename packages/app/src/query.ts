@@ -8,7 +8,6 @@ const BUILTIN_FIELD_NAMES = new Set([
   "body",
   "trace_id",
   "span_id",
-  "source",
   "name",
   "kind",
   "status",

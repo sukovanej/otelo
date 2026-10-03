@@ -2,7 +2,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{Attributes, LogSource, Severity, SpanId, TraceId};
+use crate::{Attributes, Severity, SpanId, TraceId};
 
 pub const MAX_GROUPED_LOG_LINES: u64 = 50_000;
 
@@ -34,8 +34,6 @@ pub struct LogLine {
     pub attributes: Attributes,
     /// The attributes of the resource that sent the line.
     pub resource: Attributes,
-    /// `otlp`, or the service log source that read the line.
-    pub source: LogSource,
 }
 
 /// Log lines grouped by message template, the largest group first.
