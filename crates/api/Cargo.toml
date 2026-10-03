@@ -4,6 +4,7 @@ description = "The HTTP API of the otelo daemon, which the CLI and the web UI re
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

@@ -4,6 +4,7 @@ description = "The state file of otelo, state.sqlite: what no journal can rebuil
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
