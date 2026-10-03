@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "otelo",
-    "description": "Query the logs, traces, and metrics that otelo keeps. Every path but `POST /api/login` needs the session that the login starts, as the cookie `otelo_session` or as `Authorization: Bearer <session>`.",
+    "description": "Query the logs, traces, and metrics that otelo keeps. Every path but the login and the logout needs the password of `otelo init`, as the cookie `otelo_password` or as `Authorization: Bearer <password>`.",
     "license": {
       "name": ""
     },
@@ -228,7 +228,7 @@
     },
     "/api/login": {
       "post": {
-        "summary": "Trades the password for a session, which the answer sets as the cookie\n`otelo_session`. The daemon checks one password a second, and a wrong\none answers after that second.",
+        "summary": "Checks the password, and sets it as the cookie `otelo_password`, which\nthe browser then sends with every request.",
         "operationId": "log_in",
         "requestBody": {
           "content": {
@@ -242,7 +242,7 @@
         },
         "responses": {
           "204": {
-            "description": "The session is in the cookie `otelo_session`"
+            "description": "The password is in the cookie `otelo_password`"
           },
           "401": {
             "description": "",
@@ -259,11 +259,11 @@
     },
     "/api/logout": {
       "post": {
-        "summary": "Ends the session of the request.",
+        "summary": "Clears the cookie `otelo_password`.",
         "operationId": "log_out",
         "responses": {
           "204": {
-            "description": "The session has ended"
+            "description": "The cookie is cleared"
           }
         }
       }

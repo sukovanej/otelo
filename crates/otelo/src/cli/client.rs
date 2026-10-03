@@ -8,12 +8,12 @@ use otelo_api::ErrorBody;
 use ureq::http::StatusCode;
 use ureq::http::header::AUTHORIZATION;
 
-use crate::cli::session::SessionFile;
-
 const MAX_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 
+const PASSWORD_VARIABLE: &str = "OTELO_PASSWORD";
+
 #[derive(clap::Args)]
-pub struct DaemonArgs {
+pub struct Client {
     /// Address of the otelo daemon
     #[arg(
         long = "daemon",
@@ -23,29 +23,6 @@ pub struct DaemonArgs {
         global = true
     )]
     daemon_url: String,
-}
-
-impl DaemonArgs {
-    #[must_use]
-    pub fn url(&self) -> &str {
-        self.daemon_url.trim_end_matches('/')
-    }
-
-    #[must_use]
-    pub fn build_url(&self, path: &str) -> String {
-        format!("{}{path}", self.url())
-    }
-
-    #[must_use]
-    pub fn reach_error_context(&self) -> String {
-        format!("reach the otelo daemon at {}", self.url())
-    }
-}
-
-#[derive(clap::Args)]
-pub struct Client {
-    #[command(flatten)]
-    daemon: DaemonArgs,
 
     /// Print JSON, the default when stdout is not a terminal
     #[arg(long, conflicts_with = "table", global = true)]
@@ -80,55 +57,44 @@ impl Client {
         let set_params = params
             .iter()
             .filter_map(|(name, value)| Some((*name, value.as_deref()?)));
-        let request = build_agent()
-            .get(self.daemon.build_url(path))
+        let request = Self::build_agent()
+            .get(self.build_url(path))
             .query_pairs(set_params);
-        let response = self
-            .add_session(request)?
+        let response = add_password(request)
             .call()
-            .with_context(|| self.daemon.reach_error_context())?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
         read_json_response(response)
     }
 
     pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let request = build_agent().put(self.daemon.build_url(path));
-        let response = self
-            .add_session(request)?
+        let request = Self::build_agent().put(self.build_url(path));
+        let response = add_password(request)
             .send_empty()
-            .with_context(|| self.daemon.reach_error_context())?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
         read_json_response(response)
     }
 
     pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let request = build_agent().delete(self.daemon.build_url(path));
-        let response = self
-            .add_session(request)?
+        let request = Self::build_agent().delete(self.build_url(path));
+        let response = add_password(request)
             .call()
-            .with_context(|| self.daemon.reach_error_context())?;
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
         read_json_response(response)
     }
 
-    fn add_session<Body>(
-        &self,
-        request: ureq::RequestBuilder<Body>,
-    ) -> anyhow::Result<ureq::RequestBuilder<Body>> {
-        let token = SessionFile::locate()?.read_token(self.daemon.url())?;
-        Ok(match token {
-            Some(token) => request.header(AUTHORIZATION, format!("Bearer {token}")),
-            None => request,
-        })
+    fn build_agent() -> ureq::Agent {
+        ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into()
+    }
+
+    fn build_url(&self, path: &str) -> String {
+        format!("{}{path}", self.daemon_url.trim_end_matches('/'))
     }
 }
 
-#[must_use]
-pub fn build_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build()
-        .into()
-}
-
-pub fn read_json_response<T: DeserializeOwned>(
+fn read_json_response<T: DeserializeOwned>(
     mut response: ureq::http::Response<ureq::Body>,
 ) -> anyhow::Result<T> {
     let status = response.status();
@@ -141,9 +107,16 @@ pub fn read_json_response<T: DeserializeOwned>(
         |rejection| rejection.error,
     );
     if status == StatusCode::UNAUTHORIZED {
-        bail!("{message}; `otelo login` starts a session");
+        bail!("{message}; set {PASSWORD_VARIABLE} to the password that `otelo init` printed");
     }
     bail!("{message}")
+}
+
+fn add_password<Body>(request: ureq::RequestBuilder<Body>) -> ureq::RequestBuilder<Body> {
+    match std::env::var(PASSWORD_VARIABLE) {
+        Ok(password) => request.header(AUTHORIZATION, format!("Bearer {}", password.trim())),
+        Err(_) => request,
+    }
 }
 
 #[must_use]

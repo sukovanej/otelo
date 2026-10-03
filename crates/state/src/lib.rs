@@ -1,28 +1,19 @@
 mod password;
-mod session;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, bail, ensure};
-use otelo_indexed_storage::{IndexedAttribute, IndexedSignal, now_unix_nanos};
+use otelo_indexed_storage::{IndexedAttribute, IndexedSignal};
 use otelo_query::Signal;
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::password::{generate_password, hash_password, is_password_of_hash};
-
-pub use session::SessionToken;
+use crate::password::{generate_password, hash_password};
 
 const MIGRATIONS: [&str; 2] = [
     include_str!("migrations/1_telemetry_indexes.sql"),
-    include_str!("migrations/2_logins.sql"),
+    include_str!("migrations/2_passwords.sql"),
 ];
-
-const SESSION_IDLE_LIMIT_NS: i64 = 30 * 24 * 3600 * 1_000_000_000;
-
-// The API renews a session on each request, and requests come in parallel.
-const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct StateFile {
     path: PathBuf,
@@ -61,10 +52,7 @@ impl StateFile {
     }
 
     fn open_connection(&self) -> anyhow::Result<Connection> {
-        let connection = Connection::open(&self.path)
-            .with_context(|| format!("open {}", self.path.display()))?;
-        connection.busy_timeout(BUSY_TIMEOUT)?;
-        Ok(connection)
+        Connection::open(&self.path).with_context(|| format!("open {}", self.path.display()))
     }
 
     pub fn indexed_attributes(&self) -> anyhow::Result<BTreeSet<IndexedAttribute>> {
@@ -107,16 +95,11 @@ impl StateFile {
 
     pub fn replace_password(&self) -> anyhow::Result<String> {
         let password = generate_password()?;
-        let hash = hash_password(&password)?;
-        let mut connection = self.open_connection()?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
+        self.open_connection()?.execute(
             "INSERT INTO passwords (id, hash) VALUES (1, ?1)
              ON CONFLICT (id) DO UPDATE SET hash = excluded.hash",
-            [&hash],
+            [hash_password(&password)],
         )?;
-        transaction.execute("DELETE FROM sessions", [])?;
-        transaction.commit()?;
         Ok(password)
     }
 
@@ -124,44 +107,14 @@ impl StateFile {
         let Some(hash) = self.read_password_hash()? else {
             bail!("otelo has no password; `otelo init` makes one");
         };
-        is_password_of_hash(candidate, &hash)
+        Ok(hash == hash_password(candidate))
     }
 
-    fn read_password_hash(&self) -> anyhow::Result<Option<String>> {
+    fn read_password_hash(&self) -> anyhow::Result<Option<[u8; 32]>> {
         Ok(self
             .open_connection()?
             .query_row("SELECT hash FROM passwords", [], |row| row.get(0))
             .optional()?)
-    }
-
-    pub fn start_session(&self) -> anyhow::Result<SessionToken> {
-        let token = SessionToken::generate()?;
-        let now = now_unix_nanos();
-        let connection = self.open_connection()?;
-        connection.execute(
-            "DELETE FROM sessions WHERE last_used_at <= ?1",
-            [now - SESSION_IDLE_LIMIT_NS],
-        )?;
-        connection.execute(
-            "INSERT INTO sessions (token_hash, created_at, last_used_at) VALUES (?1, ?2, ?2)",
-            (token.hash(), now),
-        )?;
-        Ok(token)
-    }
-
-    pub fn renew_session(&self, token: &SessionToken) -> anyhow::Result<bool> {
-        let now = now_unix_nanos();
-        let renewed = self.open_connection()?.execute(
-            "UPDATE sessions SET last_used_at = ?2 WHERE token_hash = ?1 AND last_used_at > ?3",
-            (token.hash(), now, now - SESSION_IDLE_LIMIT_NS),
-        )?;
-        Ok(renewed > 0)
-    }
-
-    pub fn end_session(&self, token: &SessionToken) -> anyhow::Result<()> {
-        self.open_connection()?
-            .execute("DELETE FROM sessions WHERE token_hash = ?1", [token.hash()])?;
-        Ok(())
     }
 }
 

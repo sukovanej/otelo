@@ -138,8 +138,7 @@ fn traces_itself() {
     // The rollups and the retention of the writer trace none of their statements.
     let spans_outside_a_request: i64 = connection
         .query_row(
-            "SELECT count(*) FROM spans
-             WHERE parent_span_id IS NULL AND name NOT IN ('GET /api/logs', 'POST /api/login')",
+            "SELECT count(*) FROM spans WHERE parent_span_id IS NULL AND name != 'GET /api/logs'",
             [],
             |row| row.get(0),
         )

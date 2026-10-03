@@ -28,11 +28,10 @@ use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::LoginGate;
 use crate::error::{ApiError, ApiResult};
 use crate::time::check_limit;
 
-pub use auth::{LoginBody, SESSION_COOKIE_NAME, require_session};
+pub use auth::{LoginBody, require_password};
 pub use catalog::{
     CompletionKind, Completions, FieldBody, FieldOriginBody, FieldValueBody, SignalName,
     SuggestionBody,
@@ -54,8 +53,8 @@ const HOUR_NS: i64 = 3_600_000_000_000;
     info(
         title = "otelo",
         description = "Query the logs, traces, and metrics that otelo keeps. Every path but \
-            `POST /api/login` needs the session that the login starts, as the cookie \
-            `otelo_session` or as `Authorization: Bearer <session>`."
+            the login and the logout needs the password of `otelo init`, as the cookie \
+            `otelo_password` or as `Authorization: Bearer <password>`."
     ),
     components(schemas(SignalName))
 )]
@@ -65,7 +64,6 @@ struct OpenApiInfo;
 pub struct Api {
     storage: Arc<dyn Storage>,
     state: Arc<StateFile>,
-    login_gate: Arc<LoginGate>,
 }
 
 fn build_api_routes() -> OpenApiRouter<Api> {
@@ -171,11 +169,7 @@ pub enum DefaultSince {
 impl Api {
     #[must_use]
     pub fn new(storage: Arc<dyn Storage>, state: Arc<StateFile>) -> Self {
-        Self {
-            storage,
-            state,
-            login_gate: Arc::new(LoginGate::new()),
-        }
+        Self { storage, state }
     }
 
     async fn run_blocking_query<T: Send + 'static>(
