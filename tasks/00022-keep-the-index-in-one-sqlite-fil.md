@@ -193,3 +193,9 @@ Deleted pages go to the freelist, and new rows reuse them, so the file keeps its
 - Retention of the metrics deletes a series with no rows left, and keeps a series that still has points.
 - Lowering a retention shrinks the file after the incremental vacuum.
 - A query over a range reads raw points, minutes, or hours by its length.
+
+## Comments
+
+### 2026-10-03T15:39:06Z by Milan Suk via claude-code
+
+> Departures: MetricRetention is gone, and Storage::oldest_retained_at takes a Signal. span_name_counts keeps 200 names a day. A resource and a series count once a day, which the writer tracks in memory, so a restart can count one twice that day.
