@@ -199,3 +199,7 @@ Deleted pages go to the freelist, and new rows reuse them, so the file keeps its
 ### 2026-10-03T15:39:06Z by Milan Suk via claude-code
 
 > Departures: MetricRetention is gone, and Storage::oldest_retained_at takes a Signal. span_name_counts keeps 200 names a day. A resource and a series count once a day, which the writer tracks in memory, so a restart can count one twice that day.
+
+### 2026-10-03T15:54:14Z by Milan Suk via claude-code
+
+> Two reads changed scope: completion of service names, metric names, and units counts the rows of the whole file, not the range, and a trace counts its spans in the whole file.
