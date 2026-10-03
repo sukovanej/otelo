@@ -52,3 +52,9 @@ flowchart LR
 - Frames older than the retention are skipped.
 - `otelo reindex` refuses to run while the daemon holds the lock.
 - The hash of `schema.sql` matches the one next to `STORAGE_VERSION`.
+
+## Comments
+
+### 2026-10-03T17:33:30Z by Milan Suk via claude-code
+
+> otelo reindex deletes telemetry.sqlite only when its storage version differs or it has none; a file of the current version is continued from its positions, since the task asks both for a delete and for a halfway reindex to go on.
