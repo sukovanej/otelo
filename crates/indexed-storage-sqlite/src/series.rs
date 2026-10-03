@@ -5,7 +5,7 @@ use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::{OptionalExtension, ToSql, Transaction, params};
 use twox_hash::XxHash3_64;
 
-// One label that holds a user ID would otherwise make a series per user.
+// One attribute that holds a user ID would otherwise make a series per user.
 pub const MAX_SERIES_PER_METRIC: i64 = 1000;
 
 #[derive(Clone, Copy)]
@@ -69,7 +69,7 @@ pub struct SeriesIdentity<'a> {
     pub name: &'a str,
     pub kind: MetricKind,
     pub unit: &'a str,
-    pub labels_json: &'a str,
+    pub attributes_json: &'a str,
 }
 
 // The JSON has sorted keys, so equal attributes hash equal.
@@ -113,7 +113,7 @@ pub fn find_or_insert_series_id(
         series_identity.kind.name(),
         temporality_name.unwrap_or_default(),
         series_identity.unit,
-        series_identity.labels_json,
+        series_identity.attributes_json,
     ]);
     if let Some(&series_id) = series_cache.series_ids_by_hash.get(&hash) {
         return Ok(StoredSeries::Found(series_id));
@@ -145,7 +145,7 @@ pub fn find_or_insert_series_id(
     }
     transaction
         .prepare_cached(
-            "INSERT INTO series (hash, resource_id, name, kind, temporality, unit, labels)
+            "INSERT INTO series (hash, resource_id, name, kind, temporality, unit, attributes)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?
         .execute(params![
@@ -155,7 +155,7 @@ pub fn find_or_insert_series_id(
             series_identity.kind.name(),
             temporality_name,
             series_identity.unit,
-            series_identity.labels_json
+            series_identity.attributes_json
         ])?;
     if let Some(series_count) = series_cache
         .series_counts_by_metric

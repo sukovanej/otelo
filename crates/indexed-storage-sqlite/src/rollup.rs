@@ -76,7 +76,7 @@ struct SeriesKey {
     name: String,
     kind: MetricKind,
     unit: String,
-    labels_json: String,
+    attributes_json: String,
 }
 
 pub struct Rollups {
@@ -204,7 +204,7 @@ impl Rollups {
                     name: &series_key.name,
                     kind: convert_to_rollup_kind(series_key.kind),
                     unit: &series_key.unit,
-                    labels_json: &series_key.labels_json,
+                    attributes_json: &series_key.attributes_json,
                 },
             )?;
             let (StoredSeries::Found(series_id) | StoredSeries::Inserted(series_id)) =
@@ -243,7 +243,7 @@ impl Rollups {
             |day_schema| {
                 format!(
                     "SELECT resource.service, resource.attributes, series.name, series.kind,
-                            series.temporality, series.unit, series.labels, point.recorded_at,
+                            series.temporality, series.unit, series.attributes, point.recorded_at,
                             point.value, point.histogram
                      FROM {day_schema}.points point
                      JOIN {day_schema}.series ON series.id = point.series_id
@@ -263,7 +263,7 @@ impl Rollups {
                     name: row.get(2)?,
                     kind,
                     unit: row.get(5)?,
-                    labels_json: row.get(6)?,
+                    attributes_json: row.get(6)?,
                 };
                 let point = read_series_point(row, 7)?;
                 let series_steps = steps_by_series

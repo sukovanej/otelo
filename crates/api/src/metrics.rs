@@ -13,7 +13,7 @@ use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
 
 /// The series that have points in the range and that the query keeps, by
-/// name. The query reads `name`, `service`, `kind`, `unit`, the labels, and
+/// name. The query reads `name`, `service`, `kind`, `unit`, the attributes, and
 /// the resource. A range of metrics can go back 90 days, further than the
 /// logs and the spans.
 #[utoipa::path(
@@ -55,7 +55,7 @@ pub struct MetricParams {
     until: Option<String>,
     /// The most series to return.
     limit: Option<usize>,
-    /// The series to keep, by their labels and resource, such as
+    /// The series to keep, by their attributes and resource, such as
     /// `state = used`. Every series of the metric when missing.
     #[serde(rename = "q")]
     #[param(rename = "q")]
@@ -68,7 +68,7 @@ pub struct MetricParams {
     /// for one of 14 days at most, and the summaries by the hour for a longer
     /// one, or the next of them that is still kept where the range starts.
     resolution: Option<Resolution>,
-    /// The names to group the series by, separated by commas: labels,
+    /// The names to group the series by, separated by commas: attributes,
     /// `service`, or `resource.<key>`, such as `http.route,resource.host.name`.
     /// The series with the same values of them combine into one group. Each
     /// series is its own group when missing.

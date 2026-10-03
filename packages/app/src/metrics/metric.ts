@@ -95,7 +95,7 @@ export function listGroupingSections(
   seriesOfMetric: ReadonlyArray<SeriesInfo>,
   checked: ReadonlyArray<string>,
 ): GroupingSection[] {
-  const labelOptions = listKeys(seriesOfMetric.map((series) => series.labels))
+  const attributeOptions = listKeys(seriesOfMetric.map((series) => series.attributes))
     .filter((key) => !writeAttributeField(key).startsWith("`"))
     .map((key) => ({ value: writeAttributeField(key), label: key }));
   const resourceOptions = listKeys(seriesOfMetric.map((series) => series.resource)).flatMap(
@@ -111,16 +111,16 @@ export function listGroupingSections(
   );
   const knownValues = new Set([
     "service",
-    ...[...labelOptions, ...resourceOptions].map((option) => option.value),
+    ...[...attributeOptions, ...resourceOptions].map((option) => option.value),
   ]);
   const unknownChecked = checked
     .filter((value) => !knownValues.has(value))
     .map((value) => ({ value, label: value }));
   return [
     {
-      title: "Labels",
+      title: "Attributes",
       options: [
-        ...labelOptions,
+        ...attributeOptions,
         ...unknownChecked.filter((unknown) => !unknown.value.startsWith("resource.")),
       ],
     },
@@ -235,11 +235,13 @@ function labelSeriesGroups(
 
 function labelSeriesKeys(keys: ReadonlyArray<SeriesGroupKey>): string[] {
   const servicesDiffer = new Set(keys.map((key) => key.service)).size > 1;
-  const labelKeysThatDiffer = listKeysThatDiffer(keys.map((key) => key.labels));
+  const attributeKeysThatDiffer = listKeysThatDiffer(keys.map((key) => key.attributes));
   const labels = keys.map((key) =>
     [
       ...(servicesDiffer ? [key.service] : []),
-      ...labelKeysThatDiffer.map((labelKey) => formatAttributeValue(key.labels[labelKey])),
+      ...attributeKeysThatDiffer.map((attributeKey) =>
+        formatAttributeValue(key.attributes[attributeKey]),
+      ),
     ].join(" · "),
   );
   const resourceKeysThatDiffer =

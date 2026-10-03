@@ -67,7 +67,7 @@ fn memory_metric(points: &[(i64, f64)]) -> Metric {
     Metric {
         name: "process.memory.usage".into(),
         unit: "By".into(),
-        labels: attributes_from_json(json!({"state": "used"})),
+        attributes: attributes_from_json(json!({"state": "used"})),
         points: Points::UpDown(number_points(points)),
     }
 }
@@ -321,7 +321,7 @@ fn stores_the_kind_and_the_temporality_of_each_series() {
     let metric = |name: &str, points: Points| Metric {
         name: name.into(),
         unit: "1".into(),
-        labels: Attributes::new(),
+        attributes: Attributes::new(),
         points,
     };
     let one_point = || number_points(&[(today_start_at, 1.0)]);
@@ -414,7 +414,7 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     let cart_adds_of_user = |user: i64, recorded_at: i64| Metric {
         name: "cart.adds".into(),
         unit: "{item}".into(),
-        labels: attributes_from_json(json!({"user.id": user})),
+        attributes: attributes_from_json(json!({"user.id": user})),
         points: Points::Gauge(number_points(&[(recorded_at, 1.0)])),
     };
     write_batches(

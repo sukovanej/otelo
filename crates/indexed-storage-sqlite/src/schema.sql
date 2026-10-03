@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS spans_started_at ON spans (started_at);
 
 CREATE TABLE IF NOT EXISTS series (
   id INTEGER PRIMARY KEY,
-  -- xxh3 of the resource, the name, the kind, the temporality, the unit, and the labels.
+  -- xxh3 of the resource, the name, the kind, the temporality, the unit, and the attributes.
   hash INTEGER NOT NULL UNIQUE,
   resource_id INTEGER NOT NULL REFERENCES resources (id),
   name TEXT NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS series (
   temporality TEXT,
   unit TEXT NOT NULL,
   -- A JSON object.
-  labels TEXT NOT NULL
+  attributes TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS series_name ON series (name);
 
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS points (
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS attribute_keys (
-  -- logs, spans, metrics for the labels of the series, resource, or span_names.
+  -- logs, spans, metrics for the attributes of the series, resource, or span_names.
   key_group TEXT NOT NULL,
   key TEXT NOT NULL,
   -- The JSON type of the values: null, bool, int, float, string, array, or object, or

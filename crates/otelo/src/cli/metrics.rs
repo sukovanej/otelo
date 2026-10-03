@@ -12,7 +12,7 @@ use super::{RangeArgs, join_query_words};
 
 #[derive(clap::Args)]
 pub struct MetricsArgs {
-    /// The series to keep, by name, service, kind, unit, labels, and
+    /// The series to keep, by name, service, kind, unit, attributes, and
     /// resource, such as 'name ~ http service = api'. Quote it for the shell
     query: Vec<String>,
 
@@ -29,14 +29,14 @@ pub fn print_metrics(args: &MetricsArgs) -> anyhow::Result<()> {
     let answer: MetricList = args.client.get("/api/metrics", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {
-            let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "LABELS"]);
+            let mut table = Table::new(&["NAME", "KIND", "UNIT", "SERVICE", "ATTRIBUTES"]);
             for series in &answer.series {
                 table.add_row(vec![
                     series.name.clone(),
                     series.kind.name().into(),
                     series.unit.clone(),
                     series.service.clone(),
-                    table::format_labels(&series.labels),
+                    table::format_attributes(&series.attributes),
                 ]);
             }
             table.print()?;
@@ -55,7 +55,7 @@ pub struct MetricArgs {
     /// The name of the metric
     name: String,
 
-    /// The series of the metric to keep, by labels and resource, such as
+    /// The series of the metric to keep, by attributes and resource, such as
     /// 'state = used'. Quote it for the shell
     query: Vec<String>,
 
@@ -71,7 +71,7 @@ pub struct MetricArgs {
     resolution: Option<Resolution>,
 
     /// Combine the series with the same values of these names into one
-    /// group: labels, service, or resource.<key>. Repeat it, or separate the
+    /// group: attributes, service, or resource.<key>. Repeat it, or separate the
     /// names with commas
     #[arg(long, value_delimiter = ',')]
     by: Vec<String>,
@@ -142,13 +142,15 @@ fn describe_group(group: &SeriesGroup) -> String {
     let kind_and_unit = format!("{} {}", group.kind.name(), group.unit);
     match &group.key {
         GroupKey::Series {
-            service, labels, ..
+            service,
+            attributes,
+            ..
         } => {
-            let labels = table::format_labels(labels);
-            if labels.is_empty() {
+            let attributes = table::format_attributes(attributes);
+            if attributes.is_empty() {
                 format!("{service} {kind_and_unit}")
             } else {
-                format!("{service} {kind_and_unit} {labels}")
+                format!("{service} {kind_and_unit} {attributes}")
             }
         }
         GroupKey::Values {
@@ -159,7 +161,7 @@ fn describe_group(group: &SeriesGroup) -> String {
             let values = if values.is_empty() {
                 "-".to_owned()
             } else {
-                table::format_labels(values)
+                table::format_attributes(values)
             };
             format!("{kind_and_unit} {values} ({series_count} series)")
         }

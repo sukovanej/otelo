@@ -7,7 +7,7 @@ use crate::{Attributes, Histogram};
 pub struct Metric {
     pub name: String,
     pub unit: String,
-    pub labels: Attributes,
+    pub attributes: Attributes,
     pub points: Points,
 }
 

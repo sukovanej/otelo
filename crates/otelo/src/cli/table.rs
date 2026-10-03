@@ -129,8 +129,8 @@ fn round_to_three_decimals(value: f64) -> f64 {
 }
 
 #[must_use]
-pub fn format_labels(labels: &Attributes) -> String {
-    labels
+pub fn format_attributes(attributes: &Attributes) -> String {
+    attributes
         .iter()
         .map(|(name, value)| match value {
             AttributeValue::String(text) => format!("{name}={text}"),

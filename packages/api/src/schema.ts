@@ -129,7 +129,7 @@ export interface paths {
         };
         /**
          * The series that have points in the range and that the query keeps, by
-         *     name. The query reads `name`, `service`, `kind`, `unit`, the labels, and
+         *     name. The query reads `name`, `service`, `kind`, `unit`, the attributes, and
          *     the resource. A range of metrics can go back 90 days, further than the
          *     logs and the spans.
          */
@@ -348,7 +348,7 @@ export interface components {
         /** @description The attribute keys of a signal, over the attached days. */
         AttributeKeys: {
             /**
-             * @description The attributes of the records: of the logs, the spans, or the labels
+             * @description The attributes of the records: of the logs, the spans, or the attributes
              *     of the series.
              */
             record: components["schemas"]["Attribute"][];
@@ -572,7 +572,7 @@ export interface components {
          *     the series lack is missing. `other` is the groups past `top`.
          */
         GroupKey: {
-            labels: components["schemas"]["Attributes"];
+            attributes: components["schemas"]["Attributes"];
             /** @description The attributes of the resource that sends the series. */
             resource: components["schemas"]["Attributes"];
             service: string;
@@ -849,7 +849,7 @@ export interface components {
             unit: string;
         };
         SeriesInfo: components["schemas"]["MetricKind"] & {
-            labels: components["schemas"]["Attributes"];
+            attributes: components["schemas"]["Attributes"];
             name: string;
             /** @description The attributes of the resource that sends the series. */
             resource: components["schemas"]["Attributes"];
@@ -1394,7 +1394,7 @@ export interface operations {
                 /** @description The most series to return. */
                 limit?: number;
                 /**
-                 * @description The series to keep, by their labels and resource, such as
+                 * @description The series to keep, by their attributes and resource, such as
                  *     `state = used`. Every series of the metric when missing.
                  */
                 q?: string;
@@ -1411,7 +1411,7 @@ export interface operations {
                  */
                 resolution?: components["schemas"]["Resolution"];
                 /**
-                 * @description The names to group the series by, separated by commas: labels,
+                 * @description The names to group the series by, separated by commas: attributes,
                  *     `service`, or `resource.<key>`, such as `http.route,resource.host.name`.
                  *     The series with the same values of them combine into one group. Each
                  *     series is its own group when missing.

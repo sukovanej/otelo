@@ -120,17 +120,9 @@ impl Compiler<'_> {
     }
 
     fn json_extract_args(&self, field: &Field) -> Result<String> {
-        let (alias, column, key) = match field {
-            Field::Attribute(key) => (
-                self.aliases.record,
-                if self.signal == Signal::Metrics {
-                    "labels"
-                } else {
-                    "attributes"
-                },
-                key,
-            ),
-            Field::Resource(key) => (self.aliases.resource, "attributes", key),
+        let (alias, key) = match field {
+            Field::Attribute(key) => (self.aliases.record, key),
+            Field::Resource(key) => (self.aliases.resource, key),
             Field::Builtin(_) => unreachable!("a built-in field is a column"),
         };
         if key.contains('"') {
@@ -139,7 +131,7 @@ impl Compiler<'_> {
             ));
         }
         // The expression of the attribute's index, so SQLite uses the index when there is one.
-        Ok(format!("{alias}.{column}, {}", attribute_json_path(key)))
+        Ok(format!("{alias}.attributes, {}", attribute_json_path(key)))
     }
 
     fn compile_comparison(

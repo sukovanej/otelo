@@ -5,7 +5,7 @@ use utoipa::ToSchema;
 /// The attribute keys of a signal, over the attached days.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct AttributeKeys {
-    /// The attributes of the records: of the logs, the spans, or the labels
+    /// The attributes of the records: of the logs, the spans, or the attributes
     /// of the series.
     pub record: Vec<Attribute>,
     /// The attributes of the resources that sent them.

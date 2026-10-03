@@ -52,7 +52,7 @@ fn write_telemetry(data: &Path) {
     let build_queue_depth = |queue: &str, depth: f64| Metric {
         name: "queue.depth".into(),
         unit: "{job}".into(),
-        labels: parse_attributes(json!({"queue": queue})),
+        attributes: parse_attributes(json!({"queue": queue})),
         points: Points::UpDown(vec![NumberPoint {
             recorded_at: written_at,
             value: depth,

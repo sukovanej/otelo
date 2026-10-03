@@ -60,7 +60,7 @@ fn metric(name: &str, points: Points) -> Metric {
     Metric {
         name: name.into(),
         unit: "1".into(),
-        labels: Attributes::new(),
+        attributes: Attributes::new(),
         points,
     }
 }
@@ -274,7 +274,7 @@ fn a_minute_sums_up_each_kind_as_the_raw_points_do() {
 fn a_group_of_minutes_combines_as_the_group_of_raw_points_does() {
     let directory = tempfile::tempdir().unwrap();
     let queue_metric = |name: &str, queue: &str, points: Points| Metric {
-        labels: serde_json::from_value(serde_json::json!({"queue": queue})).unwrap(),
+        attributes: serde_json::from_value(serde_json::json!({"queue": queue})).unwrap(),
         ..metric(name, points)
     };
     write_metrics(
