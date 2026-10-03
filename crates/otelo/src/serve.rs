@@ -26,7 +26,7 @@ pub const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
 #[cfg(not(target_os = "macos"))]
 pub const DEFAULT_DATA_DIR: &str = "/var/lib/otelo";
 
-const JOURNAL_DIRECTORY_NAME: &str = "journal";
+pub const JOURNAL_DIRECTORY_NAME: &str = "journal";
 
 const HOST_METRICS_INTERVAL_NS: i64 = 15 * 1_000_000_000;
 
