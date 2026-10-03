@@ -122,7 +122,7 @@ erDiagram
 
 ### Names
 
-None of these names come from OpenTelemetry today except the ones marked OTel. The new names say what a table holds without its comments, and use the OTel name where OTel has one.
+Most names of today are otelo's own, `cursors` among them. A new name says what a table or a column holds without its comment, and takes the OTel name where OTel has one, marked OTel below.
 
 | Today | After | Why |
 |---|---|---|
