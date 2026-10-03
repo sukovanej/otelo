@@ -3,6 +3,8 @@ status: todo
 created: 2026-10-03T22:33:34Z
 tags:
 - bug
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/46
 ---
 # Keep otelo's RSS from growing with each UI query
 
