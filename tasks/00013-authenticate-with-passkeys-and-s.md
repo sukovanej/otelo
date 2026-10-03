@@ -3,6 +3,7 @@ status: backlog
 created: 2026-09-27T19:13:31Z
 dependencies:
 - ./00002-run-the-daemon-with-siner-serve.md
+- ./00025-log-in-with-a-static-password.md
 tags:
 - draft
 - feature
