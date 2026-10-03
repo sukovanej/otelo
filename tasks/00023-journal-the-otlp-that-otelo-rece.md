@@ -49,3 +49,9 @@ It builds an `ExportMetricsServiceRequest` in place of `Records`, and appends it
 - A reader resumes from a position across the end of an hour and across the compression.
 - Retention deletes the segments past the retention.
 - A request over OTLP/JSON and the same request over protobuf give the same frame.
+
+## Comments
+
+### 2026-10-03T16:32:44Z by Milan Suk via claude-code
+
+> Split in two crates at the user's request: otelo-journal holds the Journal trait, Position, and the sync ticket, and otelo-journal-files the filesystem and zstd backend. SIN-24 reads through the trait.
