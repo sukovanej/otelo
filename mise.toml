@@ -111,8 +111,10 @@ grep -q "^## \[$version\]" CHANGELOG.md \
 
 perl -pi -e "s/^version = \".*\"/version = \"$version\"/" Cargo.toml
 cargo update --workspace --quiet
+# The spec of the API carries the version, and a test compares it with packages/api/openapi.json.
+mise run api:generate
 
-git add Cargo.toml Cargo.lock CHANGELOG.md
+git add Cargo.toml Cargo.lock CHANGELOG.md packages/api
 git diff --cached --quiet || git commit --quiet -m "Release v$version"
 
 echo "Next: merge this commit into main, then run:"

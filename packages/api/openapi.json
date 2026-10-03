@@ -4,7 +4,8 @@
     "title": "otelo",
     "description": "Query the logs, traces, and metrics that otelo keeps. Every path but the login and the logout needs the password of `otelo init`, as the cookie `otelo_password` or as `Authorization: Bearer <password>`.",
     "license": {
-      "name": ""
+      "name": "MIT",
+      "identifier": "MIT"
     },
     "version": "0.0.1"
   },
