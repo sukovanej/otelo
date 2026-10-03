@@ -11,7 +11,7 @@ use opentelemetry_proto::tonic::collector::metrics::v1::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use otelo_storage::BatchSender;
+use otelo_indexed_storage::BatchSender;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 

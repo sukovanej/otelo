@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
+use otelo_indexed_storage::query::{LogGroups, Logs};
 use otelo_query::Signal;
-use otelo_storage::query::{LogGroups, Logs};
 
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_query};

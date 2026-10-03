@@ -13,7 +13,7 @@ use opentelemetry_proto::tonic::metrics::v1::{
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
-use otelo_storage::{
+use otelo_indexed_storage::{
     AttributeValue, Attributes, Batch, Buckets, ExplicitBuckets, ExponentialBuckets, Histogram,
     HistogramPoint, IndexedCounts, Log, LogSource, Metric, NumberPoint, Points, Records, Resource,
     Severity, Span, SpanEvent, SpanId, SpanKind, SpanStatus, Temporality, TraceContext, TraceId,

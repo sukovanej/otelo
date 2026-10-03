@@ -3,7 +3,7 @@ use std::io::{self, Write};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use otelo_storage::{AttributeValue, Attributes};
+use otelo_indexed_storage::{AttributeValue, Attributes};
 
 pub struct Table {
     header: Vec<String>,

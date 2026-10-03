@@ -11,14 +11,14 @@ axum = { workspace = true }
 jiff = { workspace = true }
 serde = { workspace = true }
 otelo-query = { workspace = true }
-otelo-storage = { workspace = true }
+otelo-indexed-storage = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { workspace = true }
 
 [dev-dependencies]
-otelo-storage-sqlite = { workspace = true }
+otelo-indexed-storage-sqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

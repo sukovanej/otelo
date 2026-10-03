@@ -1,8 +1,8 @@
 use std::io;
 
 use jiff::Timestamp;
-use otelo_storage::Attributes;
-use otelo_storage::query::{
+use otelo_indexed_storage::Attributes;
+use otelo_indexed_storage::query::{
     CallOperation, Calls, Operation, RequestBucket, Requests, Service, ServiceBucket, ServiceStats,
     Services, Target, TargetKey, TargetType,
 };
@@ -269,7 +269,7 @@ fn print_call_steps(buckets: &[RequestBucket]) -> io::Result<()> {
 }
 
 fn format_request_cells(requests: &Requests) -> [String; 5] {
-    let format_percentile = |pick: fn(&otelo_storage::query::Latency) -> i64| {
+    let format_percentile = |pick: fn(&otelo_indexed_storage::query::Latency) -> i64| {
         requests.latency.as_ref().map_or_else(
             || "-".into(),
             |latency| table::format_duration(pick(latency)),

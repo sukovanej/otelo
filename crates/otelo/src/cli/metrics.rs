@@ -1,8 +1,8 @@
 use std::io;
 use std::num::NonZeroUsize;
 
-use otelo_storage::MetricKind;
-use otelo_storage::query::{
+use otelo_indexed_storage::MetricKind;
+use otelo_indexed_storage::query::{
     Bucket, BucketChange, GroupKey, MetricList, MetricSeries, Resolution, SeriesGroup,
 };
 

@@ -6,11 +6,11 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use common::{StopSignal, send_get_request, start_daemon, stop_daemon};
-use otelo_storage::{
+use otelo_indexed_storage::{
     Attributes, Log, LogSource, Metric, NumberPoint, Points, Records, Resource, Severity, Span,
     SpanId, SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos, open_batch_channel,
 };
-use otelo_storage_sqlite::{Config, Writer};
+use otelo_indexed_storage_sqlite::{Config, Writer};
 use serde_json::{Value, json};
 
 fn parse_attributes(value: Value) -> Attributes {
@@ -349,7 +349,7 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     let day_file_path = dir
         .path()
         .join("telemetry")
-        .join(otelo_storage_sqlite::Day::today().file_name());
+        .join(otelo_indexed_storage_sqlite::Day::today().file_name());
     let count_attribute_indexes = || -> i64 {
         rusqlite::Connection::open(&day_file_path)
             .unwrap()

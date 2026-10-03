@@ -1,10 +1,10 @@
 use std::num::NonZeroUsize;
 
 use axum::extract::{Path, Query, State};
-use otelo_query::Signal;
-use otelo_storage::query::{
+use otelo_indexed_storage::query::{
     Grouping, GroupingField, MetricFilter, MetricList, MetricSeries, Resolution,
 };
+use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
 

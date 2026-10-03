@@ -18,7 +18,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use jiff::Timestamp;
-use otelo_storage::{RangeQueries, Storage, TimeRange};
+use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
 use tracing::Instrument;
 use tracing::field::Empty;
 use utoipa::OpenApi;

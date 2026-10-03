@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::Command;
 
-use otelo_storage::{Attributes, Resource};
+use otelo_indexed_storage::{Attributes, Resource};
 
 // OpenTelemetry names these files and this command as the sources of `host.id`.
 const MACHINE_ID_PATHS: [&str; 2] = ["/etc/machine-id", "/var/lib/dbus/machine-id"];

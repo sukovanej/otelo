@@ -3,8 +3,8 @@
 use std::net::SocketAddr;
 use std::path::Path;
 
-use otelo_storage::{BatchInbox, BatchSender, open_batch_channel};
-use otelo_storage_sqlite::{Config, Day, Writer};
+use otelo_indexed_storage::{BatchInbox, BatchSender, open_batch_channel};
+use otelo_indexed_storage_sqlite::{Config, Day, Writer};
 use rusqlite::Connection;
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
