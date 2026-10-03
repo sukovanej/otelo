@@ -47,6 +47,15 @@ Scopes: `admin`, `deploy:<app>`, `read`. A `read` token queries logs, traces, me
 
 Otelo stores a hash of each token and shows the token once. Each token has a label, a last-used time, and an optional expiry. The UI lists and revokes tokens.
 
+## Migrations of state.sqlite
+
+The users, the passkeys, and the tokens are the first data otelo keeps that no journal can rebuild ([[./00021-rebuild-the-index-from-a-journal.md]]). `state.sqlite` gets migrations before they land:
+
+- An ordered list of SQL steps in the code. `PRAGMA user_version` is the number of steps applied.
+- At open, each step after it runs once, in a transaction with the new `user_version`.
+- The table `telemetry_indexes` of today is step 1.
+- A file with a `user_version` past the last step, from a newer otelo, fails the startup.
+
 ## Open decisions
 
 - Drop GitHub login completely? Proposal: yes.
