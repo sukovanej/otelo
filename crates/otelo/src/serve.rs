@@ -30,6 +30,10 @@ pub const JOURNAL_DIRECTORY_NAME: &str = "journal";
 
 const HOST_METRICS_INTERVAL_NS: i64 = 15 * 1_000_000_000;
 
+// glibc gives each thread that allocates at the same time its own arena, and an arena keeps
+// the peak of the queries it served, so every blocking thread adds that peak to the RSS.
+const MAX_BLOCKING_THREADS: usize = 2;
+
 #[derive(clap::Args)]
 pub struct ServeArgs {
     /// Address of the HTTP server
@@ -87,6 +91,7 @@ pub fn run_daemon(args: ServeArgs) -> anyhow::Result<()> {
     );
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .max_blocking_threads(MAX_BLOCKING_THREADS)
         .build()
         .context("start the async runtime")?
         .block_on(async {
