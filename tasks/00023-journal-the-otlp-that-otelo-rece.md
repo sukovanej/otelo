@@ -7,7 +7,7 @@ tags:
 ---
 # Journal the OTLP that otelo receives
 
-The journal keeps every OTLP export request that otelo accepts, as protobuf, for `journal_retention_days` (30 by default). [[SIN-xx-index]] builds the index from it. In this task the receiver still sends batches to the writer as now, and also appends to the journal.
+The journal keeps every OTLP export request that otelo accepts, as protobuf, for `journal_retention_days` (30 by default). [[./00024-index-from-the-journal-and-rebui.md]] builds the index from it. In this task the receiver still sends batches to the writer as now, and also appends to the journal.
 
 ## Layout
 
