@@ -19,6 +19,7 @@ use otelo_indexed_storage_sqlite::Sqlite;
 use otelo_journal::Journal;
 use otelo_journal_files::JournalFiles;
 use otelo_otlp::Intake;
+use otelo_state::StateFile;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
@@ -126,7 +127,8 @@ async fn serve_until_shutdown(
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(&args.data_dir)
         .with_context(|| format!("make the data directory {}", args.data_dir.display()))?;
-    let storage = Sqlite::open(&args.data_dir)?;
+    let state = Arc::new(StateFile::open(&args.data_dir)?);
+    let storage = Sqlite::open(&args.data_dir, state.indexed_attributes()?)?;
     let (journal, journal_threads) = JournalFiles::open(otelo_journal_files::Config::new(
         args.data_dir.join(JOURNAL_DIRECTORY_NAME),
     ))?;
@@ -137,6 +139,7 @@ async fn serve_until_shutdown(
     let storage: Arc<dyn Storage> = Arc::new(storage);
     let api = Api {
         storage: Arc::clone(&storage),
+        state: Arc::clone(&state),
     };
     let Listeners {
         api: api_listener,
@@ -160,7 +163,14 @@ async fn serve_until_shutdown(
         serve_api,
         otelo_otlp::serve_http(otlp_http, intake.clone(), shutdown.clone()),
         otelo_otlp::serve_grpc(otlp_grpc, intake.clone(), shutdown.clone()),
-        collect_host_metrics(host, storage, journal, intake.clone(), shutdown.clone()),
+        collect_host_metrics(
+            host,
+            storage,
+            state,
+            journal,
+            intake.clone(),
+            shutdown.clone()
+        ),
     )?;
     // The writer ends once the last sender is gone.
     drop(intake);
@@ -179,6 +189,7 @@ async fn serve_until_shutdown(
 async fn collect_host_metrics(
     host: HostIdentity,
     storage: Arc<dyn Storage>,
+    state: Arc<StateFile>,
     journal: Arc<dyn Journal>,
     intake: Intake,
     shutdown: CancellationToken,
@@ -198,9 +209,10 @@ async fn collect_host_metrics(
     let mut recorded_at = now_unix_nanos();
     loop {
         let storage = Arc::clone(&storage);
+        let state = Arc::clone(&state);
         let journal = Arc::clone(&journal);
         let (collector_after_reading, request) = tokio::task::spawn_blocking(move || {
-            let storage_size = read_storage_size(storage.as_ref(), journal.as_ref())
+            let storage_size = read_storage_size(storage.as_ref(), &state, journal.as_ref())
                 .inspect_err(|error| tracing::warn!("read the size of the storage: {error:#}"))
                 .ok();
             let request = collector.collect_request(recorded_at, storage_size);
@@ -226,10 +238,15 @@ async fn collect_host_metrics(
     }
 }
 
-fn read_storage_size(storage: &dyn Storage, journal: &dyn Journal) -> anyhow::Result<StorageSize> {
+fn read_storage_size(
+    storage: &dyn Storage,
+    state: &StateFile,
+    journal: &dyn Journal,
+) -> anyhow::Result<StorageSize> {
     Ok(StorageSize {
         journal_bytes: journal.size_in_bytes()?,
-        index: storage.size()?,
+        telemetry_bytes: storage.size_in_bytes()?,
+        state_bytes: state.size_in_bytes()?,
     })
 }
 

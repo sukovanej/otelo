@@ -33,6 +33,7 @@ otelo-journal = { path = "crates/journal" }
 otelo-journal-files = { path = "crates/journal-files" }
 otelo-otlp = { path = "crates/otlp" }
 otelo-query = { path = "crates/query" }
+otelo-state = { path = "crates/state" }
 otelo-indexed-storage = { path = "crates/indexed-storage" }
 otelo-indexed-storage-sqlite = { path = "crates/indexed-storage-sqlite" }
 tempfile = "3.27.0"

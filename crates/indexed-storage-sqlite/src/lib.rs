@@ -8,7 +8,6 @@ mod retention;
 mod rollup;
 mod series;
 mod sqlite;
-mod state;
 mod telemetry_file;
 mod writer;
 

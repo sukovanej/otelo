@@ -25,7 +25,7 @@ pub use indexes::{IndexedAttribute, IndexedSignal};
 pub use metric::{HistogramPoint, Metric, MetricKind, NumberPoint, Points, Temporality};
 pub use otel::{Severity, SpanId, SpanKind, SpanStatus, TraceContext, TraceId};
 pub use range::TimeRange;
-pub use storage::{IndexSize, RangeQueries, Storage, StorageSize};
+pub use storage::{RangeQueries, Storage, StorageSize};
 pub use summary::{Change, Level, SeriesPoint, SeriesSteps, StepSummary};
 
 #[must_use]

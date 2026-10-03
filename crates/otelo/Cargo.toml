@@ -23,6 +23,7 @@ otelo-journal = { workspace = true }
 otelo-journal-files = { workspace = true }
 otelo-otlp = { workspace = true }
 otelo-query = { workspace = true }
+otelo-state = { workspace = true }
 otelo-indexed-storage = { workspace = true }
 otelo-indexed-storage-sqlite = { workspace = true }
 tokio = { workspace = true }

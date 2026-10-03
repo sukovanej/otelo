@@ -6,8 +6,6 @@ use otelo_indexed_storage::{IndexedAttribute, IndexedSignal};
 use otelo_query::Signal;
 use rusqlite::Connection;
 
-use crate::sqlite::size_of_database_in_bytes;
-
 const STATE_SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS telemetry_indexes (
@@ -34,7 +32,21 @@ impl StateFile {
     }
 
     pub fn size_in_bytes(&self) -> anyhow::Result<u64> {
-        size_of_database_in_bytes(&self.path)
+        // The write-ahead log and its index are part of the database.
+        ["", "-wal", "-shm"]
+            .into_iter()
+            .map(|suffix| {
+                let mut path = self.path.clone().into_os_string();
+                path.push(suffix);
+                match std::fs::metadata(&path) {
+                    Ok(metadata) => Ok(metadata.len()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+                    Err(error) => {
+                        Err(error).with_context(|| format!("read the size of {}", path.display()))
+                    }
+                }
+            })
+            .sum()
     }
 
     fn open_connection(&self) -> anyhow::Result<Connection> {

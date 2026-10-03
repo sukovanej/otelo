@@ -5,7 +5,7 @@ use otelo_host::{
     CgroupMemory, Cpu, CpuTicks, Filesystem, HostIdentity, Interface, LaunchdJob, LoadAverage,
     Memory, Pid, Process, ProcessUsage, Services, Snapshot, SnapshotMapper, Swap, Unit,
 };
-use otelo_indexed_storage::{Batch, IndexSize, Points, StorageSize, Temporality};
+use otelo_indexed_storage::{Batch, Points, StorageSize, Temporality};
 use otelo_otlp::map::map_metrics_request;
 use serde_json::{Value, json};
 
@@ -568,10 +568,8 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
     let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let storage_size = StorageSize {
         journal_bytes: 31_000_000,
-        index: IndexSize {
-            telemetry_bytes: 52_000_000,
-            state_bytes: 8192,
-        },
+        telemetry_bytes: 52_000_000,
+        state_bytes: 8192,
     };
     let rows = collect_point_rows(&map_request_to_batch(
         snapshot_mapper.map_snapshot_to_request(TICK_AT, &idle_machine(), Some(storage_size)),

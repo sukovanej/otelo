@@ -1,11 +1,12 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
 use otelo_indexed_storage::{
     Attributes, Batch, BatchInbox, BatchSender, Buckets, ExplicitBuckets, Histogram,
-    HistogramPoint, IndexSize, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span,
-    SpanEvent, SpanId, SpanKind, SpanStatus, Storage, Temporality, TimeRange, TraceContext,
-    TraceId, open_batch_channel,
+    HistogramPoint, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanEvent,
+    SpanId, SpanKind, SpanStatus, Storage, Temporality, TimeRange, TraceContext, TraceId,
+    open_batch_channel,
 };
 use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, TELEMETRY_FILE_NAME, Writer};
 use rusqlite::Connection;
@@ -247,7 +248,7 @@ fn a_reader_needs_the_telemetry_file() {
     let directory = tempfile::tempdir().unwrap();
     let range = TimeRange::new(0, SECOND).unwrap();
     assert!(Reader::open(&directory.path().join("telemetry"), range).is_err());
-    Sqlite::open(directory.path()).unwrap();
+    Sqlite::open(directory.path(), BTreeSet::new()).unwrap();
     let reader = Reader::open(&directory.path().join("telemetry"), range).unwrap();
     assert_eq!(
         query_integer(reader.connection(), "SELECT count(*) FROM logs"),
@@ -434,31 +435,16 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
 }
 
 #[test]
-fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
+fn the_size_counts_the_write_ahead_log_of_the_telemetry() {
     let directory = tempfile::tempdir().unwrap();
-    let storage = Sqlite::open(directory.path()).unwrap();
-    let file_bytes = |path: &Path| fs::metadata(path).unwrap().len();
-    let state_bytes = file_bytes(&directory.path().join("state.sqlite"));
+    let storage = Sqlite::open(directory.path(), BTreeSet::new()).unwrap();
     let telemetry_path = directory.path().join("telemetry").join(TELEMETRY_FILE_NAME);
-    let telemetry_bytes = file_bytes(&telemetry_path);
-    assert!(state_bytes > 0 && telemetry_bytes > 0);
-    assert_eq!(
-        storage.size().unwrap(),
-        IndexSize {
-            telemetry_bytes,
-            state_bytes,
-        }
-    );
+    let telemetry_bytes = fs::metadata(&telemetry_path).unwrap().len();
+    assert!(telemetry_bytes > 0);
+    assert_eq!(storage.size_in_bytes().unwrap(), telemetry_bytes);
 
     let mut wal_path = telemetry_path.into_os_string();
     wal_path.push("-wal");
     fs::write(wal_path, [0; 512]).unwrap();
-    fs::write(directory.path().join("state.sqlite-wal"), [0; 7]).unwrap();
-    assert_eq!(
-        storage.size().unwrap(),
-        IndexSize {
-            telemetry_bytes: telemetry_bytes + 512,
-            state_bytes: state_bytes + 7,
-        }
-    );
+    assert_eq!(storage.size_in_bytes().unwrap(), telemetry_bytes + 512);
 }

@@ -545,8 +545,8 @@ fn metrics_of_unit(recorded_at: i64, unit: &Unit) -> TickMetrics {
 fn push_storage_size(metrics: &mut TickMetrics, storage_size: StorageSize) {
     for (file_kind, bytes) in [
         ("journal", storage_size.journal_bytes),
-        ("telemetry", storage_size.index.telemetry_bytes),
-        ("state", storage_size.index.state_bytes),
+        ("telemetry", storage_size.telemetry_bytes),
+        ("state", storage_size.state_bytes),
     ] {
         metrics.push_level(
             "otelo.storage.size",
