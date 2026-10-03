@@ -14,8 +14,6 @@ pub struct Daemon {
     pub otlp_http_addr: String,
     pub otlp_grpc_addr: String,
     pub password: String,
-    pub config_dir: tempfile::TempDir,
-    pub session_token: String,
 }
 
 impl Drop for Daemon {
@@ -86,45 +84,14 @@ pub fn start_daemon_with_args(data_dir: &Path, args: &[&str]) -> Daemon {
             .unwrap()
             .to_owned()
     };
-    let api_addr = read_log_field("addr");
-    let config_dir = tempfile::tempdir().unwrap();
-    let login = log_in_with_cli(&api_addr, config_dir.path(), &password);
-    assert!(
-        login.status.success(),
-        "{}",
-        String::from_utf8_lossy(&login.stderr)
-    );
-    let session_token = read_saved_session_token(config_dir.path(), &api_addr).unwrap();
     Daemon {
-        api_addr,
+        api_addr: read_log_field("addr"),
         otlp_http_addr: read_log_field("otlp_http"),
         otlp_grpc_addr: read_log_field("otlp_grpc"),
         child,
         stderr,
         password,
-        config_dir,
-        session_token,
     }
-}
-
-pub fn log_in_with_cli(api_addr: &str, config_dir: &Path, password: &str) -> Output {
-    let mut login = Command::new(env!("CARGO_BIN_EXE_otelo"))
-        .arg("login")
-        .env("OTELO_URL", format!("http://{api_addr}"))
-        .env("XDG_CONFIG_HOME", config_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    writeln!(login.stdin.take().unwrap(), "{password}").unwrap();
-    login.wait_with_output().unwrap()
-}
-
-pub fn read_saved_session_token(config_dir: &Path, api_addr: &str) -> Option<String> {
-    let sessions = std::fs::read(config_dir.join("otelo/sessions.json")).ok()?;
-    let sessions: serde_json::Value = serde_json::from_slice(&sessions).unwrap();
-    Some(sessions[format!("http://{api_addr}")].as_str()?.to_owned())
 }
 
 impl Daemon {
@@ -132,12 +99,12 @@ impl Daemon {
         let mut command = Command::new(env!("CARGO_BIN_EXE_otelo"));
         command
             .env("OTELO_URL", format!("http://{}", self.api_addr))
-            .env("XDG_CONFIG_HOME", self.config_dir.path());
+            .env("OTELO_PASSWORD", &self.password);
         command
     }
 
     pub fn bearer_header(&self) -> String {
-        format!("Bearer {}", self.session_token)
+        format!("Bearer {}", self.password)
     }
 }
 

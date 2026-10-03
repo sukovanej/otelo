@@ -82,8 +82,8 @@ The statements are strings in the Rust sources of the crate that owns the file.
 
 ## Changing the schema of state.sqlite
 
-- `state.sqlite` keeps what no journal can rebuild: the indexed attributes, the password,
-  and the sessions. A change never deletes it.
+- `state.sqlite` keeps what no journal can rebuild: the indexed attributes and the
+  hash of the password. A change never deletes it.
 - Each change is a new step: a file `<number>_<what>.sql` in `crates/state/src/migrations/`,
   added to the end of `MIGRATIONS`. `PRAGMA user_version` counts the steps a file has.
 - A step that has shipped never changes. A later step alters what an earlier one made.

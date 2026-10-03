@@ -92,9 +92,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Trades the password for a session, which the answer sets as the cookie
-         *     `otelo_session`. The daemon checks one password a second, and a wrong
-         *     one answers after that second.
+         * Checks the password, and sets it as the cookie `otelo_password`, which
+         *     the browser then sends with every request.
          */
         post: operations["log_in"];
         delete?: never;
@@ -112,7 +111,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ends the session of the request. */
+        /** Clears the cookie `otelo_password`. */
         post: operations["log_out"];
         delete?: never;
         options?: never;
@@ -1309,7 +1308,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The session is in the cookie `otelo_session` */
+            /** @description The password is in the cookie `otelo_password` */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -1335,7 +1334,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The session has ended */
+            /** @description The cookie is cleared */
             204: {
                 headers: {
                     [name: string]: unknown;

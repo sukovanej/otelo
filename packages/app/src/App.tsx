@@ -17,7 +17,7 @@ const SECTIONS = [
 
 export default function App(props: RouteSectionProps) {
   const queryClient = useQueryClient();
-  const endSession = async () => {
+  const logOutOfDaemon = async () => {
     await logOut();
     queryClient.clear();
     askForLogin();
@@ -43,7 +43,7 @@ export default function App(props: RouteSectionProps) {
             )}
           </For>
         </nav>
-        <Button variant="ghost" size="sm" class="ml-auto" onClick={() => void endSession()}>
+        <Button variant="ghost" size="sm" class="ml-auto" onClick={() => void logOutOfDaemon()}>
           Log out
         </Button>
       </header>

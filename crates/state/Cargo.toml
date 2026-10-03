@@ -7,7 +7,6 @@ publish.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-argon2 = { workspace = true }
 data-encoding = { workspace = true }
 getrandom = { workspace = true }
 rusqlite = { workspace = true }

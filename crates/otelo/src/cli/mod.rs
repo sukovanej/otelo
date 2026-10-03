@@ -1,10 +1,8 @@
 mod catalog;
 pub mod client;
-mod login;
 mod logs;
 mod metrics;
 mod services;
-mod session;
 pub mod table;
 mod traces;
 
@@ -14,7 +12,6 @@ pub use catalog::{
     AttributesArgs, CompleteArgs, IndexArgs, change_and_print_indexes, print_attributes,
     print_completions,
 };
-pub use login::{LoginArgs, LogoutArgs, log_in, log_out};
 pub use logs::{LogsArgs, print_logs};
 pub use metrics::{MetricArgs, MetricsArgs, print_metric_series, print_metrics};
 pub use services::{

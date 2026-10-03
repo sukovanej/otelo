@@ -11,7 +11,7 @@ pub struct InitArgs {
     #[arg(long = "data", value_name = "DATA", default_value = DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
 
-    /// Replace the password, and end every session
+    /// Replace the password
     #[arg(long)]
     new_password: bool,
 }
@@ -22,15 +22,15 @@ pub fn init_data_directory(args: &InitArgs) -> anyhow::Result<()> {
     let state = StateFile::open(&args.data_dir)?;
     if state.has_password()? && !args.new_password {
         bail!(
-            "{} has a password already; `otelo init --new-password` replaces it and ends every session",
+            "{} has a password already; `otelo init --new-password` replaces it",
             args.data_dir.display()
         );
     }
     let password = state.replace_password()?;
     println!("{password}");
     eprintln!(
-        "That is the password of the UI and of `otelo login`. otelo keeps only its hash, so it \
-         prints the password this once."
+        "That is the password of the UI, and of the CLI in OTELO_PASSWORD. otelo keeps only its \
+         hash, so it prints the password this once."
     );
     Ok(())
 }

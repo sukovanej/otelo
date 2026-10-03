@@ -264,7 +264,7 @@ fn build_daemon_router(api: Api) -> Router {
         .route("/health", get(|| async { "ok" }))
         .merge(api::build_router(api.clone()))
         .fallback(ui::serve_ui)
-        .layer(middleware::from_fn_with_state(api, api::require_session))
+        .layer(middleware::from_fn_with_state(api, api::require_password))
 }
 
 fn listen_for_shutdown_signal() -> io::Result<impl Future<Output = ()>> {
