@@ -8,7 +8,8 @@ use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    WhereClause, span_id_from_blob, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
+    WhereClause, row_limit_with_one_more, span_id_from_blob, timestamp_from_nanos,
+    trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
 
@@ -118,23 +119,18 @@ impl Reader {
         &self,
         trace_ids: impl Iterator<Item = TraceId>,
     ) -> anyhow::Result<HashMap<TraceId, TraceStats>> {
-        let mut where_clause = WhereClause::new();
-        let mut param_names = Vec::new();
-        for (index, trace_id) in trace_ids.enumerate() {
-            let name = format!(":t{index}");
-            where_clause.push_param(&name, trace_id.0.to_vec());
-            param_names.push(name);
-        }
-        if param_names.is_empty() {
+        let trace_ids: Vec<String> = trace_ids.map(|trace_id| trace_id.to_string()).collect();
+        if trace_ids.is_empty() {
             return Ok(HashMap::new());
         }
+        let mut where_clause = WhereClause::new();
+        where_clause.push_param(":trace_ids", serde_json::to_string(&trace_ids)?);
         let sql = format!(
             "SELECT trace_id, count(*), max(status_code = {})
              FROM spans
-             WHERE trace_id IN ({})
+             WHERE trace_id IN (SELECT unhex(value) FROM json_each(:trace_ids))
              GROUP BY trace_id",
-            SpanStatus::Error.number(),
-            param_names.join(", ")
+            SpanStatus::Error.number()
         );
         let rows = self.collect_rows(&sql, &where_clause, |row| {
             Ok((
@@ -155,12 +151,12 @@ pub(super) fn read_spans(
     sort: SpanSort,
     limit: usize,
 ) -> anyhow::Result<Spans> {
-    let (where_clause, unindexed) = compile_span_query(reader, query)?;
+    let (mut where_clause, unindexed) = compile_span_query(reader, query)?;
+    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let sql = format!(
-        "{} ORDER BY {} LIMIT {}",
+        "{} ORDER BY {} LIMIT :limit",
         select_spans(&where_clause),
-        pick_order_columns(sort),
-        limit + 1
+        pick_order_columns(sort)
     );
     let mut spans = reader.collect_rows(&sql, &where_clause, trace_span_from_row)?;
     let truncated = truncate_to_limit(&mut spans, limit);
@@ -211,11 +207,11 @@ pub(super) fn read_traces(
          JOIN resources resource ON resource.id = span.resource_id
          WHERE {}
          ORDER BY {}
-         LIMIT {}",
+         LIMIT :limit",
         where_clause.sql(),
-        pick_order_columns(sort),
-        limit + 1
+        pick_order_columns(sort)
     );
+    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let mut roots = reader.collect_rows(&sql, &where_clause, |row| {
         let attributes: String = row.get(6)?;
         let resource: String = row.get(7)?;
@@ -267,10 +263,10 @@ pub(super) fn read_trace(
 ) -> anyhow::Result<Option<Trace>> {
     let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
     where_clause.push_condition_with_param("span.trace_id = :trace_id", ":trace_id", id.0.to_vec());
+    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let sql = format!(
-        "{} ORDER BY span.started_at LIMIT {}",
-        select_spans(&where_clause),
-        limit + 1
+        "{} ORDER BY span.started_at LIMIT :limit",
+        select_spans(&where_clause)
     );
     let mut spans = reader.collect_rows(&sql, &where_clause, trace_span_from_row)?;
     let spans_truncated = truncate_to_limit(&mut spans, limit);

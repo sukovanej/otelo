@@ -13,7 +13,7 @@ use otelo_indexed_storage::{
 use otelo_query::{Query, Signal};
 
 use super::compile::{TableAliases, compile_query};
-use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
+use super::{WhereClause, row_limit_with_one_more, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
 use crate::rollup::{SummaryTable, convert_to_summary_kind, read_summary, summary_columns_of};
 use crate::series::MetricSeriesId;
@@ -179,10 +179,10 @@ pub(super) fn list_metrics(
          JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE {}
          ORDER BY metric_series.name, resource.service, metric_series.attributes
-         LIMIT {}",
-        where_clause.sql(),
-        limit + 1
+         LIMIT :limit",
+        where_clause.sql()
     );
+    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let mut series = reader.collect_rows(&sql, &where_clause, |row| {
         let kind: String = row.get(1)?;
         let aggregation_temporality: Option<String> = row.get(2)?;
