@@ -11,8 +11,10 @@ flowchart LR
   app[App with OTel SDK] -->|OTLP HTTP :4318| recv[OTLP receiver]
   app -->|OTLP gRPC :4317| recv
   machine[The machine and its services] --> host[Host collector]
-  recv --> writer[Writer]
-  host --> writer
+  recv --> intake[Intake]
+  host --> intake
+  intake -->|append, sync, then answer| journal[(journal/)]
+  intake --> writer[Writer]
   writer --> file[(telemetry/telemetry.sqlite)]
   file --> api[Query API]
   api -->|HTTP| cli[otelo CLI]
@@ -27,7 +29,27 @@ flowchart LR
 - otelo is in development, so the files carry no schema version, and nothing reads or fixes a file written by an older schema. After a schema change, delete the telemetry files written before it.
 - A query is one connection to the file. The query API caps a range at the retention of its signal, and a range that reads two signals, such as a service, at the shorter of the two.
 - The writer keeps one connection open. Each connection keeps a page cache of 1 MB, and the daemon caps the heap of SQLite at 16 MB with `sqlite3_hard_heap_limit64`. The OS page cache keeps the hot pages.
-- `service` is the OTel `service.name` resource attribute. The host collector sends no OTLP, so it names its services itself.
+- `service` is the OTel `service.name` resource attribute. The host collector builds its OTLP requests itself, so it names its services itself.
+
+## Journal
+
+The journal keeps every OTLP export request that otelo accepts, as protobuf, for 30 days. `otelo-journal` has the `Journal` trait that the receivers and the indexer of [[../tasks/00024-index-from-the-journal-and-rebui.md]] use, and `otelo-journal-files` keeps it on the local filesystem:
+
+```
+journal/
+  logs/2026-10-03T14.seg          the open hour, appended to
+  logs/2026-10-03T13.seg.zst      a closed hour
+  traces/...
+  metrics/...
+```
+
+- One segment per signal and UTC hour of receipt. A frame received in an hour before the open one goes to the open one, so a clock that goes back never reopens a closed hour.
+- A frame is little-endian: the length `u32` of what follows the checksum, a CRC-32C `u32` of it, `received_at` as Unix nanoseconds `i64`, then the protobuf of the `Export*ServiceRequest`.
+- A position is the hour and the offset in the segment before compression. A reader reads the open segment only up to what is synced.
+- One thread per signal syncs the open segment, at most once every 200 ms. A failed sync stops the appends of that signal until the daemon starts again.
+- When an append starts a new hour, the old segment is synced, and a maintenance thread compresses it with zstd at level 3 into a temporary file, syncs it, renames it to `.seg.zst`, and deletes the `.seg`.
+- At startup, an unfinished frame at the end of a segment, a short one or one with a wrong checksum, is cut off with a warning that names the segment and the bytes cut. A `.seg` of a past hour is compressed, and a `.seg` next to its `.seg.zst` is deleted.
+- The segments whose hour ended more than 30 days ago are deleted at startup and then once an hour.
 
 ## Schema of `telemetry.sqlite`
 
@@ -149,12 +171,13 @@ The `otelo-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 - The key of `metric_points` is the series and the time, so a batch that is sent again overwrites its points.
 - Summaries, a delta sum that is not monotonic, a sum or a histogram without a temporality, and a span without valid IDs are rejected. Span links, severity text, trace state, exemplars, and the start time of a point are not kept.
 - Proto3 JSON leaves out a field at its default, and the decoder of `opentelemetry-proto` takes a point of an exponential histogram only with every field. The receiver fills the missing ones before it decodes.
+- The receiver appends each request to the journal, encoded again as protobuf when it came as JSON or with gzip, and answers once the frame is synced. A request the journal cannot keep gets 503 over HTTP and `UNAVAILABLE` over gRPC, so the client retries it, and it never reaches the writer.
 - A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
 - A metric gets at most 1,000 series in the file, so one attribute that holds a user ID cannot fill the disk. The writer skips the points of a series past that. The receiver has answered by then, so the writer counts them in `otelo.telemetry.rejected_points`, next to `otelo.telemetry.dropped_batches`, and warns in its log.
 
 ## Host collector
 
-The `otelo-host` crate reads the machine once when the daemon starts, and then every 15 seconds, on the wall-clock multiples of 15 seconds. It sends the points straight to the writer. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
+The `otelo-host` crate reads the machine once when the daemon starts, and then every 15 seconds, on the wall-clock multiples of 15 seconds. It builds an `ExportMetricsServiceRequest`, which goes to the journal and the writer as a request the receiver took does. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
 
 OpenTelemetry treats a host as a resource of its own and gives host metrics no service name. The `service` column needs one, so otelo names itself, as an app that reports the metrics of its host does:
 
@@ -174,13 +197,13 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 | `process.cpu.time` | counter | `s` | |
 | `process.memory.usage` | updown | `By` | |
 | `process.cgroup.memory.usage` | updown | `By` | |
-| `otelo.storage.size` | updown | `By` | `otelo.storage.file`: `telemetry`, `state` |
+| `otelo.storage.size` | updown | `By` | `otelo.storage.file`: `journal`, `telemetry`, `state` |
 
 - The kinds are the four of the model in [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]. A counter is cumulative, and a chart shows its rate.
 - The names, units, and attributes are the OpenTelemetry semantic conventions for system and process metrics, which are still in development and can change. Three names are not from there: the load averages have the names the OpenTelemetry Collector gives them, and `process.cgroup.memory.usage` and `otelo.storage.size` are otelo's.
 - `iowait` is the time the CPUs sat idle waiting for the disk, and `steal` the time the hypervisor gave to another tenant. Without the two, a slow droplet at 30% CPU looks healthy.
 - The `process.*` metrics cover a whole service, every process of its unit, and otelo's own process. `process.memory.usage` is the memory the processes hold themselves. `process.cgroup.memory.usage`, on Linux only, adds the page cache the unit filled, which is what `MemoryMax` and the OOM killer count.
-- `otelo.storage.size` is the size of otelo's data. The storage backend reports it through `Storage::size()`, so the collector knows no file names. The SQLite backend adds up its files, and a WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
+- `otelo.storage.size` is the size of otelo's data. The journal reports its size through `Journal::size_in_bytes()` and the storage backend through `Storage::size()`, so the collector knows no file names. The SQLite backend adds up its files, and a WAL file counts with its database. The free space of the disk under them is in `system.filesystem.usage`.
 - A filesystem counts once per device, under its shortest mount point. Filesystems without a disk, such as `tmpfs`, `overlay`, and `squashfs`, are left out. So are the loopback interface and every interface that has moved no bytes.
 - A reading that fails, or a list of services that cannot be read, is a warning in the log. The collector sends what it has and tries again at the next tick.
 
