@@ -3,8 +3,8 @@ use std::path::Path;
 
 use otelo_indexed_storage::{
     Attributes, Batch, BatchInbox, BatchSender, Buckets, ExplicitBuckets, Histogram,
-    HistogramPoint, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanEvent,
-    SpanId, SpanKind, SpanStatus, Storage, StorageSize, Temporality, TimeRange, TraceContext,
+    HistogramPoint, IndexSize, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span,
+    SpanEvent, SpanId, SpanKind, SpanStatus, Storage, Temporality, TimeRange, TraceContext,
     TraceId, open_batch_channel,
 };
 use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, TELEMETRY_FILE_NAME, Writer};
@@ -444,7 +444,7 @@ fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
     assert!(state_bytes > 0 && telemetry_bytes > 0);
     assert_eq!(
         storage.size().unwrap(),
-        StorageSize {
+        IndexSize {
             telemetry_bytes,
             state_bytes,
         }
@@ -456,7 +456,7 @@ fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
     fs::write(directory.path().join("state.sqlite-wal"), [0; 7]).unwrap();
     assert_eq!(
         storage.size().unwrap(),
-        StorageSize {
+        IndexSize {
             telemetry_bytes: telemetry_bytes + 512,
             state_bytes: state_bytes + 7,
         }

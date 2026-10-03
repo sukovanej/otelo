@@ -1,5 +1,5 @@
 use otelo_host::{Collector, HostIdentity};
-use otelo_indexed_storage::{Batch, Points, StorageSize};
+use otelo_indexed_storage::{Batch, IndexSize, Points, StorageSize};
 use otelo_otlp::map::map_metrics_request;
 
 fn newest_value(batch: &Batch, service: &str, name: &str) -> Option<f64> {
@@ -22,8 +22,11 @@ fn reads_the_machine_the_test_runs_on() {
     assert!(host.attributes().iter().any(|(key, _)| *key == "os.type"));
     let mut collector = Collector::new(host).unwrap();
     let storage_size = StorageSize {
-        telemetry_bytes: 1,
-        state_bytes: 2,
+        journal_bytes: 3,
+        index: IndexSize {
+            telemetry_bytes: 1,
+            state_bytes: 2,
+        },
     };
     let mut collect_batch = |recorded_at| {
         map_metrics_request(

@@ -19,6 +19,7 @@ rust-embed = { workspace = true }
 serde_json = { workspace = true }
 otelo-api = { workspace = true }
 otelo-host = { workspace = true }
+otelo-journal = { workspace = true }
 otelo-journal-files = { workspace = true }
 otelo-otlp = { workspace = true }
 otelo-query = { workspace = true }

@@ -1314,6 +1314,7 @@ dependencies = [
  "otelo-host",
  "otelo-indexed-storage",
  "otelo-indexed-storage-sqlite",
+ "otelo-journal",
  "otelo-journal-files",
  "otelo-otlp",
  "otelo-query",
