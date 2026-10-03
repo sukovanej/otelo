@@ -14,8 +14,9 @@ flowchart LR
   recv --> intake[Intake]
   host --> intake
   intake -->|append, sync, then answer| journal[(journal/)]
-  intake --> writer[Writer]
-  writer --> file[(telemetry/telemetry.sqlite)]
+  journal -->|synced ends| indexer[Indexer]
+  journal -->|frames after the position| indexer
+  indexer -->|rows and position, one transaction| file[(telemetry/telemetry.sqlite)]
   file --> api[Query API]
   api -->|HTTP| cli[otelo CLI]
   api -->|HTTP| ui[UI]
@@ -23,12 +24,12 @@ flowchart LR
 
 ## Rules
 
-- One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
+- One indexer thread owns every write to `telemetry.sqlite`, and reads what it writes from the journal. A burst of telemetry makes the indexer lag, and nothing is dropped.
 - SQLite in WAL mode, in one file, `telemetry/telemetry.sqlite`. Each signal has its own retention, 7 days by default, and retention deletes rows. The 1-minute and 1-hour rollups of the metrics are kept as long as the raw points. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
 - No command runs SQL from a user, so the names of the tables and columns stay private to `otelo-indexed-storage-sqlite`.
-- otelo is in development, so the files carry no schema version, and nothing reads or fixes a file written by an older schema. After a schema change, delete the telemetry files written before it.
+- `telemetry.sqlite` carries a storage version, and nothing migrates a file of another one. `otelo reindex` builds it again from the journal, as the Indexer section says.
 - A query is one connection to the file. The query API caps a range at the retention of its signal, and a range that reads two signals, such as a service, at the shorter of the two.
-- The writer keeps one connection open. Each connection keeps a page cache of 1 MB, and the daemon caps the heap of SQLite at 16 MB with `sqlite3_hard_heap_limit64`. The OS page cache keeps the hot pages.
+- The indexer keeps one connection open. Each connection keeps a page cache of 1 MB, and the daemon caps the heap of SQLite at 16 MB with `sqlite3_hard_heap_limit64`. The OS page cache keeps the hot pages.
 - `service` is the OTel `service.name` resource attribute. The host collector builds its OTLP requests itself, so it names its services itself.
 
 ## Journal
@@ -50,6 +51,57 @@ journal/
 - When an append starts a new hour, the old segment is synced, and a maintenance thread compresses it with zstd at level 3 into a temporary file, syncs it, renames it to `.seg.zst`, and deletes the `.seg`.
 - At startup, an unfinished frame at the end of a segment, a short one or one with a wrong checksum, is cut off with a warning that names the segment and the bytes cut. A `.seg` of a past hour is compressed, and a `.seg` next to its `.seg.zst` is deleted.
 - The segments whose hour ended more than 30 days ago are deleted at startup and then once an hour.
+
+## Indexer
+
+The indexer of `otelo-indexed-storage-sqlite` builds `telemetry.sqlite` from the journal. A queue joins the two: each sync of the journal sends the end it synced, and the indexer reads the frames up to there.
+
+```mermaid
+sequenceDiagram
+  participant receiver as Receiver
+  participant journal as Journal
+  participant indexer as Indexer
+  participant file as telemetry.sqlite
+  receiver->>journal: append a frame
+  journal->>journal: sync, at most every 200 ms
+  journal-->>receiver: synced, so the receiver answers
+  journal->>indexer: the synced end, through the queue
+  indexer->>journal: read the frames after the position
+  indexer->>file: rows and position, one transaction
+```
+
+- A message of the queue holds the signal, the synced end, and the `received_at` of the newest frame. It only wakes the indexer, which reads every synced frame, so a full queue drops a message and loses no frame. The queue keeps 1,024.
+- The indexer maps up to 64 frames per transaction with `otelo-otlp/src/map.rs`, and writes their rows and the position after the last one into `indexed_journal_positions` in the same transaction, so a crash neither loses a frame nor indexes it twice.
+- Without a position, or with one before the retention of its signal, the indexer starts at the hour the retention starts. It skips a frame received before the retention, and logs and skips a frame that does not decode.
+- A frame the journal cannot read is logged, and the indexer tries that signal again a minute later.
+- When the daemon stops, the journal stops after its last sync, and the indexer indexes what it synced before it ends.
+- Between transactions the indexer applies the indexed attributes, deletes past the retention, and rolls the metrics up.
+
+### Storage version and `otelo reindex`
+
+- `STORAGE_VERSION` in `version.rs` goes into `PRAGMA user_version` when the file is made. `otelo serve` does not start on another version, or on a file without one: `telemetry.sqlite has storage version 3 and this otelo writes 4. Stop otelo and run otelo reindex.`
+- A test keeps the xxh3 of `schema.sql` next to `STORAGE_VERSION`, so a change of the schema bumps both. A change of the mapping that changes what is stored bumps the version by hand.
+- The daemon and `otelo reindex` both lock `telemetry/telemetry.lock`, so the command refuses to run next to a daemon. The lock is taken before the journal opens, because opening it recovers its segments.
+- `otelo reindex` deletes a `telemetry.sqlite` of another version, makes it again with the indexed attributes of `state.sqlite`, and indexes the journal from the start of each retention, printing each signal and hour. A file of the current version goes on from its positions, so a reindex that stopped halfway goes on where it stopped.
+- The rollups catch up from their cursors in the next `otelo serve`, as after a daemon that was down.
+
+### The pipeline's own metrics
+
+The receiver and the indexer count into one set of meters, and the host collector reports them every 15 seconds under the service `otelo`, so they reach the journal as any metric does and a reindex keeps them. Every series has `otelo.signal`: `logs`, `spans`, or `metrics`. No span opens on this path, because the daemon's own spans would export forever.
+
+| Side | Metric | Kind | Unit | Attributes |
+|---|---|---|---|---|
+| receiver | `otelo.telemetry.received_requests` | counter | `{request}` | `otelo.telemetry.outcome`: `journaled`, `refused` |
+| receiver | `otelo.telemetry.journaled_bytes` | counter | `By` | |
+| receiver | `otelo.telemetry.journal_sync.duration` | histogram | `s` | the wait from the append to the sync, which the answer waits on |
+| indexer | `otelo.telemetry.indexed_frames` | counter | `{frame}` | `otelo.telemetry.outcome`: `indexed`, `skipped` (before the retention), `undecodable` |
+| indexer | `otelo.telemetry.indexed_records` | counter | `{record}` | `otelo.telemetry.outcome`: `written`, `skipped` (outside the retention), `rejected` (past 1,000 series) |
+| indexer | `otelo.telemetry.index_transaction.duration` | histogram | `s` | |
+| indexer | `otelo.telemetry.index_lag` | gauge | `s` | |
+
+- `index_lag` is 0 once the indexer caught up. While it is behind, it is the `received_at` of the newest synced frame minus that of the newest indexed one.
+- The histograms have the bounds 1, 2.5, 5, 10, 25, 50, 100, 250, and 500 ms, and 1, 2.5, and 5 s.
+- `received_requests` against `indexed_frames` shows whether the indexer keeps up with the receiver, and `index_lag` how far behind it is in time.
 
 ## Schema of `telemetry.sqlite`
 
@@ -150,6 +202,11 @@ erDiagram
     TEXT name PK
     INTEGER record_count
   }
+  indexed_journal_positions {
+    TEXT signal PK "logs, spans, metrics"
+    INTEGER segment_hour "hours since the Unix epoch"
+    INTEGER byte_offset "in the segment before compression"
+  }
 ```
 
 - A name says what a table or a column holds without its comment, and takes the OpenTelemetry name where OpenTelemetry has one: `severity_number`, `status_code`, `aggregation_temporality`.
@@ -171,13 +228,13 @@ The `otelo-otlp` crate serves OTLP over HTTP on `127.0.0.1:4318` (protobuf or JS
 - The key of `metric_points` is the series and the time, so a batch that is sent again overwrites its points.
 - Summaries, a delta sum that is not monotonic, a sum or a histogram without a temporality, and a span without valid IDs are rejected. Span links, severity text, trace state, exemplars, and the start time of a point are not kept.
 - Proto3 JSON leaves out a field at its default, and the decoder of `opentelemetry-proto` takes a point of an exponential histogram only with every field. The receiver fills the missing ones before it decodes.
-- The receiver appends each request to the journal, encoded again as protobuf when it came as JSON or with gzip, and answers once the frame is synced. A request the journal cannot keep gets 503 over HTTP and `UNAVAILABLE` over gRPC, so the client retries it, and it never reaches the writer.
-- A rejected item, and every item of a request the full writer channel dropped, is counted in `partial_success`.
-- A metric gets at most 1,000 series in the file, so one attribute that holds a user ID cannot fill the disk. The writer skips the points of a series past that. The receiver has answered by then, so the writer counts them in `otelo.telemetry.rejected_points`, next to `otelo.telemetry.dropped_batches`, and warns in its log.
+- The receiver appends each request to the journal, encoded again as protobuf when it came as JSON or with gzip, and answers once the frame is synced. A request the journal cannot keep gets 503 over HTTP and `UNAVAILABLE` over gRPC, so the client retries it, and it never reaches the index.
+- A rejected item is counted in `partial_success`. The receiver maps each request only to count them, and drops what it maps. The indexer maps the frame again.
+- A metric gets at most 1,000 series in the file, so one attribute that holds a user ID cannot fill the disk. The indexer skips the points of a series past that. The receiver has answered by then, so the indexer counts them in `otelo.telemetry.indexed_records` with the outcome `rejected`, and warns in its log.
 
 ## Host collector
 
-The `otelo-host` crate reads the machine once when the daemon starts, and then every 15 seconds, on the wall-clock multiples of 15 seconds. It builds an `ExportMetricsServiceRequest`, which goes to the journal and the writer as a request the receiver took does. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
+The `otelo-host` crate reads the machine once when the daemon starts, and then every 15 seconds, on the wall-clock multiples of 15 seconds. It builds an `ExportMetricsServiceRequest`, which goes to the journal as a request the receiver took does. It has no flag and no configuration. [[../tasks/00007-collect-host-and-service-metrics.md]] has the plan, and [[./platforms.md]] says where each number comes from.
 
 OpenTelemetry treats a host as a resource of its own and gives host metrics no service name. The `service` column needs one, so otelo names itself, as an app that reports the metrics of its host does:
 
@@ -209,20 +266,20 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 
 ## Rollups
 
-The writer sums the points of each series up by the minute in `metric_minute_summaries` and by the hour in `metric_hour_summaries`, so a long range reads fewer rows. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] has the reasons.
+The indexer sums the points of each series up by the minute in `metric_minute_summaries` and by the hour in `metric_hour_summaries`, so a long range reads fewer rows. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] has the reasons.
 
 - A row is one series and one minute or hour that has points, with the instant it starts in `start_at`: the count, minimum, maximum, sum, and last of the values, and for a `counter` how much it grew and over how many seconds, and for a `histogram` its merged buckets. A summary of a `counter` or a `histogram` holds what each step added, so a query of the summaries reports its temporality as `delta`.
-- Once a minute the writer summarizes the minutes that ended 2 minutes ago or earlier, so a late batch is in them. An hour is summarized from its 60 minutes once all of them are.
-- `metric_summary_progress` says up to where the minutes and the hours are summarized. A daemon that was down starts there, or at the oldest point when the table is empty, and summarizes an hour at a time with batches taken in between.
+- Once a minute the indexer summarizes the minutes that ended 2 minutes ago or earlier, so a late batch is in them. An hour is summarized from its 60 minutes once all of them are.
+- `metric_summary_progress` says up to where the minutes and the hours are summarized. A daemon that was down starts there, or at the oldest point when the table is empty, and summarizes an hour at a time with frames taken in between.
 - The rollup reads the points series by series, through the primary key, so it reads only the points of the minutes it summarizes.
 - A row is written with its key, the series and the start, so summarizing a step again gives the same row.
 - The logic that sums points up by step is one type in `otelo-indexed-storage`. The query of the raw points and the rollups both use it, so a minute of summaries equals a minute of raw points.
 
 ## Retention
 
-Each signal has its own setting in the writer's `Config`: `logs_retention_days`, `traces_retention_days`, and `metrics_retention_days`, 7 days by default. A day counts whole, so 7 days keep today and the 6 days before it. The writer skips a record older than the retention of its signal, or more than a day ahead.
+Each signal has its own setting in the indexer's `Config`: `logs_retention_days`, `traces_retention_days`, and `metrics_retention_days`, 7 days by default. A day counts whole, so 7 days keep today and the 6 days before it. The indexer skips a record older than the retention of its signal, or more than a day ahead, and a whole frame received before the retention.
 
-When the daemon starts, and then once an hour, the writer deletes what is past the retention, in transactions of up to 10,000 rows, so the WAL stays small and a batch waits little. The writer takes batches between the transactions.
+When the daemon starts, and then once an hour, the indexer deletes what is past the retention, in transactions of up to 10,000 rows, so the WAL stays small and a frame waits little. The indexer takes frames between the transactions.
 
 | Signal | Deletes |
 |---|---|
@@ -232,7 +289,7 @@ When the daemon starts, and then once an hour, the writer deletes what is past t
 
 - A resource that no row refers to is deleted with the metrics. `logs` and `spans` have an index on `resource_id` and the time, so the check reads an index and not the tables.
 - The catalog deletes the days past the retention of their signal. A resource belongs to every signal, so its keys stay as long as the longest retention.
-- Deleted pages go to the freelist, and new rows reuse them, so the file keeps its size without a `VACUUM`. When the freelist passes a quarter of the file, after a retention was lowered, the writer runs `PRAGMA incremental_vacuum` in steps of 2,048 pages.
+- Deleted pages go to the freelist, and new rows reuse them, so the file keeps its size without a `VACUUM`. When the freelist passes a quarter of the file, after a retention was lowered, the indexer runs `PRAGMA incremental_vacuum` in steps of 2,048 pages.
 
 ## The daemon's own telemetry
 
@@ -251,7 +308,7 @@ The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serv
 - `otelo metrics` lists the series. `otelo metric <name>` prints one metric at a step that fits the range: the count, minimum, average, maximum, and last value of each step for a `gauge` and an `updown`, the rate for a `counter`, and the percentiles for a `histogram`.
 - A range of 6 hours at most reads the raw points. A range of 14 days at most reads the summaries by the minute, and a longer one those by the hour. `--resolution raw`, `1m`, or `1h` picks one. A step of summaries is rounded up to whole minutes or hours, and the answer says which step and which points it read.
 - The rate of a counter is its increase between two neighbouring points, divided by the time between them and not by the step, so a 30-second step over points a minute apart stays right. A cumulative value that goes down is a restart, and the increase counts from zero. The query also reads the 5 minutes before the range, so the first step has a point to count from.
-- A histogram point keeps its buckets in `metric_points.histogram` as JSON: `count`, `sum`, `min`, `max`, and either `bounds` and `counts` (one more than the bounds), or `scale`, `zero_count`, `positive`, and `negative` for an exponential histogram. The writer skips a point whose counts do not fit its bounds. `otelo metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
+- A histogram point keeps its buckets in `metric_points.histogram` as JSON: `count`, `sum`, `min`, `max`, and either `bounds` and `counts` (one more than the bounds), or `scale`, `zero_count`, `positive`, and `negative` for an exponential histogram. The indexer skips a point whose counts do not fit its bounds. `otelo metric` merges the points of each step into one set of bucket counts with p50, p90, and p99 estimates. A cumulative point counts as its increase over the point before, a drop in the counts is a restart, and the first cumulative point only sets where the counting starts. A step with points of different bounds keeps the newest bounds.
 - Two exponential points always merge. Both go down to the lower scale, where each step joins neighbouring buckets in pairs. The API returns every distribution with explicit bounds, and joins the buckets of an exponential one until 64 are left. The percentiles are estimated before that. An explicit and an exponential point in one step do not merge, and the step keeps the newer one.
 - `otelo metric --by` and the `by` of `/api/metrics/{name}` group the series of a metric by attributes, `service`, or `resource.<key>`, and combine the series of a group in each step: a `gauge` takes their average, an `updown` adds them up, a `counter` adds up its rates, and a `histogram` merges its buckets. The minimum and the maximum of series that add up are the sums of theirs, since their points do not line up in time. A series with no point in a step adds nothing to it. Series of different kinds or units never combine, and histogram points of different explicit bounds do not merge, so the step keeps one of them.
 - The groups come highest first, by their value over the range: the average of a `gauge` and an `updown`, the rate of a `counter`, and the sum of the values of a `histogram`, which for a duration is the total time. `--top N` keeps N groups and combines the rest into one group `other`, and `--limit` drops the rest. Without `--by` each series is its own group, so `otelo metric process.memory.usage --top 5` names the 5 services with the most memory. A group needs every series of the metric, so a query reads up to 2,000 series and says so when it stops there.
@@ -283,12 +340,12 @@ root = true AND duration > 500ms AND NOT resource.host.name = "droplet"
 
 ## Catalog and completion
 
-The writer counts the attribute keys of each signal and of the resources by UTC day, in `attribute_key_counts`, with their JSON type in `json_type` and the count of records in `record_count`. The `attribute_owner` of a row says whose keys they are: a `log`, a `span`, a `metric_series`, or a `resource`. A resource and a series count once on each day that has their records. `attribute_value_counts` keeps up to 200 values of each key and day, and `has_more_values_than_listed` marks a key that has more. `span_name_counts` counts the names of the spans, up to 200 a day. The writer only touches these tables for a new key or value and for the counts, once per transaction.
+The indexer counts the attribute keys of each signal and of the resources by UTC day, in `attribute_key_counts`, with their JSON type in `json_type` and the count of records in `record_count`. The `attribute_owner` of a row says whose keys they are: a `log`, a `span`, a `metric_series`, or a `resource`. A resource and a series count once on each day that has their records. `attribute_value_counts` keeps up to 200 values of each key and day, and `has_more_values_than_listed` marks a key that has more. `span_name_counts` counts the names of the spans, up to 200 a day. The indexer only touches these tables for a new key or value and for the counts, once per transaction.
 
 `otelo complete <signal> <query>` and `/api/complete` suggest the fields, operators, values, and keywords that fit at the cursor, from the counts of the days of the retention, added up. `otelo attributes <signal>` lists the keys.
 
 ## Indexed attributes
 
-`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the writer. Within a second the writer creates an expression index on `json_extract(attributes, '$."user.id"')` on the table, once. The index is named `logs_attribute_<hash>`, after its table and a hash of the key. `otelo index remove` drops it. The query compiler writes the same expression, so SQLite uses the index, also for an `OR` of indexed keys. A query on a key without an index still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
+`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the indexer. Within a second the indexer creates an expression index on `json_extract(attributes, '$."user.id"')` on the table, once. The index is named `logs_attribute_<hash>`, after its table and a hash of the key. `otelo index remove` drops it. The query compiler writes the same expression, so SQLite uses the index, also for an `OR` of indexed keys. A query on a key without an index still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
 
 Until UI auth exists, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel.
