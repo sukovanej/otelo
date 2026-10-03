@@ -51,7 +51,6 @@ Otelo stores a hash of each token and shows the token once. Each token has a lab
 ## Open decisions
 
 - Does the static password of [[./00025-log-in-with-a-static-password.md]] stay as a way to recover, or go away? Proposal: it goes, and `otelo auth link --login` recovers.
-
 - Drop GitHub login completely? Proposal: yes.
 - Session length: 30 days, or 12 hours?
 - One user for now, or enroll links that carry a role (admin or read-only)?
