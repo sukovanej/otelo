@@ -17,6 +17,110 @@ Today the index is one SQLite file per UTC day and `metrics-rollup.sqlite`. Rete
 - `PRAGMA auto_vacuum = INCREMENTAL` is set when the file is created, before the first table.
 - Both connections set a small `cache_size`, and the daemon caps the heap of SQLite with `sqlite3_hard_heap_limit64`. The OS page cache keeps the hot pages. Each reader today can take 2 MB of cache per attached file, which does not fit the 50 MB of [[../docs/design.md]].
 
+## Schema
+
+`telemetry.sqlite` after this task. It holds the tables of a day file and of `rollup.sql` once each. The comments mark what changes.
+
+```mermaid
+erDiagram
+  resources ||--o{ logs : "resource_id"
+  resources ||--o{ spans : "resource_id"
+  resources ||--o{ series : "resource_id"
+  logs ||--|| logs_fts : "rowid"
+  series ||--o{ points : "series_id"
+  series ||--o{ minutes : "series_id"
+  series ||--o{ hours : "series_id"
+
+  resources {
+    INTEGER id PK
+    INTEGER hash "xxh3 of the service and the attributes, UNIQUE"
+    TEXT service
+    TEXT attributes "JSON object"
+  }
+  logs {
+    INTEGER logged_at "Unix ns"
+    INTEGER resource_id FK
+    INTEGER severity "OTel severity number"
+    TEXT body
+    BLOB trace_id "16 bytes, NULL outside a span"
+    BLOB span_id "8 bytes, NULL outside a span"
+    TEXT attributes "JSON object"
+    TEXT source "otlp"
+  }
+  logs_fts {
+    TEXT body "FTS5, content logs, new delete trigger"
+  }
+  spans {
+    BLOB trace_id "16 bytes"
+    BLOB span_id "8 bytes"
+    BLOB parent_span_id "8 bytes, NULL for a root"
+    INTEGER resource_id FK
+    TEXT name
+    INTEGER kind "OTel span kind"
+    INTEGER started_at "Unix ns"
+    INTEGER duration_ns
+    INTEGER status "OTel status code"
+    TEXT attributes "JSON object"
+    TEXT events "JSON array"
+  }
+  series {
+    INTEGER id PK
+    INTEGER hash "xxh3 of resource, name, kind, temporality, unit, labels, UNIQUE"
+    INTEGER resource_id FK
+    TEXT name
+    TEXT kind "gauge, updown, counter, histogram"
+    TEXT temporality "cumulative or delta, NULL for gauge and updown"
+    TEXT unit
+    TEXT labels "JSON object"
+  }
+  points {
+    INTEGER series_id PK,FK
+    INTEGER recorded_at PK "Unix ns"
+    REAL value "the sum of a histogram"
+    TEXT histogram "JSON, NULL for the other kinds"
+  }
+  minutes {
+    INTEGER series_id PK,FK
+    INTEGER start_at PK "Unix ns"
+    INTEGER count
+    REAL min
+    REAL max
+    REAL sum
+    REAL last
+    REAL increase "NULL unless counter"
+    REAL seconds "NULL unless counter"
+    TEXT histogram "JSON, NULL unless histogram"
+  }
+  hours {
+    INTEGER series_id PK,FK
+    INTEGER start_at PK "the columns of minutes"
+  }
+  cursors {
+    TEXT rollup PK "minutes or hours"
+    INTEGER rolled_until "Unix ns"
+  }
+  attribute_keys {
+    TEXT day PK "new: UTC date"
+    TEXT key_group PK "logs, spans, metrics, resource, span_names"
+    TEXT key PK
+    TEXT value_type
+    INTEGER count "records of that day with the key"
+    INTEGER has_more_values_than_listed
+  }
+  attribute_values {
+    TEXT day PK "new: UTC date"
+    TEXT key_group PK
+    TEXT key PK
+    TEXT value PK "JSON"
+    INTEGER count "records of that day with the value"
+  }
+```
+
+- `PRAGMA auto_vacuum = INCREMENTAL` is new, and `journal_mode = WAL` and `synchronous = NORMAL` stay.
+- The indexes stay as they are: `logs_logged_at`, `logs_trace_id`, `spans_trace_id`, `spans_started_at`, `series_name`, and the `logs_attribute_<hash>` and `spans_attribute_<hash>` indexes of [[../docs/telemetry.md]].
+- `points`, `minutes`, `hours`, `attribute_keys`, and `attribute_values` stay `WITHOUT ROWID`.
+- Gone: the copy of `resources` and `series` in `metrics-rollup.sqlite`.
+
 ## Retention
 
 Each signal has its own setting, 7 days by default: `logs_retention_days`, `traces_retention_days`, `metrics_retention_days`. The API caps the range of a query at the retention of its signal.
