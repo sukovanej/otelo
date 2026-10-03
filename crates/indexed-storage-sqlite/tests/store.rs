@@ -1,14 +1,16 @@
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
 use otelo_indexed_storage::{
-    Attributes, Batch, BatchInbox, BatchSender, Buckets, ExplicitBuckets, Histogram,
-    HistogramPoint, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanEvent,
-    SpanId, SpanKind, SpanStatus, Storage, Temporality, TimeRange, TraceContext, TraceId,
-    open_batch_channel,
+    Attributes, Batch, Buckets, ExplicitBuckets, Histogram, HistogramPoint, Log, Metric,
+    NumberPoint, Points, RecordCounts, Records, Resource, Severity, Span, SpanEvent, SpanId,
+    SpanKind, SpanStatus, Storage, Temporality, TimeRange, TraceContext, TraceId,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, TELEMETRY_FILE_NAME, Writer};
+use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, TELEMETRY_FILE_NAME};
+use otelo_query::Signal;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
@@ -92,17 +94,7 @@ fn log_batch(logged_at: i64, body: &str) -> Batch {
 }
 
 fn write_batches(directory: &Path, batches: Vec<Batch>) {
-    let (sender, inbox) = open_batch_channel(batches.len().max(1));
-    for batch in batches {
-        assert!(sender.send_batch(batch));
-    }
-    write_inbox(directory, sender, inbox);
-}
-
-fn write_inbox(directory: &Path, sender: BatchSender, inbox: BatchInbox) {
-    let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-    drop(sender);
-    writer.join().unwrap();
+    common::index_batches(Config::new(directory.to_owned()), batches);
 }
 
 fn query_pairs<First: rusqlite::types::FromSql, Second: rusqlite::types::FromSql>(
@@ -203,32 +195,6 @@ fn reads_back_each_kind_across_a_day_boundary() {
 }
 
 #[test]
-fn a_full_channel_drops_the_batch_and_the_writer_reports_it() {
-    let directory = tempfile::tempdir().unwrap();
-    let today_start_at = Day::today().start_at();
-    let (sender, inbox) = open_batch_channel(1);
-    assert!(sender.send_batch(log_batch(today_start_at, "kept")));
-    assert!(!sender.send_batch(log_batch(today_start_at, "dropped")));
-    assert_eq!(sender.dropped_batches(), 1);
-    write_inbox(directory.path(), sender, inbox);
-
-    let reader = open_reader_of_today(directory.path());
-    let connection = reader.connection();
-    let bodies: Vec<(i64, String)> = query_pairs(connection, "SELECT logged_at, body FROM logs");
-    assert_eq!(bodies, [(today_start_at, "kept".into())]);
-    let dropped: Vec<(String, f64)> = query_pairs(
-        connection,
-        "SELECT metric_series.unit, metric_point.value
-         FROM metric_points metric_point
-         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
-         JOIN resources resource ON resource.id = metric_series.resource_id
-         WHERE resource.service = 'otelo'
-           AND metric_series.name = 'otelo.telemetry.dropped_batches'",
-    );
-    assert_eq!(dropped, [("{batch}".into(), 1.0)]);
-}
-
-#[test]
 fn skips_records_past_the_retention() {
     let directory = tempfile::tempdir().unwrap();
     let expired_at = Day::today().add_days(-7).start_at();
@@ -322,8 +288,7 @@ fn stores_the_kind_and_the_temporality_of_each_series() {
     let reader = open_reader_of_today(directory.path());
     let kinds: Vec<(String, Option<String>)> = query_pairs(
         reader.connection(),
-        "SELECT name || ' ' || kind, aggregation_temporality FROM metric_series
-         WHERE name NOT LIKE 'otelo.%' ORDER BY name",
+        "SELECT name || ' ' || kind, aggregation_temporality FROM metric_series ORDER BY name",
     );
     assert_eq!(
         kinds,
@@ -382,8 +347,9 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
         attributes: attributes_from_json(json!({"user.id": user})),
         points: Points::Gauge(number_points(&[(recorded_at, 1.0)])),
     };
-    write_batches(
-        directory.path(),
+    let pipeline = common::index_batches_of_signal(
+        Config::new(directory.path().to_owned()),
+        Signal::Metrics,
         vec![
             metric_batch(
                 (0..1001)
@@ -424,14 +390,16 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
         ),
         1
     );
-    let rejected_points_counter: Vec<(String, f64)> = query_pairs(
-        connection,
-        "SELECT metric_series.kind || ' ' || metric_series.unit, metric_point.value
-         FROM metric_points metric_point
-         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
-         WHERE metric_series.name = 'otelo.telemetry.rejected_points'",
+    let metrics_reading = pipeline.signals[2];
+    assert_eq!(metrics_reading.signal, Signal::Metrics);
+    assert_eq!(
+        metrics_reading.records,
+        RecordCounts {
+            written: 1002,
+            skipped: 0,
+            rejected: 2,
+        }
     );
-    assert_eq!(rejected_points_counter, [("counter {point}".into(), 2.0)]);
 }
 
 #[test]

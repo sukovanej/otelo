@@ -4,13 +4,17 @@ mod common;
 
 use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::Arc;
 
 use common::{Daemon, StopSignal, send_get_request, start_daemon, stop_daemon};
 use otelo_indexed_storage::{
-    Attributes, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanId,
-    SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos, open_batch_channel,
+    Attributes, Log, Metric, NumberPoint, PipelineMeters, Points, Records, Resource, Severity,
+    Span, SpanId, SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos,
 };
-use otelo_indexed_storage_sqlite::{Config, Writer};
+use otelo_indexed_storage_sqlite::{Config, FrameMapper, index_journal_until_caught_up};
+use otelo_journal::Journal;
+use otelo_journal_files::JournalFiles;
+use otelo_query::Signal;
 use serde_json::{Value, json};
 
 fn parse_attributes(value: Value) -> Attributes {
@@ -78,11 +82,32 @@ fn write_telemetry(data: &Path) {
             build_queue_depth("push", 1.0),
         ],
     };
-    let (batch_sender, inbox) = open_batch_channel(1);
-    assert!(batch_sender.send_batch(vec![records]));
-    let writer = Writer::spawn(Config::new(data.join("telemetry")), inbox).unwrap();
-    drop(batch_sender);
-    writer.join().unwrap();
+    // The frame lives in a journal of its own, which the daemon does not read again.
+    let journal_directory = tempfile::tempdir().unwrap();
+    let opened = JournalFiles::open(otelo_journal_files::Config::new(
+        journal_directory.path().into(),
+    ))
+    .unwrap();
+    let ticket = opened
+        .journal
+        .append_frame(Signal::Logs, now_unix_nanos(), b"records")
+        .unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(ticket.wait_until_synced())
+        .unwrap();
+    let map_frame: FrameMapper = Arc::new(move |_, _| Ok(vec![records.clone()]));
+    index_journal_until_caught_up(
+        Config::new(data.join("telemetry")),
+        opened.journal,
+        map_frame,
+        Arc::new(PipelineMeters::default()),
+        |_, _| {},
+    )
+    .unwrap();
+    opened.threads.stop_and_join().unwrap();
 }
 
 fn run_otelo(daemon: &Daemon, args: &[&str]) -> Output {

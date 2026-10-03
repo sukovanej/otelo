@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use otelo_journal::{Frame, Hour, Journal, Position};
+use otelo_journal::{Frame, Hour, Journal, Position, SyncedEnd};
 use otelo_journal_files::{Config, JournalFiles, JournalThreads};
 use otelo_query::Signal;
 
@@ -19,7 +19,8 @@ fn still_open_after_a_restart() -> i64 {
 }
 
 fn open_journal(directory: &Path) -> (Arc<JournalFiles>, JournalThreads) {
-    JournalFiles::open(Config::new(directory.to_owned())).unwrap()
+    let opened = JournalFiles::open(Config::new(directory.to_owned())).unwrap();
+    (opened.journal, opened.threads)
 }
 
 async fn append_log_request(journal: &JournalFiles, received_at: i64, request: &[u8]) {
@@ -99,7 +100,7 @@ async fn frames_are_read_back_from_the_open_and_the_compressed_segments() {
     assert_eq!(frames_after_restart, frames_before_restart);
     assert_eq!(frames_after_restart[1].received_at, two_hours_ago + 1);
     assert_eq!(
-        frames_after_restart[2].position_after.hour,
+        frames_after_restart[2].position_after.segment_hour,
         Hour::containing(now)
     );
     assert!(log_segment_path(directory.path(), two_hours_ago, "seg.zst").exists());
@@ -132,7 +133,7 @@ async fn unfinished_last_frame_is_cut_off_at_startup() {
         requests_of(&frames),
         [b"first".as_slice(), b"second", b"third"]
     );
-    assert_eq!(frames[1].position_after.offset, complete_length);
+    assert_eq!(frames[1].position_after.byte_offset, complete_length);
 }
 
 #[tokio::test]
@@ -155,7 +156,7 @@ async fn last_frame_with_a_wrong_checksum_is_cut_off_at_startup() {
     assert_eq!(requests_of(&frames), [b"first".as_slice()]);
     assert_eq!(
         fs::metadata(&segment_path).unwrap().len(),
-        frames[0].position_after.offset
+        frames[0].position_after.byte_offset
     );
 }
 
@@ -230,7 +231,7 @@ async fn frame_received_before_the_open_hour_goes_to_the_open_hour() {
     assert_eq!(
         frames
             .iter()
-            .map(|frame| frame.position_after.hour)
+            .map(|frame| frame.position_after.segment_hour)
             .collect::<Vec<_>>(),
         [Hour::containing(now), Hour::containing(now)]
     );
@@ -271,4 +272,26 @@ async fn size_adds_up_the_segments_of_every_signal() {
     threads.stop_and_join().unwrap();
 
     assert_eq!(size_in_bytes, 2 * 16 + 3 + 6);
+}
+
+#[tokio::test]
+async fn each_sync_sends_its_end_to_the_indexer() {
+    let directory = tempfile::tempdir().unwrap();
+    let opened = JournalFiles::open(Config::new(directory.path().to_owned())).unwrap();
+    let received_at = now();
+    append_log_request(&opened.journal, received_at, b"first").await;
+    let frames = read_log_frames(&opened.journal, None);
+    let synced_end = opened
+        .synced_ends
+        .wait_for_synced_end(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(
+        synced_end,
+        SyncedEnd {
+            signal: Signal::Logs,
+            end: frames[0].position_after,
+            newest_received_at: received_at,
+        }
+    );
+    opened.threads.stop_and_join().unwrap();
 }

@@ -42,12 +42,12 @@ fn send_each_signal_and_check_the_telemetry_file(transport: Transport) {
     let directory = tempfile::tempdir().unwrap();
     let receiver = Receiver::start_writing_into(directory.path());
     send_each_signal(&receiver, transport);
-    receiver.stop_and_wait_for_writer();
+    receiver.stop_and_wait_for_indexer();
     let connection = open_telemetry_file(directory.path());
 
     let services: Vec<String> =
         query_first_column(&connection, "SELECT service FROM resources ORDER BY id");
-    assert_eq!(services, ["shop", "otelo"]);
+    assert_eq!(services, ["shop"]);
     let host_names: Vec<String> = query_first_column(
         &connection,
         "SELECT attributes ->> '$.\"host.name\"' FROM resources WHERE service = 'shop'",

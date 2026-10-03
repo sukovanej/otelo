@@ -6,7 +6,7 @@ mod reader;
 mod snapshot;
 
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use otelo_indexed_storage::StorageSize;
+use otelo_indexed_storage::{PipelineReading, StorageSize};
 
 pub use identity::{HostIdentity, find_platform_uuid_in_ioreg_output};
 pub use launchd::find_running_jobs_in_launchctl_list;
@@ -36,10 +36,14 @@ impl Collector {
         &mut self,
         recorded_at: i64,
         storage_size: Option<StorageSize>,
+        pipeline: Option<&PipelineReading>,
     ) -> anyhow::Result<ExportMetricsServiceRequest> {
         let snapshot = self.machine_reader.read_snapshot()?;
-        Ok(self
-            .snapshot_mapper
-            .map_snapshot_to_request(recorded_at, &snapshot, storage_size))
+        Ok(self.snapshot_mapper.map_snapshot_to_request(
+            recorded_at,
+            &snapshot,
+            storage_size,
+            pipeline,
+        ))
     }
 }

@@ -175,3 +175,14 @@ CREATE TABLE IF NOT EXISTS span_name_counts (
   record_count INTEGER NOT NULL,
   PRIMARY KEY (day, name)
 ) WITHOUT ROWID;
+
+-- The indexer writes a row in the transaction of the rows of the frames up to it, so a crash
+-- neither loses a frame nor indexes it twice.
+CREATE TABLE IF NOT EXISTS indexed_journal_positions (
+  -- logs, spans, or metrics.
+  signal TEXT NOT NULL PRIMARY KEY,
+  -- Hours since the Unix epoch: the UTC hour of the journal segment.
+  segment_hour INTEGER NOT NULL,
+  -- In the segment before compression. The frames before it are indexed.
+  byte_offset INTEGER NOT NULL
+) WITHOUT ROWID;

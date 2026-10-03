@@ -6,4 +6,4 @@ mod recovery;
 mod segment;
 mod signal_log;
 
-pub use journal_files::{Config, JournalFiles, JournalThreads};
+pub use journal_files::{Config, JournalFiles, JournalThreads, OpenedJournal};

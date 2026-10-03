@@ -4,9 +4,9 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use otelo_indexed_storage::{BatchInbox, BatchSender, open_batch_channel};
-use otelo_indexed_storage_sqlite::{Config, TELEMETRY_FILE_NAME, Writer};
-use otelo_journal::Journal;
+use otelo_indexed_storage::PipelineMeters;
+use otelo_indexed_storage_sqlite::{Config, FrameMapper, Indexer, TELEMETRY_FILE_NAME};
+use otelo_journal::{Journal, SyncedEndInbox};
 use otelo_journal_files::{JournalFiles, JournalThreads};
 use otelo_otlp::Intake;
 use rusqlite::Connection;
@@ -22,8 +22,8 @@ pub struct Receiver {
     pub grpc_address: SocketAddr,
     shutdown: CancellationToken,
     servers: Vec<JoinHandle<anyhow::Result<()>>>,
-    sender: BatchSender,
-    writer: Option<Writer>,
+    indexer: Option<Indexer>,
+    pub meters: Arc<PipelineMeters>,
     pub journal: Arc<dyn Journal>,
     journal_threads: Option<JournalThreads>,
     _journal_directory: Option<TempDir>,
@@ -32,17 +32,19 @@ pub struct Receiver {
 pub struct TestJournal {
     journal: Arc<dyn Journal>,
     threads: Option<JournalThreads>,
+    synced_ends: Option<SyncedEndInbox>,
     directory: Option<TempDir>,
 }
 
 impl TestJournal {
     pub fn open_in(directory: &Path) -> Self {
-        let (journal, threads) =
+        let opened =
             JournalFiles::open(otelo_journal_files::Config::new(directory.join("journal")))
                 .unwrap();
         Self {
-            journal,
-            threads: Some(threads),
+            journal: opened.journal,
+            threads: Some(opened.threads),
+            synced_ends: Some(opened.synced_ends),
             directory: None,
         }
     }
@@ -60,6 +62,7 @@ impl TestJournal {
         Self {
             journal,
             threads: None,
+            synced_ends: None,
             directory: None,
         }
     }
@@ -67,25 +70,30 @@ impl TestJournal {
 
 impl Receiver {
     pub fn start_writing_into(directory: &Path) -> Self {
-        let (sender, inbox) = open_batch_channel(64);
-        let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-        Self::start_servers(sender, Some(writer), TestJournal::open_in(directory))
+        let mut journal = TestJournal::open_in(directory);
+        let meters = Arc::new(PipelineMeters::default());
+        let map_frame: FrameMapper = Arc::new(otelo_otlp::map::map_journal_frame);
+        let indexer = Indexer::spawn(
+            Config::new(directory.to_owned()),
+            Arc::clone(&journal.journal),
+            journal.synced_ends.take().unwrap(),
+            map_frame,
+            Arc::clone(&meters),
+        )
+        .unwrap();
+        Self::start_servers(Some(indexer), meters, journal)
     }
 
-    // Nothing reads the channel of one batch, so the second batch finds it full.
-    pub fn start_with_full_queue() -> (Self, BatchInbox) {
-        let (sender, inbox) = open_batch_channel(1);
-        let journal = TestJournal::open_in_temporary_directory();
-        (Self::start_servers(sender, None, journal), inbox)
+    pub fn start_with_journal(journal: TestJournal) -> Self {
+        Self::start_servers(None, Arc::new(PipelineMeters::default()), journal)
     }
 
-    pub fn start_with_journal(journal: TestJournal) -> (Self, BatchInbox) {
-        let (sender, inbox) = open_batch_channel(64);
-        (Self::start_servers(sender, None, journal), inbox)
-    }
-
-    fn start_servers(sender: BatchSender, writer: Option<Writer>, journal: TestJournal) -> Self {
-        let intake = Intake::new(Arc::clone(&journal.journal), sender.clone());
+    fn start_servers(
+        indexer: Option<Indexer>,
+        meters: Arc<PipelineMeters>,
+        journal: TestJournal,
+    ) -> Self {
+        let intake = Intake::new(Arc::clone(&journal.journal), Arc::clone(&meters));
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -116,8 +124,8 @@ impl Receiver {
             grpc_address,
             shutdown,
             servers,
-            sender,
-            writer,
+            indexer,
+            meters,
             journal: journal.journal,
             journal_threads: journal.threads,
             _journal_directory: journal.directory,
@@ -128,17 +136,16 @@ impl Receiver {
         format!("http://{}{path}", self.http_address)
     }
 
-    pub fn stop_and_wait_for_writer(self) {
+    pub fn stop_and_wait_for_indexer(self) {
         self.shutdown.cancel();
         for server in self.servers {
             self.runtime.block_on(server).unwrap().unwrap();
         }
-        drop(self.sender);
-        if let Some(writer) = self.writer {
-            writer.join().unwrap();
-        }
         if let Some(journal_threads) = self.journal_threads {
             journal_threads.stop_and_join().unwrap();
+        }
+        if let Some(indexer) = self.indexer {
+            indexer.join().unwrap();
         }
     }
 }

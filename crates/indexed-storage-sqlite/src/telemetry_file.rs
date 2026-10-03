@@ -6,7 +6,9 @@ use anyhow::Context;
 use otelo_indexed_storage::{
     HistogramPoint, IndexedAttribute, Log, Metric, NumberPoint, Points, Resource, Span,
 };
-use rusqlite::{Connection, Transaction, params};
+use otelo_journal::{Hour, Position};
+use otelo_query::Signal;
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::catalog::{AttributeOwner, CatalogCache, CatalogDelta};
 use crate::day::Day;
@@ -62,6 +64,15 @@ pub struct ResourceRecords<'a> {
 impl ResourceRecords<'_> {
     pub const fn is_empty(&self) -> bool {
         self.logs.is_empty() && self.spans.is_empty() && self.point_rows_by_metric.is_empty()
+    }
+
+    pub fn record_count(&self) -> u64 {
+        let point_count: usize = self
+            .point_rows_by_metric
+            .iter()
+            .map(|(_, point_rows)| point_rows.len())
+            .sum();
+        (self.logs.len() + self.spans.len() + point_count) as u64
     }
 
     fn days(&self) -> BTreeSet<Day> {
@@ -152,25 +163,61 @@ impl TelemetryFile {
         apply_indexes_to_telemetry_file(&self.connection, attributes)
     }
 
-    pub(crate) fn write_records(
+    pub(crate) fn read_indexed_position(&self, signal: Signal) -> anyhow::Result<Option<Position>> {
+        let stored_position = self
+            .connection
+            .query_row(
+                "SELECT segment_hour, byte_offset FROM indexed_journal_positions WHERE signal = ?1",
+                [signal.name()],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        stored_position
+            .map(|(segment_hour, byte_offset)| {
+                Ok(Position {
+                    segment_hour: Hour::from_hours_since_epoch(segment_hour),
+                    byte_offset: u64::try_from(byte_offset)
+                        .with_context(|| format!("the byte offset {byte_offset} of {signal}"))?,
+                })
+            })
+            .transpose()
+    }
+
+    pub(crate) fn write_indexed_frames(
         &mut self,
         resource_records: &[ResourceRecords],
+        signal: Signal,
+        position_after: Position,
     ) -> anyhow::Result<u64> {
-        let result = self.write_records_in_transaction(resource_records);
+        let result =
+            self.write_indexed_frames_in_transaction(resource_records, signal, position_after);
         if result.is_err() {
             self.forget_cached_rows();
         }
         result
     }
 
-    fn write_records_in_transaction(
+    fn write_indexed_frames_in_transaction(
         &mut self,
         resource_records: &[ResourceRecords],
+        signal: Signal,
+        position_after: Position,
     ) -> anyhow::Result<u64> {
         let transaction = self.connection.transaction()?;
         let rejected_points = self
             .cached_rows
             .write_records(&transaction, resource_records)?;
+        transaction.execute(
+            "INSERT INTO indexed_journal_positions (signal, segment_hour, byte_offset)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (signal) DO UPDATE
+             SET segment_hour = excluded.segment_hour, byte_offset = excluded.byte_offset",
+            params![
+                signal.name(),
+                position_after.segment_hour.hours_since_epoch(),
+                i64::try_from(position_after.byte_offset)?,
+            ],
+        )?;
         transaction.commit()?;
         Ok(rejected_points)
     }

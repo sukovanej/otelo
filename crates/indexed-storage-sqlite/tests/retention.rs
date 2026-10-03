@@ -1,13 +1,15 @@
+mod common;
+
 use std::fs;
 use std::num::NonZeroU16;
 use std::path::Path;
 
 use otelo_indexed_storage::{
     Attributes, Batch, Log, Metric, NumberPoint, Points, RangeQueries, Records, Resource, Severity,
-    Span, SpanId, SpanKind, SpanStatus, TimeRange, TraceContext, TraceId, open_batch_channel,
+    Span, SpanId, SpanKind, SpanStatus, TimeRange, TraceContext, TraceId,
 };
 use otelo_indexed_storage_sqlite::{
-    Config, Day, Progress, Reader, TELEMETRY_FILE_NAME, TelemetryFile, Writer,
+    Config, Day, Progress, Reader, TELEMETRY_FILE_NAME, TelemetryFile,
 };
 use otelo_query::{Catalog, Signal, parse_query};
 use rusqlite::Connection;
@@ -86,13 +88,7 @@ const fn days(count: u16) -> NonZeroU16 {
 }
 
 fn write_batches(directory: &Path, batches: Vec<Batch>) {
-    let (sender, inbox) = open_batch_channel(batches.len());
-    for batch in batches {
-        assert!(sender.send_batch(batch));
-    }
-    let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-    drop(sender);
-    writer.join().unwrap();
+    common::index_batches(Config::new(directory.to_owned()), batches);
 }
 
 fn delete_past_retention(directory: &Path, configure_retention: impl FnOnce(&mut Config)) {
@@ -294,7 +290,7 @@ fn retention_of_the_metrics_deletes_a_series_with_no_rows_left() {
     }
     let connection = open_telemetry_file(directory.path());
     let series_names: Vec<String> = connection
-        .prepare("SELECT name FROM metric_series WHERE name NOT LIKE 'otelo.%' ORDER BY name")
+        .prepare("SELECT name FROM metric_series ORDER BY name")
         .unwrap()
         .query_map([], |row| row.get(0))
         .unwrap()
@@ -308,7 +304,7 @@ fn retention_of_the_metrics_deletes_a_series_with_no_rows_left() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(services, ["api", "otelo"]);
+    assert_eq!(services, ["api"]);
 }
 
 #[test]

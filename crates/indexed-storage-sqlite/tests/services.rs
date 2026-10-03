@@ -1,11 +1,13 @@
+mod common;
+
 use std::path::Path;
 
 use otelo_indexed_storage::query::Latency;
 use otelo_indexed_storage::{
     Attributes, Batch, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
-    SpanStatus, TimeRange, TraceContext, TraceId, open_batch_channel,
+    SpanStatus, TimeRange, TraceContext, TraceId,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Reader, Writer};
+use otelo_indexed_storage_sqlite::{Config, Day, Reader};
 use serde_json::{Value, json};
 
 fn attributes_from_json(value: Value) -> Attributes {
@@ -61,11 +63,7 @@ fn log(logged_at: i64, severity: Severity) -> Log {
 }
 
 fn write_batch(directory: &Path, batch: Batch) {
-    let (sender, inbox) = open_batch_channel(1);
-    assert!(sender.send_batch(batch));
-    let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-    drop(sender);
-    writer.join().unwrap();
+    common::index_batches(Config::new(directory.to_owned()), vec![batch]);
 }
 
 struct Fixture {

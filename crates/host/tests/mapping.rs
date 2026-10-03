@@ -5,8 +5,11 @@ use otelo_host::{
     CgroupMemory, Cpu, CpuTicks, Filesystem, HostIdentity, Interface, LaunchdJob, LoadAverage,
     Memory, Pid, Process, ProcessUsage, Services, Snapshot, SnapshotMapper, Swap, Unit,
 };
-use otelo_indexed_storage::{Batch, Points, StorageSize, Temporality};
+use otelo_indexed_storage::{
+    Batch, FrameCounts, PipelineMeters, Points, RecordCounts, StorageSize, Temporality,
+};
 use otelo_otlp::map::map_metrics_request;
+use otelo_query::Signal;
 use serde_json::{Value, json};
 
 const TICK_AT: i64 = 1_790_769_600_000_000_000;
@@ -88,7 +91,7 @@ fn collect_point_rows(batch: &Batch) -> Vec<PointRow> {
 
 fn map_to_point_rows(snapshot_mapper: &mut SnapshotMapper, snapshot: &Snapshot) -> Vec<PointRow> {
     collect_point_rows(&map_request_to_batch(
-        snapshot_mapper.map_snapshot_to_request(TICK_AT, snapshot, None),
+        snapshot_mapper.map_snapshot_to_request(TICK_AT, snapshot, None, None),
     ))
 }
 
@@ -446,6 +449,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
             ..idle_machine()
         },
         None,
+        None,
     ));
     let services: Vec<&str> = batch
         .iter()
@@ -572,7 +576,7 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
         state_bytes: 8192,
     };
     let rows = collect_point_rows(&map_request_to_batch(
-        snapshot_mapper.map_snapshot_to_request(TICK_AT, &idle_machine(), Some(storage_size)),
+        snapshot_mapper.map_snapshot_to_request(TICK_AT, &idle_machine(), Some(storage_size), None),
     ));
     assert_eq!(
         values_by_attribute(&rows, "otelo.storage.size", "otelo.storage.file"),
@@ -597,4 +601,100 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
 
     let rows = map_to_point_rows(&mut snapshot_mapper, &idle_machine());
     assert!(rows.iter().all(|row| row.name != "otelo.storage.size"));
+}
+
+#[test]
+fn the_pipeline_reports_each_side_by_signal() {
+    let meters = PipelineMeters::default();
+    meters.count_journaled_request(Signal::Logs, 2_000);
+    meters.count_refused_request(Signal::Logs);
+    meters.record_journal_sync_wait(Signal::Logs, Duration::from_millis(120));
+    meters.add_frame_counts(
+        Signal::Logs,
+        FrameCounts {
+            indexed: 1,
+            skipped: 0,
+            undecodable: 0,
+        },
+    );
+    meters.add_record_counts(
+        Signal::Logs,
+        RecordCounts {
+            written: 7,
+            skipped: 1,
+            rejected: 0,
+        },
+    );
+    meters.record_index_transaction(Signal::Logs, Duration::from_millis(3));
+    meters.set_index_lag(Signal::Logs, Duration::from_millis(1_500));
+    let batch = map_request_to_batch(SnapshotMapper::new(droplet()).map_snapshot_to_request(
+        TICK_AT,
+        &idle_machine(),
+        None,
+        Some(&meters.read_pipeline()),
+    ));
+    let logs_metrics: Vec<(String, Value)> = batch[0]
+        .metrics
+        .iter()
+        .filter(|metric| {
+            metric.name.starts_with("otelo.telemetry.")
+                && metric
+                    .attributes
+                    .to_json()
+                    .contains(r#""otelo.signal":"logs""#)
+        })
+        .map(|metric| {
+            let value = match &metric.points {
+                Points::Counter(Temporality::Cumulative, points) | Points::Gauge(points) => {
+                    json!(points[0].value)
+                }
+                Points::Histogram(Temporality::Cumulative, points) => {
+                    json!([points[0].histogram.count, points[0].histogram.sum])
+                }
+                other => panic!("the pipeline sends no {other:?}"),
+            };
+            let outcome = serde_json::from_str::<Value>(&metric.attributes.to_json()).unwrap()
+                ["otelo.telemetry.outcome"]
+                .as_str()
+                .map_or(String::new(), |outcome| format!(" {outcome}"));
+            (format!("{} {}{outcome}", metric.name, metric.unit), value)
+        })
+        .collect();
+    let expected = [
+        (
+            "otelo.telemetry.received_requests {request} journaled",
+            json!(1.0),
+        ),
+        (
+            "otelo.telemetry.received_requests {request} refused",
+            json!(1.0),
+        ),
+        ("otelo.telemetry.journaled_bytes By", json!(2_000.0)),
+        ("otelo.telemetry.journal_sync.duration s", json!([1, 0.12])),
+        ("otelo.telemetry.indexed_frames {frame} indexed", json!(1.0)),
+        ("otelo.telemetry.indexed_frames {frame} skipped", json!(0.0)),
+        (
+            "otelo.telemetry.indexed_frames {frame} undecodable",
+            json!(0.0),
+        ),
+        (
+            "otelo.telemetry.indexed_records {record} written",
+            json!(7.0),
+        ),
+        (
+            "otelo.telemetry.indexed_records {record} skipped",
+            json!(1.0),
+        ),
+        (
+            "otelo.telemetry.indexed_records {record} rejected",
+            json!(0.0),
+        ),
+        (
+            "otelo.telemetry.index_transaction.duration s",
+            json!([1, 0.003]),
+        ),
+        ("otelo.telemetry.index_lag s", json!(1.5)),
+    ]
+    .map(|(name, value)| (name.to_owned(), value));
+    assert_eq!(logs_metrics, expected);
 }
