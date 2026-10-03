@@ -32,7 +32,8 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 |---|---|
 | `otelo-query` | the query language: its parser and its completion |
 | `otelo-indexed-storage` | the storage interface: the model of the records, what the queries return, the channel to the writer, and the `Storage` and `RangeQueries` traits |
-| `otelo-indexed-storage-sqlite` | the SQLite backend: the telemetry file, the writer, its rollups and retention, the queries, and the indexed attributes in the state file, `state.sqlite` |
+| `otelo-indexed-storage-sqlite` | the SQLite backend: the telemetry file, the writer, its rollups and retention, and the queries |
+| `otelo-state` | the state file, `state.sqlite`: its migrations, the indexed attributes, the password, and the sessions |
 | `otelo-journal` | the journal of OTLP requests: its frames, its segments, their compression, and the retention ([[../tasks/00023-journal-the-otlp-that-otelo-rece.md]]) |
 | `otelo-otlp` | the OTLP receiver over HTTP and gRPC |
 | `otelo-host` | the host collector: the readers of the machine, of its services, and of otelo itself, and the mapping from what they read to metric points |
@@ -46,11 +47,11 @@ A journal and an index ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
 - The journal keeps the OTLP export requests as protobuf, in hourly segments per signal, compressed with zstd once the hour ends. It is the only telemetry that has to outlive a change of the storage, and it keeps 30 days by default.
 - The index is one SQLite file, `telemetry.sqlite`, that an indexer builds from the journal: FTS5 for log search, spans indexed by `trace_id`, metrics in a `metric_series` table and a narrow `metric_points` table, and their 1-minute and 1-hour summaries ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Each signal has its own retention, 7 days by default. Retention deletes rows in small transactions, and an incremental vacuum gives the pages back after a retention was lowered ([[../tasks/00022-keep-the-index-in-one-sqlite-fil.md]]).
 - The index carries a storage version. After a change of the storage, the daemon does not start on an index of another version, and `otelo reindex` rebuilds it from the journal.
-- One state file for the indexed attributes, and later the users and tokens. A journal cannot rebuild it, so it has migrations ([[../tasks/00025-log-in-with-a-static-password.md]]).
+- One state file, `state.sqlite`, for the indexed attributes, the password, and the sessions, and later the users and tokens. A journal cannot rebuild it, so it has migrations ([[../tasks/00025-log-in-with-a-static-password.md]]): an ordered list of SQL steps, of which `PRAGMA user_version` counts the ones a file has. A file of a newer otelo fails the startup.
 
 ## UI and CLI auth
 
-First a static password ([[../tasks/00025-log-in-with-a-static-password.md]]): `otelo init` generates it, prints it once, and stores its hash in the state file. The UI and `otelo login` trade it for a session. Then passkeys for the UI, and scoped tokens for the CLI and agents ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]). Until the password lands, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel. After it, the daemon still listens on `127.0.0.1`, and Caddy puts it on a hostname.
+First a static password ([[../tasks/00025-log-in-with-a-static-password.md]]): `otelo init` generates it, prints it once, and stores its argon2id hash in the state file. `otelo serve` does not start without one. The UI and `otelo login` trade it for a session that ends 30 days after its last use. The UI keeps the session in the cookie `otelo_session`, and the CLI keeps it in `~/.config/otelo/sessions.json` and sends it as `Authorization: Bearer`. Every path under `/api` but `POST /api/login` needs a session, and a write whose `Origin` names another host gets 403. The daemon checks one password a second. Then passkeys for the UI, and scoped tokens for the CLI and agents ([[../tasks/00013-authenticate-with-passkeys-and-s.md]]). The daemon listens on `127.0.0.1`, and Caddy puts it on a hostname with HTTPS.
 
 ## What otelo replaces in conquer
 
