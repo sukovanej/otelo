@@ -5,6 +5,7 @@ import {
   getSpans,
   getTraces,
   toQueryString,
+  type SpanSort,
   type Spans,
   type Traces,
   type TraceSpan,
@@ -16,6 +17,7 @@ import { createListState, usePageKeys } from "../../list";
 import ListContent from "../../ListContent";
 import { addTerm } from "../../query";
 import QueryBar from "../../QueryBar";
+import { SPAN_SORT_DESCRIPTIONS, SPAN_SORTS } from "../sort";
 import SpanPanel from "../span-panel";
 import SpanList, { toSpanKey } from "../SpanList";
 import TraceList from "../TraceList";
@@ -45,9 +47,10 @@ interface OpenTraceSearchParams extends SearchParams {
 }
 
 export default function TracesPage() {
-  const list = createListState<TracesView, TracesResult>({
+  const list = createListState<TracesView, TracesResult, SpanSort>({
     name: "traces",
     views: ["traces", "spans"],
+    sorts: SPAN_SORTS,
     firstLimits: { traces: 50, spans: 200 },
     fetch: async (key, signal) =>
       key.view === "spans"
@@ -75,6 +78,10 @@ export default function TracesPage() {
   let queryInput: HTMLInputElement | undefined;
   usePageKeys({ queryInput: () => queryInput, onEscape: () => setSelectedSpan(undefined) });
 
+  const sort = () => list.sortOrder() ?? "newest";
+  const describeOrderOfTruncatedList = (truncated: boolean) =>
+    truncated ? `, ${SPAN_SORT_DESCRIPTIONS[sort()]}; more match` : "";
+
   const traces = () => {
     const result = list.shownResult();
     return result?.view === "traces" ? result.body : undefined;
@@ -98,7 +105,7 @@ export default function TracesPage() {
             {(body) => (
               <>
                 {formatCount(body().traces.length, "trace")}
-                {body().truncated ? ", newest first; more match" : ""}
+                {describeOrderOfTruncatedList(body().truncated)}
               </>
             )}
           </Match>
@@ -106,7 +113,7 @@ export default function TracesPage() {
             {(body) => (
               <>
                 {formatCount(body().spans.length, "span")}
-                {body().truncated ? ", newest first; more match" : ""}
+                {describeOrderOfTruncatedList(body().truncated)}
               </>
             )}
           </Match>
@@ -141,7 +148,11 @@ export default function TracesPage() {
                   </EmptyMessage>
                 }
               >
-                <TraceList traces={body().traces} onOpen={openTrace} />
+                <TraceList
+                  traces={body().traces}
+                  onOpen={openTrace}
+                  sorting={{ sort: sort(), onSort: list.setSortOrder }}
+                />
               </Show>
             )}
           </Match>
@@ -151,7 +162,12 @@ export default function TracesPage() {
                 when={body().spans.length > 0}
                 fallback={<EmptyMessage>No spans in this range match the query.</EmptyMessage>}
               >
-                <SpanList spans={body().spans} selectedKey={selectedKey()} onSelect={selectSpan} />
+                <SpanList
+                  spans={body().spans}
+                  selectedKey={selectedKey()}
+                  onSelect={selectSpan}
+                  sorting={{ sort: sort(), onSort: list.setSortOrder }}
+                />
               </Show>
             )}
           </Match>

@@ -15,17 +15,19 @@ export interface ListResult<V extends string> {
   readonly body: ListBody;
 }
 
-export interface ListState<V extends string, R extends ListResult<V>> {
+export interface ListState<V extends string, R extends ListResult<V>, S extends string = never> {
   readonly query: () => string;
   readonly since: () => string;
   readonly until: () => string;
   readonly view: () => V;
+  readonly sortOrder: () => S | undefined;
   readonly live: () => boolean;
   readonly draftQuery: () => string;
   readonly setDraftQuery: (query: string) => void;
   readonly runDraftQuery: () => void;
   readonly addTerm: (term: string, view?: V) => void;
   readonly setView: (view: V) => void;
+  readonly setSortOrder: (sort: S) => void;
   readonly setRange: (since: string, until: string) => void;
   readonly setLive: (live: boolean) => void;
   readonly fetched: FetchState<R>;
@@ -38,17 +40,21 @@ interface ListBody {
   readonly truncated: boolean;
 }
 
-interface ListKey<V extends string> extends ListQuery {
+interface ListKey<V extends string, S extends string> extends ListQuery {
   readonly view: V;
+  readonly sort?: S;
 }
 
 type ListViews<V extends string> = readonly [defaultView: V, ...otherViews: V[]];
 
-interface ListOptions<V extends string, R extends ListResult<V>> {
+type ListSorts<S extends string> = readonly [defaultSort: S, ...otherSorts: S[]];
+
+interface ListOptions<V extends string, R extends ListResult<V>, S extends string> {
   readonly name: string;
   readonly views: ListViews<V>;
+  readonly sorts?: ListSorts<S>;
   readonly firstLimits: Record<V, number>;
-  readonly fetch: (key: ListKey<V>, signal: AbortSignal) => Promise<R>;
+  readonly fetch: (key: ListKey<V, S>, signal: AbortSignal) => Promise<R>;
 }
 
 interface ListSearchParams extends SearchParams {
@@ -56,31 +62,47 @@ interface ListSearchParams extends SearchParams {
   readonly since?: string;
   readonly until?: string;
   readonly view?: string;
+  readonly sort?: string;
   readonly live?: string;
 }
 
-export function createListState<V extends string, R extends ListResult<V>>(
-  options: ListOptions<V, R>,
-): ListState<V, R> {
+export function createListState<
+  V extends string,
+  R extends ListResult<V>,
+  S extends string = never,
+>(options: ListOptions<V, R, S>): ListState<V, R, S> {
   const [params, setParams] = useSearchParams<ListSearchParams>();
   const [defaultView] = options.views;
   const query = () => params.q ?? "";
   const since = () => params.since || DEFAULT_SINCE;
   const until = () => params.until ?? "";
   const view = () => options.views.find((knownView) => knownView === params.view) ?? defaultView;
+  const defaultSort = options.sorts?.[0];
+  const sortOrder = () =>
+    options.sorts?.find((knownSort) => knownSort === params.sort) ?? defaultSort;
   const live = () => params.live === "1" && until() === "";
   const toViewParam = (newView: V) => (newView === defaultView ? undefined : newView);
 
   const [draftQuery, setDraftQuery] = createSignal(() => query());
 
-  const queryIdentity = () => JSON.stringify([view(), query(), since(), until()]);
+  const queryIdentity = () => JSON.stringify([view(), sortOrder(), query(), since(), until()]);
   const [raisedLimit, setRaisedLimit] = createSignal({ forQuery: "", limit: 0 });
   const limit = () =>
     raisedLimit().forQuery === queryIdentity() ? raisedLimit().limit : options.firstLimits[view()];
 
   const fetched = createFetch(
     options.name,
-    () => ({ view: view(), q: query().trim(), since: since(), until: until(), limit: limit() }),
+    () => {
+      const sort = sortOrder();
+      return {
+        view: view(),
+        ...(sort !== undefined && { sort }),
+        q: query().trim(),
+        since: since(),
+        until: until(),
+        limit: limit(),
+      };
+    },
     options.fetch,
     live,
   );
@@ -95,6 +117,7 @@ export function createListState<V extends string, R extends ListResult<V>>(
     since,
     until,
     view,
+    sortOrder,
     live,
     draftQuery,
     setDraftQuery,
@@ -105,6 +128,7 @@ export function createListState<V extends string, R extends ListResult<V>>(
     addTerm: (term, newView = view()) =>
       setParams({ q: addTerm(query(), term), view: toViewParam(newView) }),
     setView: (newView) => setParams({ view: toViewParam(newView) }),
+    setSortOrder: (newSort) => setParams({ sort: newSort === defaultSort ? undefined : newSort }),
     setRange: (newSince, newUntil) =>
       setParams({
         since: newSince === DEFAULT_SINCE ? undefined : newSince,

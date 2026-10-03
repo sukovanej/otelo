@@ -16,8 +16,8 @@ interface ViewOption<V extends string> {
   readonly label: string;
 }
 
-interface QueryBarProps<V extends string, R extends ListResult<V>> {
-  readonly list: ListState<V, R>;
+interface QueryBarProps<V extends string, R extends ListResult<V>, S extends string> {
+  readonly list: ListState<V, R, S>;
   readonly signal: Signal;
   readonly placeholder: string;
   readonly views: ReadonlyArray<ViewOption<V>>;
@@ -25,8 +25,8 @@ interface QueryBarProps<V extends string, R extends ListResult<V>> {
   readonly children: JSX.Element;
 }
 
-export default function QueryBar<V extends string, R extends ListResult<V>>(
-  props: QueryBarProps<V, R>,
+export default function QueryBar<V extends string, R extends ListResult<V>, S extends string>(
+  props: QueryBarProps<V, R, S>,
 ) {
   const list = () => props.list;
   return (

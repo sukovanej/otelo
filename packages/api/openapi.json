@@ -718,7 +718,7 @@
     },
     "/api/spans": {
       "get": {
-        "summary": "Spans, newest first.",
+        "summary": "Spans in the order of `sort`, newest first when it is missing.",
         "operationId": "list_spans",
         "parameters": [
           {
@@ -752,10 +752,19 @@
           {
             "name": "q",
             "in": "query",
-            "description": "The records to keep, such as `http.route = \"/matches\" OR user.id = 7`.\nEvery record when missing.",
+            "description": "The spans to keep, such as `service = \"api\" duration > 500ms`. Every\nspan when missing.",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "The order: `newest` or `oldest` by start, `longest` or `shortest` by\nduration. A trace goes by its root span. `newest` when missing.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SpanSort"
             }
           }
         ],
@@ -870,7 +879,7 @@
     },
     "/api/traces": {
       "get": {
-        "summary": "Traces with a span that the query keeps, by their root span, newest first.",
+        "summary": "Traces with a span that the query keeps, by their root span, in the order of\n`sort`, newest first when it is missing.",
         "operationId": "list_traces",
         "parameters": [
           {
@@ -904,10 +913,19 @@
           {
             "name": "q",
             "in": "query",
-            "description": "The records to keep, such as `http.route = \"/matches\" OR user.id = 7`.\nEvery record when missing.",
+            "description": "The spans to keep, such as `service = \"api\" duration > 500ms`. Every\nspan when missing.",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "The order: `newest` or `oldest` by start, `longest` or `shortest` by\nduration. A trace goes by its root span. `newest` when missing.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SpanSort"
             }
           }
         ],
@@ -2308,6 +2326,16 @@
           }
         }
       },
+      "SpanSort": {
+        "type": "string",
+        "description": "The order of a list of spans, or of traces by their root span.",
+        "enum": [
+          "newest",
+          "oldest",
+          "longest",
+          "shortest"
+        ]
+      },
       "SpanStats": {
         "type": "object",
         "description": "The count, the failures, and the durations of some spans.",
@@ -2349,7 +2377,7 @@
       },
       "Spans": {
         "type": "object",
-        "description": "Spans, newest first.",
+        "description": "Spans, in the order the request asked for.",
         "required": [
           "spans",
           "truncated",
@@ -2577,7 +2605,7 @@
       },
       "Traces": {
         "type": "object",
-        "description": "Traces by their root span, newest first.",
+        "description": "Traces by their root span, in the order the request asked for.",
         "required": [
           "traces",
           "truncated",

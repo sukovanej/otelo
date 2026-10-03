@@ -19,17 +19,19 @@ interface IndexedListBody {
   readonly unindexed: ReadonlyArray<string>;
 }
 
-interface ListContentProps<V extends string, R extends IndexedListResult<V>> {
-  readonly list: ListState<V, R>;
+interface ListContentProps<V extends string, R extends IndexedListResult<V>, S extends string> {
+  readonly list: ListState<V, R, S>;
   readonly signal: IndexedSignal;
   readonly singularNoun: string;
   readonly panel: JSX.Element;
   readonly children: JSX.Element;
 }
 
-export default function ListContent<V extends string, R extends IndexedListResult<V>>(
-  props: ListContentProps<V, R>,
-) {
+export default function ListContent<
+  V extends string,
+  R extends IndexedListResult<V>,
+  S extends string,
+>(props: ListContentProps<V, R, S>) {
   const list = () => props.list;
   return (
     <div class="flex min-h-0 flex-1">

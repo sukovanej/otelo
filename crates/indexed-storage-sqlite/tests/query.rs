@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use otelo_indexed_storage::query::{
-    Bucket, BucketChange, GroupKey, Grouping, MetricFilter, Resolution, SeriesGroup,
+    Bucket, BucketChange, GroupKey, Grouping, MetricFilter, Resolution, SeriesGroup, SpanSort,
 };
 use otelo_indexed_storage::{
     AttributeValue, Attributes, Batch, Buckets, Distribution, Error, ExplicitBuckets,
@@ -245,13 +245,13 @@ fn log_bodies_matching(reader: &Reader, query: &str) -> Vec<String> {
 
 fn span_names_matching(reader: &Reader, query: &str) -> Vec<String> {
     let query = parse_query(query, Signal::Spans).unwrap();
-    let spans = reader.list_spans(&query, 100).unwrap();
+    let spans = reader.list_spans(&query, SpanSort::Newest, 100).unwrap();
     spans.spans.into_iter().map(|span| span.name).collect()
 }
 
 fn trace_names_matching(reader: &Reader, query: &str) -> Vec<String> {
     let query = parse_query(query, Signal::Spans).unwrap();
-    let traces = reader.list_traces(&query, 100).unwrap();
+    let traces = reader.list_traces(&query, SpanSort::Newest, 100).unwrap();
     traces.traces.into_iter().map(|trace| trace.name).collect()
 }
 
@@ -419,7 +419,11 @@ fn traces_match_on_any_of_their_spans() {
     let fixture = Fixture::new();
     let reader = fixture.reader_around_midnight();
     let all_traces = reader
-        .list_traces(&parse_query("", Signal::Spans).unwrap(), 10)
+        .list_traces(
+            &parse_query("", Signal::Spans).unwrap(),
+            SpanSort::Newest,
+            10,
+        )
         .unwrap();
     let found: Vec<(&str, u64, bool)> = all_traces
         .traces
@@ -480,9 +484,84 @@ fn spans_list_the_matching_spans() {
         3
     );
     let query = parse_query("db.system = sqlite", Signal::Spans).unwrap();
-    let span = &reader.list_spans(&query, 10).unwrap().spans[0];
+    let span = &reader
+        .list_spans(&query, SpanSort::Newest, 10)
+        .unwrap()
+        .spans[0];
     assert_eq!(span.trace_id, TRACE_ID);
     assert_eq!(span.resource["service.name"], "api");
+}
+
+fn sorted_span_names(reader: &Reader, sort: SpanSort) -> Vec<String> {
+    let every_span = parse_query("", Signal::Spans).unwrap();
+    let spans = reader.list_spans(&every_span, sort, 100).unwrap();
+    spans.spans.into_iter().map(|span| span.name).collect()
+}
+
+fn sorted_trace_names(reader: &Reader, sort: SpanSort) -> Vec<String> {
+    let every_span = parse_query("", Signal::Spans).unwrap();
+    let traces = reader.list_traces(&every_span, sort, 100).unwrap();
+    traces.traces.into_iter().map(|trace| trace.name).collect()
+}
+
+#[test]
+fn spans_sort_by_start_or_duration_and_ties_go_newest_first() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader_around_midnight();
+    assert_eq!(
+        sorted_span_names(&reader, SpanSort::Newest),
+        [
+            "SELECT languages",
+            "POST /matches",
+            "GET /languages",
+            "GET /health"
+        ]
+    );
+    assert_eq!(
+        sorted_span_names(&reader, SpanSort::Oldest),
+        [
+            "GET /health",
+            "GET /languages",
+            "POST /matches",
+            "SELECT languages"
+        ]
+    );
+    assert_eq!(
+        sorted_span_names(&reader, SpanSort::Longest),
+        [
+            "GET /languages",
+            "SELECT languages",
+            "POST /matches",
+            "GET /health"
+        ]
+    );
+    assert_eq!(
+        sorted_span_names(&reader, SpanSort::Shortest),
+        [
+            "SELECT languages",
+            "POST /matches",
+            "GET /health",
+            "GET /languages"
+        ]
+    );
+}
+
+#[test]
+fn traces_sort_by_the_start_or_the_duration_of_their_root_span() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader_around_midnight();
+    assert_eq!(
+        sorted_trace_names(&reader, SpanSort::Oldest),
+        ["GET /health", "GET /languages", "POST /matches"]
+    );
+    assert_eq!(
+        sorted_trace_names(&reader, SpanSort::Longest),
+        ["GET /languages", "POST /matches", "GET /health"]
+    );
+    assert_eq!(
+        sorted_trace_names(&reader, SpanSort::Shortest),
+        ["POST /matches", "GET /health", "GET /languages"]
+    );
 }
 
 #[test]

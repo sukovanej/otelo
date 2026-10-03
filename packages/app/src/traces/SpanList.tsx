@@ -4,6 +4,7 @@ import { type Column, Table } from "@otelo/viz";
 
 import ServiceName from "../ServiceName";
 import { formatTime, parseTime } from "../time";
+import { type SpanSorting, toTableSorting } from "./sort";
 import { isFailedSpan, toKindName } from "./span";
 import SpanTitle from "./SpanTitle";
 
@@ -63,6 +64,7 @@ interface SpanListProps {
   readonly spans: ReadonlyArray<TraceSpan>;
   readonly selectedKey: string | undefined;
   readonly onSelect: (span: TraceSpan | undefined) => void;
+  readonly sorting?: SpanSorting;
 }
 
 export default function SpanList(props: SpanListProps) {
@@ -72,6 +74,7 @@ export default function SpanList(props: SpanListProps) {
       rows={props.spans}
       rowKey={toSpanKey}
       columns={COLUMNS}
+      sorting={props.sorting && toTableSorting(props.sorting)}
       selectedKey={() => props.selectedKey}
       tone={(span) => (isFailedSpan(span) ? "error" : undefined)}
       onRowClick={(span) =>

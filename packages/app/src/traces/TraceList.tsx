@@ -3,6 +3,7 @@ import { type Column, Table } from "@otelo/viz";
 
 import ServiceName from "../ServiceName";
 import { formatTime, parseTime } from "../time";
+import { type SpanSorting, toTableSorting } from "./sort";
 import SpanTitle from "./SpanTitle";
 
 const COLUMNS: Column<TraceSummary>[] = [
@@ -54,6 +55,7 @@ const COLUMNS: Column<TraceSummary>[] = [
 interface TraceListProps {
   readonly traces: ReadonlyArray<TraceSummary>;
   readonly onOpen: (id: string) => void;
+  readonly sorting?: SpanSorting;
 }
 
 export default function TraceList(props: TraceListProps) {
@@ -63,6 +65,7 @@ export default function TraceList(props: TraceListProps) {
       rows={props.traces}
       rowKey={(trace) => trace.trace_id}
       columns={COLUMNS}
+      sorting={props.sorting && toTableSorting(props.sorting)}
       tone={(trace) => (trace.error ? "error" : undefined)}
       href={(trace) => `/traces/${trace.trace_id}`}
       onRowClick={(trace) => props.onOpen(trace.trace_id)}

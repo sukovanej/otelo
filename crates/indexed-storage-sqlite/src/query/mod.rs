@@ -13,7 +13,7 @@ use anyhow::bail;
 use jiff::Timestamp;
 use otelo_indexed_storage::query::{
     AttributeKeys, LogGroups, Logs, MetricFilter, MetricList, MetricSeries, Resolution, Service,
-    Services, SpanGroupingField, SpanGroups, Spans, Trace, Traces,
+    Services, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
 };
 use otelo_indexed_storage::{Error, RangeQueries, Result, SpanId, TraceId};
 use otelo_query::{Query, Signal};
@@ -213,8 +213,8 @@ impl RangeQueries for Reader {
         logs::group_logs(self, query, limit).map_err(classify_query_error)
     }
 
-    fn list_spans(&self, query: &Query, limit: usize) -> Result<Spans> {
-        traces::read_spans(self, query, limit).map_err(classify_query_error)
+    fn list_spans(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Spans> {
+        traces::read_spans(self, query, sort, limit).map_err(classify_query_error)
     }
 
     fn list_span_groups(
@@ -227,8 +227,8 @@ impl RangeQueries for Reader {
         span_groups::group_spans(self, query, by, step_ns, limit).map_err(classify_query_error)
     }
 
-    fn list_traces(&self, query: &Query, limit: usize) -> Result<Traces> {
-        traces::read_traces(self, query, limit).map_err(classify_query_error)
+    fn list_traces(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Traces> {
+        traces::read_traces(self, query, sort, limit).map_err(classify_query_error)
     }
 
     fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>> {

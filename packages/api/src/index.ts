@@ -19,6 +19,7 @@ export type Signal = Schemas["Signal"];
 export type SpanBucket = Schemas["SpanBucket"];
 export type SpanGroup = Schemas["SpanGroup"];
 export type SpanGroups = Schemas["SpanGroups"];
+export type SpanSort = Schemas["SpanSort"];
 export type SpanStats = Schemas["SpanStats"];
 export type Spans = Schemas["Spans"];
 export type TraceSpan = Schemas["TraceSpan"];

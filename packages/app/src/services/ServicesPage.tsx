@@ -130,7 +130,10 @@ export default function ServicesPage() {
                   rows={services().services}
                   rowKey={(service) => service.service}
                   columns={columns}
-                  initialSort={{ columnId: "requests", descending: true }}
+                  sorting={{
+                    kind: "table",
+                    initialOrder: { columnId: "requests", descending: true },
+                  }}
                   href={(service) =>
                     `/services/${encodeURIComponent(service.service)}${range.toSearch()}`
                   }
