@@ -8,7 +8,7 @@ use common::{StopSignal, send_get_request, start_daemon, start_daemon_with_args,
 fn health_answers_200() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
-    let response = send_get_request(&daemon.api_addr, "/health");
+    let response = send_get_request(&daemon, "/health");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     stop_daemon(daemon, StopSignal::Term);
 }
@@ -103,7 +103,7 @@ fn journals_the_otlp_it_receives_and_the_host_metrics() {
 fn traces_itself() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon_with_args(dir.path(), &["--own-telemetry", "self"]);
-    let response = send_get_request(&daemon.api_addr, "/api/logs?q=level%20%3E%3D%20warn");
+    let response = send_get_request(&daemon, "/api/logs?q=level%20%3E%3D%20warn");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     stop_daemon(daemon, StopSignal::Term);
     let connection = rusqlite::Connection::open(
@@ -138,7 +138,8 @@ fn traces_itself() {
     // The rollups and the retention of the writer trace none of their statements.
     let spans_outside_a_request: i64 = connection
         .query_row(
-            "SELECT count(*) FROM spans WHERE parent_span_id IS NULL AND name != 'GET /api/logs'",
+            "SELECT count(*) FROM spans
+             WHERE parent_span_id IS NULL AND name NOT IN ('GET /api/logs', 'POST /api/login')",
             [],
             |row| row.get(0),
         )

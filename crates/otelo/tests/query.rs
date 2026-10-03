@@ -5,7 +5,7 @@ mod common;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use common::{StopSignal, send_get_request, start_daemon, stop_daemon};
+use common::{Daemon, StopSignal, send_get_request, start_daemon, stop_daemon};
 use otelo_indexed_storage::{
     Attributes, Log, Metric, NumberPoint, Points, Records, Resource, Severity, Span, SpanId,
     SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos, open_batch_channel,
@@ -85,34 +85,30 @@ fn write_telemetry(data: &Path) {
     writer.join().unwrap();
 }
 
-fn run_otelo(addr: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_otelo"))
-        .args(args)
-        .env("OTELO_URL", format!("http://{addr}"))
-        .output()
-        .unwrap()
+fn run_otelo(daemon: &Daemon, args: &[&str]) -> Output {
+    daemon.otelo_command().args(args).output().unwrap()
 }
 
-fn run_otelo_and_parse_json(addr: &str, args: &[&str]) -> (Value, String) {
-    let output = run_otelo(addr, args);
+fn run_otelo_and_parse_json(daemon: &Daemon, args: &[&str]) -> (Value, String) {
+    let output = run_otelo(daemon, args);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(output.status.success(), "{args:?} failed: {stderr}");
     (serde_json::from_slice(&output.stdout).unwrap(), stderr)
 }
 
-fn check_calls_of_a_service_without_calls(addr: &str) {
-    let (calls, _) = run_otelo_and_parse_json(addr, &["calls", "api"]);
+fn check_calls_of_a_service_without_calls(daemon: &Daemon) {
+    let (calls, _) = run_otelo_and_parse_json(daemon, &["calls", "api"]);
     assert_eq!(calls["calls"]["count"], 0);
     assert_eq!(calls["targets"], json!([]));
     assert!(calls.get("buckets").is_none(), "{calls}");
-    let table = run_otelo(addr, &["calls", "api", "--table"]);
+    let table = run_otelo(daemon, &["calls", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.starts_with("api: 0 calls"), "{table}");
 }
 
-fn check_the_groups_of_a_metric(addr: &str) {
+fn check_the_groups_of_a_metric(daemon: &Daemon) {
     let queue_depth_args = ["metric", "queue.depth", "--by", "queue", "--top", "2"];
-    let (queue_depth, _) = run_otelo_and_parse_json(addr, &queue_depth_args);
+    let (queue_depth, _) = run_otelo_and_parse_json(daemon, &queue_depth_args);
     let keys: Vec<&Value> = queue_depth["groups"]
         .as_array()
         .unwrap()
@@ -127,7 +123,7 @@ fn check_the_groups_of_a_metric(addr: &str) {
             &json!({"type": "other", "group_count": 1, "series_count": 1}),
         ]
     );
-    let queue_depth_table = run_otelo(addr, &[&queue_depth_args[..], &["--table"]].concat());
+    let queue_depth_table = run_otelo(daemon, &[&queue_depth_args[..], &["--table"]].concat());
     let queue_depth_table = String::from_utf8(queue_depth_table.stdout).unwrap();
     assert!(
         queue_depth_table.contains("queue.depth updown {job} queue=sms (1 series) every"),
@@ -139,8 +135,8 @@ fn check_the_groups_of_a_metric(addr: &str) {
     );
 }
 
-fn check_the_spec_lists_every_path(addr: &str) {
-    let spec = send_get_request(addr, "/api/openapi.json");
+fn check_the_spec_lists_every_path(daemon: &Daemon) {
+    let spec = send_get_request(daemon, "/api/openapi.json");
     for path in [
         "/api/logs",
         "/api/logs/groups",
@@ -168,29 +164,28 @@ fn the_cli_reads_what_the_api_serves() {
     let dir = tempfile::tempdir().unwrap();
     write_telemetry(dir.path());
     let daemon = start_daemon(dir.path());
-    let addr = daemon.api_addr.clone();
 
-    let (groups, _) = run_otelo_and_parse_json(&addr, &["logs"]);
+    let (groups, _) = run_otelo_and_parse_json(&daemon, &["logs"]);
     assert_eq!(groups["groups"][0]["template"], "user <num> signed in");
     assert_eq!(groups["groups"][0]["count"], 2);
 
-    let (raw, stderr) = run_otelo_and_parse_json(&addr, &["logs", "--raw", "--limit", "1"]);
+    let (raw, stderr) = run_otelo_and_parse_json(&daemon, &["logs", "--raw", "--limit", "1"]);
     assert_eq!(raw["logs"][0]["body"], "query failed");
     assert_eq!(raw["truncated"], true);
     assert!(stderr.contains("--limit"), "{stderr}");
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
 
-    let (errors, _) = run_otelo_and_parse_json(&addr, &["logs", "--raw", "level >= error"]);
+    let (errors, _) = run_otelo_and_parse_json(&daemon, &["logs", "--raw", "level >= error"]);
     assert_eq!(errors["logs"].as_array().unwrap().len(), 1);
     let (user_logs, stderr) = run_otelo_and_parse_json(
-        &addr,
+        &daemon,
         &["logs", "--raw", "user.id", "=", "7", "OR", "user.id = 9"],
     );
     assert_eq!(user_logs["logs"][0]["body"], "user 7 signed in");
     assert_eq!(user_logs["unindexed"], json!(["user.id"]));
     assert!(stderr.contains("otelo index add logs user.id"), "{stderr}");
 
-    let (traces, _) = run_otelo_and_parse_json(&addr, &["traces", "error = true"]);
+    let (traces, _) = run_otelo_and_parse_json(&daemon, &["traces", "error = true"]);
     assert_eq!(
         traces["traces"][0],
         json!({
@@ -206,14 +201,14 @@ fn the_cli_reads_what_the_api_serves() {
             "resource": {},
         })
     );
-    let (spans, _) = run_otelo_and_parse_json(&addr, &["spans", "status = error"]);
+    let (spans, _) = run_otelo_and_parse_json(&daemon, &["spans", "status = error"]);
     assert_eq!(spans["spans"][0]["name"], "SELECT languages");
 
-    let (trace, _) = run_otelo_and_parse_json(&addr, &["trace", TRACE_ID_HEX]);
+    let (trace, _) = run_otelo_and_parse_json(&daemon, &["trace", TRACE_ID_HEX]);
     assert_eq!(trace["spans"].as_array().unwrap().len(), 2);
     assert_eq!(trace["logs"][0]["body"], "query failed");
 
-    let tree = run_otelo(&addr, &["trace", TRACE_ID_HEX, "--table"]);
+    let tree = run_otelo(&daemon, &["trace", TRACE_ID_HEX, "--table"]);
     let tree = String::from_utf8(tree.stdout).unwrap();
     assert!(tree.contains("GET /languages"), "{tree}");
     let child = tree
@@ -223,10 +218,10 @@ fn the_cli_reads_what_the_api_serves() {
     assert!(child.starts_with("└─ "), "{tree}");
     assert!(child.contains("ERROR"), "{tree}");
 
-    let (metrics, _) = run_otelo_and_parse_json(&addr, &["metrics", "--since", "2d"]);
+    let (metrics, _) = run_otelo_and_parse_json(&daemon, &["metrics", "--since", "2d"]);
     assert!(metrics["series"].is_array());
     // Both spans have the server kind, so both are requests.
-    let (services, _) = run_otelo_and_parse_json(&addr, &["services"]);
+    let (services, _) = run_otelo_and_parse_json(&daemon, &["services"]);
     let api = &services["services"][0];
     assert_eq!(api["service"], "api");
     assert_eq!(api["stats"]["requests"]["count"], 2);
@@ -234,7 +229,7 @@ fn the_cli_reads_what_the_api_serves() {
     assert_eq!(api["stats"]["error_logs"], 1);
     assert!(api.get("buckets").is_none(), "{api}");
     let (services, _) =
-        run_otelo_and_parse_json(&addr, &["services", "--buckets", "--step", "10m"]);
+        run_otelo_and_parse_json(&daemon, &["services", "--buckets", "--step", "10m"]);
     assert_eq!(services["step_ns"], 600 * SECOND_NS);
     assert!(
         !services["services"][0]["buckets"]
@@ -243,15 +238,15 @@ fn the_cli_reads_what_the_api_serves() {
             .is_empty()
     );
 
-    let (service, _) = run_otelo_and_parse_json(&addr, &["service", "api"]);
+    let (service, _) = run_otelo_and_parse_json(&daemon, &["service", "api"]);
     assert_eq!(service["operations"][0]["name"], "GET /languages");
     assert_eq!(service["operations"][1]["requests"]["errors"], 1);
-    let table = run_otelo(&addr, &["service", "api", "--table"]);
+    let table = run_otelo(&daemon, &["service", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.contains("GET /languages"), "{table}");
-    check_calls_of_a_service_without_calls(&addr);
-    check_the_groups_of_a_metric(&addr);
-    check_the_spec_lists_every_path(&addr);
+    check_calls_of_a_service_without_calls(&daemon);
+    check_the_groups_of_a_metric(&daemon);
+    check_the_spec_lists_every_path(&daemon);
     stop_daemon(daemon, StopSignal::Term);
 }
 
@@ -260,15 +255,14 @@ fn the_cli_completes_queries_and_lists_attributes() {
     let dir = tempfile::tempdir().unwrap();
     write_telemetry(dir.path());
     let daemon = start_daemon(dir.path());
-    let addr = daemon.api_addr.clone();
 
     let (completions, _) =
-        run_otelo_and_parse_json(&addr, &["complete", "logs", "user.id = 7 AND http.r"]);
+        run_otelo_and_parse_json(&daemon, &["complete", "logs", "user.id = 7 AND http.r"]);
     assert_eq!(
         completions["suggestions"],
         json!([{"text": "http.route", "start": 16, "end": 22, "kind": "field", "detail": "string, 2"}])
     );
-    let (values, _) = run_otelo_and_parse_json(&addr, &["complete", "logs", "user.id = "]);
+    let (values, _) = run_otelo_and_parse_json(&daemon, &["complete", "logs", "user.id = "]);
     let texts: Vec<&str> = values["suggestions"]
         .as_array()
         .unwrap()
@@ -278,12 +272,12 @@ fn the_cli_completes_queries_and_lists_attributes() {
     assert_eq!(texts, ["7", "8"]);
     // The cursor counts characters, and a suggestion replaces the word at it.
     let (completions_at_cursor, _) = run_otelo_and_parse_json(
-        &addr,
+        &daemon,
         &["complete", "logs", "ú = 1 OR use", "--cursor", "11"],
     );
     assert_eq!(completions_at_cursor["suggestions"][0]["start"], 9);
 
-    let (at_attribute, _) = run_otelo_and_parse_json(&addr, &["complete", "logs", "http.route"]);
+    let (at_attribute, _) = run_otelo_and_parse_json(&daemon, &["complete", "logs", "http.route"]);
     assert_eq!(
         at_attribute["field"],
         json!({
@@ -296,7 +290,7 @@ fn the_cli_completes_queries_and_lists_attributes() {
             "has_more_values_than_listed": false,
         })
     );
-    let (at_builtin_field, _) = run_otelo_and_parse_json(&addr, &["complete", "spans", "root"]);
+    let (at_builtin_field, _) = run_otelo_and_parse_json(&daemon, &["complete", "spans", "root"]);
     assert_eq!(
         at_builtin_field["field"],
         json!({
@@ -310,7 +304,7 @@ fn the_cli_completes_queries_and_lists_attributes() {
         })
     );
 
-    let (attributes, _) = run_otelo_and_parse_json(&addr, &["attributes", "logs"]);
+    let (attributes, _) = run_otelo_and_parse_json(&daemon, &["attributes", "logs"]);
     assert_eq!(attributes["record"][0]["key"], "http.route");
     assert_eq!(attributes["record"][0]["type"], "string");
     assert_eq!(attributes["record"][1]["indexed"], false);
@@ -322,18 +316,17 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     let dir = tempfile::tempdir().unwrap();
     write_telemetry(dir.path());
     let daemon = start_daemon(dir.path());
-    let addr = daemon.api_addr.clone();
 
-    let (list, _) = run_otelo_and_parse_json(&addr, &["index", "add", "logs", "user.id"]);
+    let (list, _) = run_otelo_and_parse_json(&daemon, &["index", "add", "logs", "user.id"]);
     assert_eq!(
         list["indexes"],
         json!([{"signal": "logs", "key": "user.id"}])
     );
-    let (user_logs, stderr) = run_otelo_and_parse_json(&addr, &["logs", "--raw", "user.id = 7"]);
+    let (user_logs, stderr) = run_otelo_and_parse_json(&daemon, &["logs", "--raw", "user.id = 7"]);
     assert_eq!(user_logs["unindexed"], json!([]));
     assert!(stderr.is_empty(), "{stderr}");
     let is_user_id_indexed = || {
-        let (attributes, _) = run_otelo_and_parse_json(&addr, &["attributes", "logs"]);
+        let (attributes, _) = run_otelo_and_parse_json(&daemon, &["attributes", "logs"]);
         attributes["record"]
             .as_array()
             .unwrap()
@@ -367,20 +360,19 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     stop_daemon(daemon, StopSignal::Term);
 
     let daemon = start_daemon(dir.path());
-    let addr = daemon.api_addr.clone();
-    let listed = run_otelo(&addr, &["index", "list", "--table"]);
+    let listed = run_otelo(&daemon, &["index", "list", "--table"]);
     assert!(
         String::from_utf8(listed.stdout)
             .unwrap()
             .contains("logs    user.id")
     );
-    let (list, _) = run_otelo_and_parse_json(&addr, &["index", "list"]);
+    let (list, _) = run_otelo_and_parse_json(&daemon, &["index", "list"]);
     assert_eq!(list["indexes"].as_array().unwrap().len(), 1);
-    let (list, _) = run_otelo_and_parse_json(&addr, &["index", "remove", "logs", "user.id"]);
+    let (list, _) = run_otelo_and_parse_json(&daemon, &["index", "remove", "logs", "user.id"]);
     assert_eq!(list["indexes"], json!([]));
-    let output = run_otelo(&addr, &["index", "remove", "logs", "user.id"]);
+    let output = run_otelo(&daemon, &["index", "remove", "logs", "user.id"]);
     assert!(!output.status.success());
-    let output = run_otelo(&addr, &["index", "add", "metrics", "state"]);
+    let output = run_otelo(&daemon, &["index", "add", "metrics", "state"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
         stderr.contains("only the attributes of logs and spans"),
@@ -393,9 +385,8 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
 fn a_bad_request_prints_the_reason() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon(dir.path());
-    let addr = daemon.api_addr.clone();
 
-    let output = run_otelo(&addr, &["logs", "--since", "yesterday"]);
+    let output = run_otelo(&daemon, &["logs", "--since", "yesterday"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
@@ -403,19 +394,19 @@ fn a_bad_request_prints_the_reason() {
         "{stderr}"
     );
 
-    let output = run_otelo(&addr, &["logs", "user.id = = 7"]);
+    let output = run_otelo(&daemon, &["logs", "user.id = = 7"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("column 11: expected a value"), "{stderr}");
 
-    let output = run_otelo(&addr, &["logs", "level = loud"]);
+    let output = run_otelo(&daemon, &["logs", "level = loud"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("not a severity"), "{stderr}");
 
-    let output = run_otelo(&addr, &["trace", TRACE_ID_HEX]);
+    let output = run_otelo(&daemon, &["trace", TRACE_ID_HEX]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("no spans or logs"), "{stderr}");
 
-    let output = run_otelo(&addr, &["metric", "queue.depth", "--by", "state,name"]);
+    let output = run_otelo(&daemon, &["metric", "queue.depth", "--by", "state,name"]);
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("share its name"), "{stderr}");
     stop_daemon(daemon, StopSignal::Term);
@@ -423,7 +414,11 @@ fn a_bad_request_prints_the_reason() {
 
 #[test]
 fn an_unreachable_daemon_is_named() {
-    let output = run_otelo("127.0.0.1:1", &["traces"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_otelo"))
+        .arg("traces")
+        .env("OTELO_URL", "http://127.0.0.1:1")
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("http://127.0.0.1:1"), "{stderr}");

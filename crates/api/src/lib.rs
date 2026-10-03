@@ -1,3 +1,4 @@
+mod auth;
 mod catalog;
 mod error;
 mod indexes;
@@ -27,9 +28,11 @@ use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::auth::LoginGate;
 use crate::error::{ApiError, ApiResult};
 use crate::time::check_limit;
 
+pub use auth::{LoginBody, SESSION_COOKIE_NAME, require_session};
 pub use catalog::{
     CompletionKind, Completions, FieldBody, FieldOriginBody, FieldValueBody, SignalName,
     SuggestionBody,
@@ -50,7 +53,9 @@ const HOUR_NS: i64 = 3_600_000_000_000;
 #[openapi(
     info(
         title = "otelo",
-        description = "Query the logs, traces, and metrics that otelo keeps."
+        description = "Query the logs, traces, and metrics that otelo keeps. Every path but \
+            `POST /api/login` needs the session that the login starts, as the cookie \
+            `otelo_session` or as `Authorization: Bearer <session>`."
     ),
     components(schemas(SignalName))
 )]
@@ -58,11 +63,12 @@ struct OpenApiInfo;
 
 #[derive(Clone)]
 pub struct Api {
-    pub storage: Arc<dyn Storage>,
-    pub state: Arc<StateFile>,
+    storage: Arc<dyn Storage>,
+    state: Arc<StateFile>,
+    login_gate: Arc<LoginGate>,
 }
 
-fn build_query_routes() -> OpenApiRouter<Api> {
+fn build_api_routes() -> OpenApiRouter<Api> {
     OpenApiRouter::with_openapi(OpenApiInfo::openapi())
         .routes(routes!(logs::list_logs))
         .routes(routes!(logs::list_log_groups))
@@ -80,15 +86,17 @@ fn build_query_routes() -> OpenApiRouter<Api> {
         .routes(routes!(catalog::complete_query))
         .routes(routes!(indexes::list_indexes))
         .routes(routes!(indexes::add_index, indexes::remove_index))
+        .routes(routes!(auth::log_in))
+        .routes(routes!(auth::log_out))
 }
 
 #[must_use]
 pub fn build_openapi_spec() -> utoipa::openapi::OpenApi {
-    build_query_routes().into_openapi()
+    build_api_routes().into_openapi()
 }
 
 pub fn build_router(api: Api) -> Router {
-    let (router, spec) = build_query_routes().with_state(api).split_for_parts();
+    let (router, spec) = build_api_routes().with_state(api).split_for_parts();
     router
         .route(
             "/api/openapi.json",
@@ -161,6 +169,15 @@ pub enum DefaultSince {
 }
 
 impl Api {
+    #[must_use]
+    pub fn new(storage: Arc<dyn Storage>, state: Arc<StateFile>) -> Self {
+        Self {
+            storage,
+            state,
+            login_gate: Arc::new(LoginGate::new()),
+        }
+    }
+
     async fn run_blocking_query<T: Send + 'static>(
         &self,
         query: impl FnOnce(&Self) -> Result<T, ApiError> + Send + 'static,

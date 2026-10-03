@@ -7,7 +7,11 @@ publish.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+argon2 = { workspace = true }
+data-encoding = { workspace = true }
+getrandom = { workspace = true }
 rusqlite = { workspace = true }
+sha2 = { workspace = true }
 otelo-query = { workspace = true }
 otelo-indexed-storage = { workspace = true }
 

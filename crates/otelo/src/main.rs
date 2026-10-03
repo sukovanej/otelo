@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use otelo::{cli, serve};
+use otelo::{cli, init, serve};
 
 #[derive(Parser)]
 #[command(version, about = "Deploy, run, and observe the apps on one server")]
@@ -10,8 +10,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Make the password of a data directory, and print it once
+    Init(init::InitArgs),
     /// Run the daemon
     Serve(serve::ServeArgs),
+    /// Trade the password for a session, which the next commands send
+    Login(cli::LoginArgs),
+    /// End the session of the daemon
+    Logout(cli::LogoutArgs),
     /// Print log lines, grouped by message template unless --raw
     Logs(cli::LogsArgs),
     /// List spans, newest first
@@ -42,7 +48,10 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
+        Command::Init(args) => init::init_data_directory(&args),
         Command::Serve(args) => serve::run_daemon(args),
+        Command::Login(args) => cli::log_in(&args),
+        Command::Logout(args) => cli::log_out(&args),
         Command::Logs(args) => cli::print_logs(&args),
         Command::Spans(args) => cli::print_spans(&args),
         Command::Traces(args) => cli::print_traces(&args),

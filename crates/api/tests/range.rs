@@ -27,10 +27,10 @@ fn parses_durations_and_timestamps() {
 #[test]
 fn caps_the_range_at_the_retention_of_its_signals() {
     let dir = tempfile::tempdir().unwrap();
-    let api = Api {
-        storage: Arc::new(Sqlite::open(dir.path(), BTreeSet::new()).unwrap()),
-        state: Arc::new(StateFile::open(dir.path()).unwrap()),
-    };
+    let api = Api::new(
+        Arc::new(Sqlite::open(dir.path(), BTreeSet::new()).unwrap()),
+        Arc::new(StateFile::open(dir.path()).unwrap()),
+    );
     let range = api
         .resolve_range_within_retention(
             RangeSignals::One(Signal::Logs),

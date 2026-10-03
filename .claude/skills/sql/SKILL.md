@@ -9,7 +9,7 @@ Two crates write SQL, each for its own file:
 
 - `otelo-indexed-storage-sqlite` for `telemetry.sqlite`. Its schema is `schema.sql` in
   `crates/indexed-storage-sqlite/src/`.
-- `otelo-state` for `state.sqlite`. Its schema is the state SQL in `crates/state/src/`.
+- `otelo-state` for `state.sqlite`. Its schema is the steps in `crates/state/src/migrations/`.
 
 The statements are strings in the Rust sources of the crate that owns the file.
 
@@ -69,13 +69,24 @@ The statements are strings in the Rust sources of the crate that owns the file.
 - `GROUP BY` and `ORDER BY` name their columns, never `1, 2`. To sort by an aggregate,
   name it with `AS`.
 
-## Changing the schema
+## Changing the schema of telemetry.sqlite
 
 - otelo is in development and the tables are still being designed. Change a table, a
   column, or an index as soon as a better design shows up.
-- The files carry no schema version, and no code handles a file of an older schema: no
+- The file carries no schema version, and no code handles a file of an older schema: no
   migration, no check, nothing that sets the file aside or fills in what it lacks.
 - After a change, delete the telemetry files written before it, such as
   `target/dev/telemetry/`.
 - The same commit changes the `telemetry` doc, the tests, and the SQL in
   `packages/ui/tests/sql.test.ts`.
+
+## Changing the schema of state.sqlite
+
+- `state.sqlite` keeps what no journal can rebuild: the indexed attributes, the password,
+  and the sessions. A change never deletes it.
+- Each change is a new step: a file `<number>_<what>.sql` in `crates/state/src/migrations/`,
+  added to the end of `MIGRATIONS`. `PRAGMA user_version` counts the steps a file has.
+- A step that has shipped never changes. A later step alters what an earlier one made.
+- A step runs once, so its `CREATE` has no `IF NOT EXISTS`. Step 1 keeps it, for the files
+  from before the migrations.
+- The same commit adds a test that brings a file of the step before to the new one.
