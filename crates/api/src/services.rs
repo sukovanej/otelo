@@ -3,12 +3,13 @@ use otelo_indexed_storage::SpanKind;
 use otelo_indexed_storage::query::{
     CallDetail, Calls, OperationDetail, Service, Services, TargetKey, TargetType,
 };
+use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{parse_step_ns, resolve_step};
-use crate::{Api, DefaultSince};
+use crate::{Api, DefaultSince, RequestedRange};
 
 /// The range, the limit, and the step of the services.
 #[derive(Deserialize, IntoParams)]
@@ -45,9 +46,12 @@ pub async fn list_services(
 ) -> ApiResult<Services> {
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans, Signal::Logs],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         100,
         move |opened, limit| {
@@ -80,9 +84,12 @@ pub async fn get_service(
 ) -> ApiResult<Service> {
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans, Signal::Logs],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         50,
         move |opened, limit| {
@@ -135,9 +142,12 @@ pub async fn get_operation(
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     let (operation, kind) = (params.operation, params.kind);
     api.run_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         move |opened| {
             let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
             Ok(opened
@@ -175,9 +185,12 @@ pub async fn list_calls(
 ) -> ApiResult<Calls> {
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         50,
         move |opened, limit| {
@@ -246,9 +259,12 @@ pub async fn get_call(
     };
     let (summary, kind) = (params.summary, params.kind);
     api.run_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         move |opened| {
             let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
             Ok(opened

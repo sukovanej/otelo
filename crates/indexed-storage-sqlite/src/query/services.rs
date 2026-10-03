@@ -8,8 +8,8 @@ use otelo_indexed_storage::query::{
 };
 use otelo_indexed_storage::{Attributes, Severity, SpanKind, SpanStatus};
 
-use super::{DaySchema, WhereClause, new_statement_span, timestamp_from_nanos, truncate_to_limit};
-use crate::{Day, Reader};
+use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
+use crate::Reader;
 
 fn entry_span_condition() -> String {
     format!(
@@ -168,26 +168,23 @@ struct EntrySpan {
     started_at: i64,
     duration_ns: i64,
     failed: bool,
-    location: SpanLocation,
+    rowid: SpanRowid,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct SpanLocation {
-    pub(super) day: Day,
-    pub(super) rowid: i64,
-}
+pub(super) struct SpanRowid(pub(super) i64);
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct NewestRequest<Detail = ()> {
     pub(super) started_at: i64,
-    pub(super) location: SpanLocation,
+    pub(super) rowid: SpanRowid,
     pub(super) detail: Detail,
 }
 
 fn keep_newest_request<Detail>(
     newest_request: &mut Option<NewestRequest<Detail>>,
     started_at: i64,
-    location: SpanLocation,
+    rowid: SpanRowid,
     detail: impl FnOnce() -> Detail,
 ) {
     if newest_request
@@ -196,7 +193,7 @@ fn keep_newest_request<Detail>(
     {
         *newest_request = Some(NewestRequest {
             started_at,
-            location,
+            rowid,
             detail: detail(),
         });
     }
@@ -222,56 +219,34 @@ impl<Detail> OperationTally<Detail> {
         started_at: i64,
         duration_ns: i64,
         failed: bool,
-        location: SpanLocation,
+        rowid: SpanRowid,
         detail: impl FnOnce() -> Detail,
     ) {
         self.requests.add_request(duration_ns, failed);
-        keep_newest_request(&mut self.newest_request, started_at, location, detail);
+        keep_newest_request(&mut self.newest_request, started_at, rowid, detail);
     }
 }
 
 impl Reader {
     pub(super) fn read_span_attributes(
         &self,
-        locations: impl Iterator<Item = SpanLocation>,
-    ) -> anyhow::Result<HashMap<SpanLocation, Attributes>> {
-        let mut rowids_by_day: BTreeMap<Day, Vec<i64>> = BTreeMap::new();
-        for location in locations {
-            rowids_by_day
-                .entry(location.day)
-                .or_default()
-                .push(location.rowid);
+        rowids: impl Iterator<Item = SpanRowid>,
+    ) -> anyhow::Result<HashMap<SpanRowid, Attributes>> {
+        let rowid_list = rowids
+            .map(|rowid| rowid.0.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if rowid_list.is_empty() {
+            return Ok(HashMap::new());
         }
-        let mut attributes_by_location = HashMap::new();
-        for (day, rowids) in rowids_by_day {
-            let day_schema = DaySchema { day };
-            let rowid_list = rowids
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT rowid, attributes FROM {day_schema}.spans WHERE rowid IN ({rowid_list})"
-            );
-            let statement_span = new_statement_span(&sql);
-            let _entered = statement_span.enter();
-            let mut statement = self.connection().prepare(&sql)?;
-            let mut rows = statement.query([])?;
-            let mut returned_rows = 0_i64;
-            while let Some(row) = rows.next()? {
-                returned_rows += 1;
-                let attributes: String = row.get(1)?;
-                attributes_by_location.insert(
-                    SpanLocation {
-                        day,
-                        rowid: row.get(0)?,
-                    },
-                    serde_json::from_str(&attributes)?,
-                );
-            }
-            statement_span.record("db.response.returned_rows", returned_rows);
-        }
-        Ok(attributes_by_location)
+        let sql = format!("SELECT rowid, attributes FROM spans WHERE rowid IN ({rowid_list})");
+        let mut attributes_by_rowid = HashMap::new();
+        self.scan_rows(&sql, &WhereClause::new(), |row| {
+            let attributes: String = row.get(1)?;
+            attributes_by_rowid.insert(SpanRowid(row.get(0)?), serde_json::from_str(&attributes)?);
+            Ok(ControlFlow::Continue(()))
+        })?;
+        Ok(attributes_by_rowid)
     }
 
     pub(super) fn check_step(&self, step_ns: i64) -> anyhow::Result<()> {
@@ -304,49 +279,39 @@ impl Reader {
             where_clause.push_condition_with_param("span.name = :name", ":name", name.to_owned());
             where_clause.push_condition_with_param("span.kind = :kind", ":kind", kind.number());
         }
-        self.scan_rows(
-            ["", ""],
-            |day_schema| {
-                format!(
-                    "SELECT resource.service, span.name, span.kind, span.started_at,
-                            span.duration_ns, span.status, '{}', span.rowid
-                     FROM {day_schema}.spans span
-                     JOIN {day_schema}.resources resource ON resource.id = span.resource_id
-                     WHERE {}",
-                    day_schema.day,
-                    where_clause.sql_for_day(day_schema)
-                )
-            },
-            &where_clause,
-            |row| {
-                let entry = EntrySpan {
-                    service: row.get(0)?,
-                    name: row.get(1)?,
-                    kind: SpanKind::from_number(row.get(2)?),
-                    started_at: row.get(3)?,
-                    duration_ns: row.get(4)?,
-                    failed: SpanStatus::from_number(row.get(5)?).is_error(),
-                    location: SpanLocation {
-                        day: row.get(6)?,
-                        rowid: row.get(7)?,
-                    },
-                };
-                let tally = tallies.entry(entry.service.clone()).or_default();
-                tally
-                    .total
-                    .requests
-                    .add_request(entry.duration_ns, entry.failed);
-                let step_at = entry.started_at.div_euclid(step_ns) * step_ns;
-                tally
-                    .steps
-                    .entry(step_at)
-                    .or_default()
-                    .requests
-                    .add_request(entry.duration_ns, entry.failed);
-                on_entry_span(&entry);
-                Ok(ControlFlow::Continue(()))
-            },
-        )?;
+        let sql = format!(
+            "SELECT resource.service, span.name, span.kind, span.started_at, span.duration_ns,
+                    span.status_code, span.rowid
+             FROM spans span
+             JOIN resources resource ON resource.id = span.resource_id
+             WHERE {}",
+            where_clause.sql()
+        );
+        self.scan_rows(&sql, &where_clause, |row| {
+            let entry = EntrySpan {
+                service: row.get(0)?,
+                name: row.get(1)?,
+                kind: SpanKind::from_number(row.get(2)?),
+                started_at: row.get(3)?,
+                duration_ns: row.get(4)?,
+                failed: SpanStatus::from_number(row.get(5)?).is_error(),
+                rowid: SpanRowid(row.get(6)?),
+            };
+            let tally = tallies.entry(entry.service.clone()).or_default();
+            tally
+                .total
+                .requests
+                .add_request(entry.duration_ns, entry.failed);
+            let step_at = entry.started_at.div_euclid(step_ns) * step_ns;
+            tally
+                .steps
+                .entry(step_at)
+                .or_default()
+                .requests
+                .add_request(entry.duration_ns, entry.failed);
+            on_entry_span(&entry);
+            Ok(ControlFlow::Continue(()))
+        })?;
 
         // No operation has logs.
         if !matches!(scope, TallyScope::Operation { .. }) {
@@ -370,37 +335,27 @@ impl Reader {
                 service.to_owned(),
             );
         }
-        self.scan_rows(
-            [
-                "SELECT service, step_start_at, sum(log_count), sum(error_log_count) FROM (",
-                ") GROUP BY service, step_start_at",
-            ],
-            |day_schema| {
-                format!(
-                    "SELECT resource.service, log.logged_at / :step * :step AS step_start_at,
-                            count(*) AS log_count,
-                            sum(log.severity >= {}) AS error_log_count
-                     FROM {day_schema}.logs log
-                     JOIN {day_schema}.resources resource ON resource.id = log.resource_id
-                     WHERE {}
-                     GROUP BY resource.service, step_start_at",
-                    Severity::ERROR.number(),
-                    where_clause.sql_for_day(day_schema)
-                )
-            },
-            &where_clause,
-            |row| {
-                let logs = u64::try_from(row.get::<_, i64>(2)?)?;
-                let error_logs = u64::try_from(row.get::<_, i64>(3)?)?;
-                let tally = tallies.entry(row.get(0)?).or_default();
-                tally.total.logs += logs;
-                tally.total.error_logs += error_logs;
-                let step = tally.steps.entry(row.get(1)?).or_default();
-                step.logs += logs;
-                step.error_logs += error_logs;
-                Ok(ControlFlow::Continue(()))
-            },
-        )?;
+        let sql = format!(
+            "SELECT resource.service, log.logged_at / :step * :step AS step_start_at, count(*),
+                    sum(log.severity_number >= {})
+             FROM logs log
+             JOIN resources resource ON resource.id = log.resource_id
+             WHERE {}
+             GROUP BY resource.service, step_start_at",
+            Severity::ERROR.number(),
+            where_clause.sql()
+        );
+        self.scan_rows(&sql, &where_clause, |row| {
+            let logs = u64::try_from(row.get::<_, i64>(2)?)?;
+            let error_logs = u64::try_from(row.get::<_, i64>(3)?)?;
+            let tally = tallies.entry(row.get(0)?).or_default();
+            tally.total.logs += logs;
+            tally.total.error_logs += error_logs;
+            let step = tally.steps.entry(row.get(1)?).or_default();
+            step.logs += logs;
+            step.error_logs += error_logs;
+            Ok(ControlFlow::Continue(()))
+        })?;
         Ok(())
     }
 
@@ -417,26 +372,20 @@ impl Reader {
             );
         }
         let mut resources = HashMap::new();
-        self.scan_rows(
-            [
-                "SELECT service, attributes FROM (",
-                // A resource with attributes wins over one without, such as the writer's own.
-                ") ORDER BY attributes != '{}', day, id",
-            ],
-            |day_schema| {
-                format!(
-                    "SELECT '{}' AS day, id, service, attributes FROM {day_schema}.resources WHERE {}",
-                    day_schema.day,
-                    where_clause.sql_for_day(day_schema)
-                )
-            },
-            &where_clause,
-            |row| {
-                let attributes: String = row.get(1)?;
-                resources.insert(row.get(0)?, serde_json::from_str(&attributes)?);
-                Ok(ControlFlow::Continue(()))
-            },
-        )?;
+        // A resource with attributes wins over one without, such as the writer's own, and a
+        // newer one over an older one.
+        let sql = format!(
+            "SELECT service, attributes
+             FROM resources
+             WHERE {}
+             ORDER BY attributes != '{{}}', id",
+            where_clause.sql()
+        );
+        self.scan_rows(&sql, &where_clause, |row| {
+            let attributes: String = row.get(1)?;
+            resources.insert(row.get(0)?, serde_json::from_str(&attributes)?);
+            Ok(ControlFlow::Continue(()))
+        })?;
         Ok(resources)
     }
 }
@@ -490,7 +439,7 @@ pub(super) fn summarize_service(
                 entry.started_at,
                 entry.duration_ns,
                 entry.failed,
-                entry.location,
+                entry.rowid,
                 || (),
             );
     })?;
@@ -509,7 +458,7 @@ pub(super) fn summarize_service(
             operation
                 .newest_request
                 .as_ref()
-                .map(|newest_request| newest_request.location)
+                .map(|newest_request| newest_request.rowid)
         }))?;
     let operations = operations
         .into_iter()
@@ -518,7 +467,7 @@ pub(super) fn summarize_service(
             kind,
             attributes: operation
                 .newest_request
-                .and_then(|newest_request| attributes.remove(&newest_request.location))
+                .and_then(|newest_request| attributes.remove(&newest_request.rowid))
                 .unwrap_or_default(),
             requests: operation.requests.to_requests(),
         })
@@ -555,13 +504,13 @@ pub(super) fn summarize_operation(
         kind,
     };
     let mut tallies = reader.tally_services(scope, step_ns, |entry| {
-        keep_newest_request(&mut newest_request, entry.started_at, entry.location, || ());
+        keep_newest_request(&mut newest_request, entry.started_at, entry.rowid, || ());
     })?;
     let tally = tallies.remove(service).unwrap_or_default();
     let attributes = match newest_request {
         Some(newest_request) => reader
-            .read_span_attributes(std::iter::once(newest_request.location))?
-            .remove(&newest_request.location),
+            .read_span_attributes(std::iter::once(newest_request.rowid))?
+            .remove(&newest_request.rowid),
         None => None,
     };
     let first_step_at = reader.range().start_at().div_euclid(step_ns) * step_ns;

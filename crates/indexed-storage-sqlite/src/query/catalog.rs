@@ -1,9 +1,11 @@
 use otelo_indexed_storage::AttributeValue;
 use otelo_indexed_storage::query::{Attribute, AttributeKeys};
 use otelo_query::{BuiltinField, Catalog, Field, FieldValues, KeyInfo, Signal, Value, ValueInfo};
+use rusqlite::params;
 
 use crate::Reader;
-use crate::catalog::{KeyGroup, value_type_from_stored_name};
+use crate::catalog::{AttributeOwner, MAX_VALUES_PER_KEY, json_type_from_stored_name};
+use crate::day::Day;
 
 const MAX_CATALOG_ROWS: usize = 500;
 
@@ -18,7 +20,7 @@ impl ListedColumn {
     const fn table_name(self) -> &'static str {
         match self {
             Self::ResourceService => "resources",
-            Self::SeriesName | Self::SeriesUnit => "series",
+            Self::SeriesName | Self::SeriesUnit => "metric_series",
         }
     }
 
@@ -32,37 +34,46 @@ impl ListedColumn {
 }
 
 impl Reader {
-    fn read_catalog_keys(&self, group: KeyGroup) -> anyhow::Result<Vec<KeyInfo>> {
+    const fn days_of_range(&self) -> (Day, Day) {
+        (
+            Day::from_unix_nanos(self.range().start_at()),
+            Day::from_unix_nanos(self.range().end_at() - 1),
+        )
+    }
+
+    fn read_catalog_keys(&self, owner: AttributeOwner) -> anyhow::Result<Vec<KeyInfo>> {
+        let (first_day, last_day) = self.days_of_range();
         let mut statement = self.connection().prepare(&format!(
             "SELECT key,
-                    CASE WHEN count(DISTINCT value_type) > 1 THEN 'mixed' ELSE min(value_type) END,
-                    sum(count) AS record_count
-             FROM attribute_keys
-             WHERE key_group = ?1
+                    CASE WHEN count(DISTINCT json_type) > 1 THEN 'mixed' ELSE min(json_type) END,
+                    sum(record_count) AS total_record_count
+             FROM attribute_key_counts
+             WHERE attribute_owner = ?1 AND day >= ?2 AND day <= ?3
              GROUP BY key
-             ORDER BY record_count DESC, key
+             ORDER BY total_record_count DESC, key
              LIMIT {MAX_CATALOG_ROWS}"
         ))?;
-        let rows = statement.query_map([group.name()], |row| {
+        let rows = statement.query_map(params![owner.name(), first_day, last_day], |row| {
             Ok(KeyInfo {
                 key: row.get(0)?,
-                value_type: value_type_from_stored_name(&row.get::<_, String>(1)?),
+                value_type: json_type_from_stored_name(&row.get::<_, String>(1)?),
                 count: row.get::<_, i64>(2)?.cast_unsigned(),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    fn read_catalog_values(&self, group: KeyGroup, key: &str) -> anyhow::Result<FieldValues> {
+    fn read_catalog_values(&self, owner: AttributeOwner, key: &str) -> anyhow::Result<FieldValues> {
+        let (first_day, last_day) = self.days_of_range();
         let mut statement = self.connection().prepare(&format!(
-            "SELECT value, sum(count) AS record_count
-             FROM attribute_values
-             WHERE key_group = ?1 AND key = ?2
+            "SELECT value, sum(record_count) AS total_record_count
+             FROM attribute_value_counts
+             WHERE attribute_owner = ?1 AND key = ?2 AND day >= ?3 AND day <= ?4
              GROUP BY value
-             ORDER BY record_count DESC, value
+             ORDER BY total_record_count DESC, value
              LIMIT {MAX_CATALOG_ROWS}"
         ))?;
-        let rows = statement.query_map([group.name(), key], |row| {
+        let rows = statement.query_map(params![owner.name(), key, first_day, last_day], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         let mut values = Vec::new();
@@ -82,13 +93,48 @@ impl Reader {
         }
         let has_more_values_than_listed = self.connection().query_row(
             "SELECT coalesce(max(has_more_values_than_listed), 0)
-             FROM attribute_keys
-             WHERE key_group = ?1 AND key = ?2",
-            [group.name(), key],
+             FROM attribute_key_counts
+             WHERE attribute_owner = ?1 AND key = ?2 AND day >= ?3 AND day <= ?4",
+            params![owner.name(), key, first_day, last_day],
             |row| row.get(0),
         )?;
         Ok(FieldValues {
             listed: values,
+            has_more_values_than_listed,
+        })
+    }
+
+    fn read_span_names(&self) -> anyhow::Result<FieldValues> {
+        let (first_day, last_day) = self.days_of_range();
+        let mut statement = self.connection().prepare(&format!(
+            "SELECT name, sum(record_count) AS total_record_count
+             FROM span_name_counts
+             WHERE day >= ?1 AND day <= ?2
+             GROUP BY name
+             ORDER BY total_record_count DESC, name
+             LIMIT {MAX_CATALOG_ROWS}"
+        ))?;
+        let rows = statement.query_map(params![first_day, last_day], |row| {
+            Ok(ValueInfo {
+                value: Value::String(row.get(0)?),
+                count: row.get::<_, i64>(1)?.cast_unsigned(),
+            })
+        })?;
+        let listed = rows.collect::<Result<_, _>>()?;
+        // The writer stops at this many names a day, so a day that reached it may have more.
+        let has_more_values_than_listed = self.connection().query_row(
+            &format!(
+                "SELECT EXISTS (SELECT 1
+                                FROM span_name_counts
+                                WHERE day >= ?1 AND day <= ?2
+                                GROUP BY day
+                                HAVING count(*) >= {MAX_VALUES_PER_KEY})"
+            ),
+            params![first_day, last_day],
+            |row| row.get(0),
+        )?;
+        Ok(FieldValues {
+            listed,
             has_more_values_than_listed,
         })
     }
@@ -128,24 +174,22 @@ fn read_or_warn<T: Default>(result: anyhow::Result<T>) -> T {
 
 impl Catalog for Reader {
     fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo> {
-        let group = if resource {
-            KeyGroup::Resource
+        let owner = if resource {
+            AttributeOwner::Resource
         } else {
-            KeyGroup::from(signal)
+            AttributeOwner::from(signal)
         };
-        read_or_warn(self.read_catalog_keys(group))
+        read_or_warn(self.read_catalog_keys(owner))
     }
 
     fn values(&self, signal: Signal, field: &Field) -> FieldValues {
         read_or_warn(match field {
-            Field::Attribute(key) => self.read_catalog_values(KeyGroup::from(signal), key),
-            Field::Resource(key) => self.read_catalog_values(KeyGroup::Resource, key),
+            Field::Attribute(key) => self.read_catalog_values(AttributeOwner::from(signal), key),
+            Field::Resource(key) => self.read_catalog_values(AttributeOwner::Resource, key),
             Field::Builtin(BuiltinField::Service) => {
                 self.read_column_values(ListedColumn::ResourceService)
             }
-            Field::Builtin(BuiltinField::Name) if signal == Signal::Spans => {
-                self.read_catalog_values(KeyGroup::SpanNames, "name")
-            }
+            Field::Builtin(BuiltinField::Name) if signal == Signal::Spans => self.read_span_names(),
             Field::Builtin(BuiltinField::Name) => self.read_column_values(ListedColumn::SeriesName),
             Field::Builtin(BuiltinField::Unit) => self.read_column_values(ListedColumn::SeriesUnit),
             Field::Builtin(_) => Ok(FieldValues::default()),
@@ -174,7 +218,10 @@ pub(super) fn list_attribute_keys(
             .collect()
     };
     Ok(AttributeKeys {
-        record: to_attributes(reader.read_catalog_keys(KeyGroup::from(signal))?, true),
-        resource: to_attributes(reader.read_catalog_keys(KeyGroup::Resource)?, false),
+        record: to_attributes(
+            reader.read_catalog_keys(AttributeOwner::from(signal))?,
+            true,
+        ),
+        resource: to_attributes(reader.read_catalog_keys(AttributeOwner::Resource)?, false),
     })
 }

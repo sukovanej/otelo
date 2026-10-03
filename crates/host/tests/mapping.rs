@@ -560,7 +560,6 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
     let mut snapshot_mapper = SnapshotMapper::new(droplet());
     let storage_size = StorageSize {
         telemetry_bytes: 52_000_000,
-        rollup_bytes: 4_000_000,
         state_bytes: 8192,
     };
     let rows = collect_point_rows(&snapshot_mapper.map_snapshot_to_batch(
@@ -570,11 +569,7 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
     ));
     assert_eq!(
         values_by_attribute(&rows, "otelo.storage.size", "otelo.storage.file"),
-        owned_pairs(&[
-            ("telemetry", 52_000_000.0),
-            ("rollup", 4_000_000.0),
-            ("state", 8192.0),
-        ])
+        owned_pairs(&[("telemetry", 52_000_000.0), ("state", 8192.0),])
     );
     let size_row = rows
         .iter()

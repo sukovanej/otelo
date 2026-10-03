@@ -7,7 +7,7 @@ use otelo_indexed_storage::{
     SpanId, SpanKind, SpanStatus, Storage, StorageSize, Temporality, TimeRange, TraceContext,
     TraceId, open_batch_channel,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, Writer};
+use otelo_indexed_storage_sqlite::{Config, Day, Reader, Sqlite, TELEMETRY_FILE_NAME, Writer};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
@@ -104,10 +104,10 @@ fn write_inbox(directory: &Path, sender: BatchSender, inbox: BatchInbox) {
     writer.join().unwrap();
 }
 
-fn query_pairs<T: rusqlite::types::FromSql>(
+fn query_pairs<First: rusqlite::types::FromSql, Second: rusqlite::types::FromSql>(
     connection: &Connection,
     sql: &str,
-) -> Vec<(String, T)> {
+) -> Vec<(First, Second)> {
     connection
         .prepare(sql)
         .unwrap()
@@ -121,7 +121,6 @@ fn query_pairs<T: rusqlite::types::FromSql>(
 fn reads_back_each_kind_across_a_day_boundary() {
     let directory = tempfile::tempdir().unwrap();
     let today = Day::today();
-    let yesterday = today.add_days(-1);
     let before_midnight_at = today.start_at() - SECOND;
     let after_midnight_at = today.start_at() + SECOND;
     let records = vec![Records {
@@ -149,59 +148,57 @@ fn reads_back_each_kind_across_a_day_boundary() {
         TimeRange::new(before_midnight_at, after_midnight_at + 1).unwrap(),
     )
     .unwrap();
-    assert_eq!(reader.days(), [yesterday, today]);
     let connection = reader.connection();
-    let (yesterday_name, today_name) = (yesterday.to_string(), today.to_string());
-
-    let bodies: Vec<(String, String)> = query_pairs(
+    let bodies: Vec<(i64, String)> = query_pairs(
         connection,
-        "SELECT day, body FROM logs ORDER BY logged_at, body",
+        "SELECT logged_at, body FROM logs ORDER BY logged_at, body",
     );
     assert_eq!(
         bodies,
         [
-            (yesterday_name.clone(), "user 7 signed in".into()),
-            (today_name.clone(), "payment 12 failed".into()),
-            (today_name.clone(), "user 8 signed in".into()),
+            (before_midnight_at, "user 7 signed in".into()),
+            (after_midnight_at, "payment 12 failed".into()),
+            (after_midnight_at, "user 8 signed in".into()),
         ]
     );
-    let names: Vec<(String, String)> = query_pairs(
+    let names: Vec<(i64, String)> = query_pairs(
         connection,
-        "SELECT day, name FROM spans ORDER BY started_at",
+        "SELECT started_at, name FROM spans ORDER BY started_at",
     );
     assert_eq!(
         names,
         [
-            (yesterday_name.clone(), "GET /languages".into()),
-            (today_name.clone(), "POST /matches".into())
+            (before_midnight_at, "GET /languages".into()),
+            (after_midnight_at, "POST /matches".into())
         ]
     );
-    let values: Vec<(String, f64)> = query_pairs(
+    let values: Vec<(i64, f64)> = query_pairs(
         connection,
-        "SELECT point.day, point.value
-         FROM points point
-         JOIN series ON series.day = point.day AND series.id = point.series_id
-         WHERE series.name = 'process.memory.usage'
+        "SELECT point.recorded_at, point.value
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name = 'process.memory.usage'
          ORDER BY point.recorded_at",
     );
     assert_eq!(
         values,
-        [(yesterday_name.clone(), 100.0), (today_name.clone(), 200.0)]
+        [(before_midnight_at, 100.0), (after_midnight_at, 200.0)]
     );
-
-    let resources: Vec<(String, i64)> = query_pairs(
-        connection,
-        "SELECT day, count(*) FROM resources WHERE service = 'api' GROUP BY day ORDER BY day",
-    );
-    assert_eq!(resources, [(yesterday_name, 1), (today_name.clone(), 1)]);
-
-    let found: Vec<(String, String)> = query_pairs(
-        connection,
-        &format!(
-            "SELECT '{today_name}', body FROM \"{today_name}\".logs_fts WHERE logs_fts MATCH 'payment'"
+    assert_eq!(
+        query_integer(
+            connection,
+            "SELECT count(*) FROM resources WHERE service = 'api'"
         ),
+        1
     );
-    assert_eq!(found, [(today_name, "payment 12 failed".into())]);
+    let found: Vec<(i64, String)> = query_pairs(
+        connection,
+        "SELECT log.logged_at, log.body
+         FROM log_body_search
+         JOIN logs log ON log.rowid = log_body_search.rowid
+         WHERE log_body_search MATCH 'payment'",
+    );
+    assert_eq!(found, [(after_midnight_at, "payment 12 failed".into())]);
 }
 
 #[test]
@@ -214,74 +211,48 @@ fn a_full_channel_drops_the_batch_and_the_writer_reports_it() {
     assert_eq!(sender.dropped_batches(), 1);
     write_inbox(directory.path(), sender, inbox);
 
-    let reader = Reader::open(
-        directory.path(),
-        TimeRange::new(today_start_at, today_start_at + 86_400 * SECOND).unwrap(),
-    )
-    .unwrap();
+    let reader = open_reader_of_today(directory.path());
     let connection = reader.connection();
-    let bodies: Vec<(String, String)> = query_pairs(connection, "SELECT day, body FROM logs");
-    assert_eq!(bodies, [(Day::today().to_string(), "kept".into())]);
+    let bodies: Vec<(i64, String)> = query_pairs(connection, "SELECT logged_at, body FROM logs");
+    assert_eq!(bodies, [(today_start_at, "kept".into())]);
     let dropped: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT series.unit, point.value
-         FROM points point
-         JOIN series ON series.day = point.day AND series.id = point.series_id
-         JOIN resources resource
-           ON resource.day = series.day AND resource.id = series.resource_id
+        "SELECT metric_series.unit, point.value
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE resource.service = 'otelo'
-           AND series.name = 'otelo.telemetry.dropped_batches'",
+           AND metric_series.name = 'otelo.telemetry.dropped_batches'",
     );
     assert_eq!(dropped, [("{batch}".into(), 1.0)]);
 }
 
 #[test]
-fn deletes_the_files_past_the_retention() {
-    let directory = tempfile::tempdir().unwrap();
-    let expired = Day::today().add_days(-7);
-    let kept = Day::today().add_days(-6);
-    let names = [
-        expired.file_name(),
-        format!("{}-wal", expired.file_name()),
-        kept.file_name(),
-        "notes.txt".into(),
-    ];
-    for name in &names {
-        fs::write(directory.path().join(name), "").unwrap();
-    }
-    write_batches(directory.path(), Vec::new());
-    for name in &names[..2] {
-        assert!(
-            !directory.path().join(name).exists(),
-            "{name} is still there"
-        );
-    }
-    for name in &names[2..] {
-        assert!(directory.path().join(name).exists(), "{name} is gone");
-    }
-}
-
-#[test]
 fn skips_records_past_the_retention() {
     let directory = tempfile::tempdir().unwrap();
-    let expired = Day::today().add_days(-7);
+    let expired_at = Day::today().add_days(-7).start_at();
+    let kept_at = Day::today().add_days(-6).start_at();
     write_batches(
         directory.path(),
-        vec![log_batch(expired.start_at(), "too old")],
+        vec![log_batch(expired_at, "too old"), log_batch(kept_at, "kept")],
     );
-    assert!(!directory.path().join(expired.file_name()).exists());
+    let reader = open_reader_of_today(directory.path());
+    let bodies: Vec<(i64, String)> =
+        query_pairs(reader.connection(), "SELECT logged_at, body FROM logs");
+    assert_eq!(bodies, [(kept_at, "kept".into())]);
 }
 
 #[test]
-fn a_range_without_files_reads_empty_tables() {
+fn a_reader_needs_the_telemetry_file() {
     let directory = tempfile::tempdir().unwrap();
-    let reader = Reader::open(directory.path(), TimeRange::new(0, SECOND).unwrap()).unwrap();
-    assert!(reader.days().is_empty());
-    let count: i64 = reader
-        .connection()
-        .query_row("SELECT count(*) FROM logs", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(count, 0);
+    let range = TimeRange::new(0, SECOND).unwrap();
+    assert!(Reader::open(&directory.path().join("telemetry"), range).is_err());
+    Sqlite::open(directory.path()).unwrap();
+    let reader = Reader::open(&directory.path().join("telemetry"), range).unwrap();
+    assert_eq!(
+        query_integer(reader.connection(), "SELECT count(*) FROM logs"),
+        0
+    );
 }
 
 #[test]
@@ -289,15 +260,8 @@ fn a_reader_cannot_write() {
     let directory = tempfile::tempdir().unwrap();
     let today_start_at = Day::today().start_at();
     write_batches(directory.path(), vec![log_batch(today_start_at, "kept")]);
-    let reader = Reader::open(
-        directory.path(),
-        TimeRange::new(today_start_at, today_start_at + SECOND).unwrap(),
-    )
-    .unwrap();
-    let day = Day::today();
-    let result = reader
-        .connection()
-        .execute(&format!("DELETE FROM \"{day}\".logs"), []);
+    let reader = open_reader_of_today(directory.path());
+    let result = reader.connection().execute("DELETE FROM logs", []);
     assert!(result.is_err());
 }
 
@@ -357,7 +321,7 @@ fn stores_the_kind_and_the_temporality_of_each_series() {
     let reader = open_reader_of_today(directory.path());
     let kinds: Vec<(String, Option<String>)> = query_pairs(
         reader.connection(),
-        "SELECT name || ' ' || kind, temporality FROM series
+        "SELECT name || ' ' || kind, aggregation_temporality FROM metric_series
          WHERE name NOT LIKE 'otelo.%' ORDER BY name",
     );
     assert_eq!(
@@ -373,9 +337,9 @@ fn stores_the_kind_and_the_temporality_of_each_series() {
     let counts_and_sums: Vec<(String, f64)> = query_pairs(
         reader.connection(),
         "SELECT point.histogram ->> '$.counts', point.value
-         FROM points point
-         JOIN series ON series.day = point.day AND series.id = point.series_id
-         WHERE series.name = 'request.duration'",
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name = 'request.duration'",
     );
     assert_eq!(counts_and_sums, [("[2,1]".into(), 2.5)]);
 }
@@ -397,10 +361,10 @@ fn a_batch_written_twice_leaves_each_point_once() {
     let reader = open_reader_of_today(directory.path());
     let names_and_values: Vec<(String, f64)> = query_pairs(
         reader.connection(),
-        "SELECT series.name, point.value
-         FROM points point
-         JOIN series ON series.day = point.day AND series.id = point.series_id
-         WHERE series.name = 'process.memory.usage'
+        "SELECT metric_series.name, point.value
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name = 'process.memory.usage'
          ORDER BY point.recorded_at",
     );
     let name = || String::from("process.memory.usage");
@@ -434,13 +398,12 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     );
     let reader = open_reader_of_today(directory.path());
     let connection = reader.connection();
-    let join_cart_adds_series =
-        "JOIN series ON series.day = point.day AND series.id = point.series_id
-         WHERE series.name = 'cart.adds'";
+    let join_cart_adds_series = "JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name = 'cart.adds'";
     assert_eq!(
         query_integer(
             connection,
-            "SELECT count(*) FROM series WHERE name = 'cart.adds'"
+            "SELECT count(*) FROM metric_series WHERE name = 'cart.adds'"
         ),
         1000
     );
@@ -448,23 +411,23 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     assert_eq!(
         query_integer(
             connection,
-            &format!("SELECT count(*) FROM points point {join_cart_adds_series}")
+            &format!("SELECT count(*) FROM metric_points point {join_cart_adds_series}")
         ),
         1001
     );
     assert_eq!(
         query_integer(
             connection,
-            "SELECT count(*) FROM series WHERE name = 'process.memory.usage'"
+            "SELECT count(*) FROM metric_series WHERE name = 'process.memory.usage'"
         ),
         1
     );
     let rejected_points_counter: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT series.kind || ' ' || series.unit, point.value
-         FROM points point
-         JOIN series ON series.day = point.day AND series.id = point.series_id
-         WHERE series.name = 'otelo.telemetry.rejected_points'",
+        "SELECT metric_series.kind || ' ' || metric_series.unit, point.value
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name = 'otelo.telemetry.rejected_points'",
     );
     assert_eq!(rejected_points_counter, [("counter {point}".into(), 2.0)]);
 }
@@ -473,37 +436,27 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
 fn the_size_counts_every_file_of_the_telemetry_and_of_the_state() {
     let directory = tempfile::tempdir().unwrap();
     let storage = Sqlite::open(directory.path()).unwrap();
-    let state_bytes = fs::metadata(directory.path().join("state.sqlite"))
-        .unwrap()
-        .len();
-    assert!(state_bytes > 0);
+    let file_bytes = |path: &Path| fs::metadata(path).unwrap().len();
+    let state_bytes = file_bytes(&directory.path().join("state.sqlite"));
+    let telemetry_path = directory.path().join("telemetry").join(TELEMETRY_FILE_NAME);
+    let telemetry_bytes = file_bytes(&telemetry_path);
+    assert!(state_bytes > 0 && telemetry_bytes > 0);
     assert_eq!(
         storage.size().unwrap(),
         StorageSize {
-            telemetry_bytes: 0,
-            rollup_bytes: 0,
+            telemetry_bytes,
             state_bytes,
         }
     );
 
-    let telemetry_directory = directory.path().join("telemetry");
-    fs::create_dir_all(&telemetry_directory).unwrap();
-    let day_file_name = Day::today().file_name();
-    for (file_name, byte_count) in [
-        (day_file_name.clone(), 4096),
-        (format!("{day_file_name}-wal"), 512),
-        (format!("{day_file_name}-shm"), 32),
-        ("metrics-rollup.sqlite".into(), 2048),
-        ("metrics-rollup.sqlite-wal".into(), 64),
-    ] {
-        fs::write(telemetry_directory.join(file_name), vec![0; byte_count]).unwrap();
-    }
+    let mut wal_path = telemetry_path.into_os_string();
+    wal_path.push("-wal");
+    fs::write(wal_path, [0; 512]).unwrap();
     fs::write(directory.path().join("state.sqlite-wal"), [0; 7]).unwrap();
     assert_eq!(
         storage.size().unwrap(),
         StorageSize {
-            telemetry_bytes: 4096 + 512 + 32,
-            rollup_bytes: 2048 + 64,
+            telemetry_bytes: telemetry_bytes + 512,
             state_bytes: state_bytes + 7,
         }
     );

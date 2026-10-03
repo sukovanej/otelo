@@ -65,8 +65,10 @@ pub async fn list_attribute_keys(
     Query(params): Query<SignalParams>,
 ) -> ApiResult<AttributeKeys> {
     let signal = parse_signal(&params.signal)?;
-    api.run_retention_query(move |opened| Ok(opened.queries.list_attribute_keys(signal)?))
-        .await
+    api.run_retention_query(signal, move |opened| {
+        Ok(opened.queries.list_attribute_keys(signal)?)
+    })
+    .await
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -253,7 +255,7 @@ pub async fn complete_query(
                 .nth(cursor_char_offset)
                 .map_or(query_text.len(), |(byte_offset, _)| byte_offset)
         });
-    api.run_retention_query(move |opened| {
+    api.run_retention_query(signal, move |opened| {
         let count_chars_before = |byte_offset: usize| query_text[..byte_offset].chars().count();
         let completion =
             otelo_query::complete_query(&query_text, cursor_byte_offset, signal, &*opened.queries);

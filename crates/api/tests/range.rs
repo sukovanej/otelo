@@ -3,6 +3,7 @@ use std::sync::Arc;
 use jiff::Timestamp;
 use otelo_api::{Api, DefaultSince, convert_to_unix_nanos, parse_duration, parse_time};
 use otelo_indexed_storage_sqlite::{Day, Sqlite};
+use otelo_query::Signal;
 
 const HOUR_NS: i64 = 3600 * 1_000_000_000;
 
@@ -20,26 +21,45 @@ fn parses_durations_and_timestamps() {
 }
 
 #[test]
-fn caps_the_range_at_the_retention() {
+fn caps_the_range_at_the_retention_of_its_signals() {
     let dir = tempfile::tempdir().unwrap();
     let api = Api {
         storage: Arc::new(Sqlite::open(dir.path()).unwrap()),
     };
     let range = api
-        .resolve_range(Some("30d"), None, DefaultSince::HourBeforeNow)
+        .resolve_range_within_retention(
+            &[Signal::Logs],
+            Some("30d"),
+            None,
+            DefaultSince::HourBeforeNow,
+        )
+        .unwrap();
+    assert_eq!(range.start_at(), Day::today().add_days(-6).start_at());
+    let range = api
+        .resolve_range_within_retention(
+            &[Signal::Metrics],
+            None,
+            None,
+            DefaultSince::OldestRetained,
+        )
         .unwrap();
     assert_eq!(range.start_at(), Day::today().add_days(-6).start_at());
     assert!(
-        api.resolve_range(Some("1h"), Some("2h"), DefaultSince::HourBeforeNow)
-            .is_err()
+        api.resolve_range_within_retention(
+            &[Signal::Spans],
+            Some("1h"),
+            Some("2h"),
+            DefaultSince::HourBeforeNow
+        )
+        .is_err()
     );
     assert!(
-        api.resolve_range(Some("30d"), Some("20d"), DefaultSince::HourBeforeNow)
-            .is_err()
+        api.resolve_range_within_retention(
+            &[Signal::Spans, Signal::Logs],
+            Some("30d"),
+            Some("20d"),
+            DefaultSince::HourBeforeNow
+        )
+        .is_err()
     );
-    // The summaries of the metrics are kept longer.
-    let range = api.resolve_metric_range(Some("30d"), None).unwrap();
-    assert!(range.start_at() < Day::today().add_days(-29).start_at());
-    let range = api.resolve_metric_range(Some("200d"), None).unwrap();
-    assert_eq!(range.start_at(), Day::today().add_days(-89).start_at());
 }

@@ -1,10 +1,12 @@
+-- Retention deletes rows, and only a file made with it can give their pages back to the disk.
+PRAGMA auto_vacuum = INCREMENTAL;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 
 CREATE TABLE IF NOT EXISTS resources (
   id INTEGER PRIMARY KEY,
   -- xxh3 of the service and the attributes.
-  hash INTEGER NOT NULL UNIQUE,
+  identity_hash INTEGER NOT NULL UNIQUE,
   service TEXT NOT NULL,
   -- A JSON object.
   attributes TEXT NOT NULL
@@ -16,7 +18,7 @@ CREATE TABLE IF NOT EXISTS logs (
   resource_id INTEGER NOT NULL REFERENCES resources (id),
   -- The OpenTelemetry severity number: 0 is unspecified, 1 to 4 trace, 5 to 8 debug,
   -- 9 to 12 info, 13 to 16 warn, 17 to 20 error, 21 to 24 fatal.
-  severity INTEGER NOT NULL,
+  severity_number INTEGER NOT NULL,
   body TEXT NOT NULL,
   -- 16 bytes. NULL for a log outside a span.
   trace_id BLOB,
@@ -28,10 +30,13 @@ CREATE TABLE IF NOT EXISTS logs (
 CREATE INDEX IF NOT EXISTS logs_logged_at ON logs (logged_at);
 CREATE INDEX IF NOT EXISTS logs_trace_id ON logs (trace_id) WHERE trace_id IS NOT NULL;
 
--- Retention deletes whole files, so no trigger follows an update or a delete.
-CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5 (body, content = 'logs');
-CREATE TRIGGER IF NOT EXISTS logs_fts_insert AFTER INSERT ON logs BEGIN
-  INSERT INTO logs_fts (rowid, body) VALUES (new.rowid, new.body);
+CREATE VIRTUAL TABLE IF NOT EXISTS log_body_search USING fts5 (body, content = 'logs');
+CREATE TRIGGER IF NOT EXISTS log_body_search_insert AFTER INSERT ON logs BEGIN
+  INSERT INTO log_body_search (rowid, body) VALUES (new.rowid, new.body);
+END;
+-- Retention deletes logs, and no log is ever updated.
+CREATE TRIGGER IF NOT EXISTS log_body_search_delete AFTER DELETE ON logs BEGIN
+  INSERT INTO log_body_search (log_body_search, rowid, body) VALUES ('delete', old.rowid, old.body);
 END;
 
 CREATE TABLE IF NOT EXISTS spans (
@@ -50,7 +55,7 @@ CREATE TABLE IF NOT EXISTS spans (
   started_at INTEGER NOT NULL,
   duration_ns INTEGER NOT NULL,
   -- The OpenTelemetry status code: 0 unset, 1 ok, 2 error.
-  status INTEGER NOT NULL,
+  status_code INTEGER NOT NULL,
   -- A JSON object.
   attributes TEXT NOT NULL,
   -- A JSON array of objects with occurred_at in Unix nanoseconds, name, and attributes.
@@ -59,24 +64,25 @@ CREATE TABLE IF NOT EXISTS spans (
 CREATE INDEX IF NOT EXISTS spans_trace_id ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS spans_started_at ON spans (started_at);
 
-CREATE TABLE IF NOT EXISTS series (
+CREATE TABLE IF NOT EXISTS metric_series (
   id INTEGER PRIMARY KEY,
-  -- xxh3 of the resource, the name, the kind, the temporality, the unit, and the attributes.
-  hash INTEGER NOT NULL UNIQUE,
+  -- xxh3 of the resource, the name, the kind, the aggregation temporality, the unit, and the
+  -- attributes.
+  identity_hash INTEGER NOT NULL UNIQUE,
   resource_id INTEGER NOT NULL REFERENCES resources (id),
   name TEXT NOT NULL,
   -- gauge, updown, counter, or histogram.
   kind TEXT NOT NULL,
   -- cumulative or delta for a counter and a histogram. NULL for the rest.
-  temporality TEXT,
+  aggregation_temporality TEXT,
   unit TEXT NOT NULL,
   -- A JSON object.
   attributes TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS series_name ON series (name);
+CREATE INDEX IF NOT EXISTS metric_series_name ON metric_series (name);
 
-CREATE TABLE IF NOT EXISTS points (
-  series_id INTEGER NOT NULL REFERENCES series (id),
+CREATE TABLE IF NOT EXISTS metric_points (
+  metric_series_id INTEGER NOT NULL REFERENCES metric_series (id),
   -- Unix nanoseconds.
   recorded_at INTEGER NOT NULL,
   -- The sum of a histogram point.
@@ -85,30 +91,86 @@ CREATE TABLE IF NOT EXISTS points (
   -- bounds and counts, or scale, zero_count, positive, and negative for an exponential
   -- histogram. NULL for the other kinds.
   histogram TEXT,
-  PRIMARY KEY (series_id, recorded_at)
+  PRIMARY KEY (metric_series_id, recorded_at)
 ) WITHOUT ROWID;
 
-CREATE TABLE IF NOT EXISTS attribute_keys (
-  -- logs, spans, metrics for the attributes of the series, resource, or span_names.
-  key_group TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS metric_minute_summaries (
+  metric_series_id INTEGER NOT NULL REFERENCES metric_series (id),
+  -- The start of the minute, in Unix nanoseconds.
+  start_at INTEGER NOT NULL,
+  -- Of the points in the minute.
+  point_count INTEGER NOT NULL,
+  min_value REAL NOT NULL,
+  max_value REAL NOT NULL,
+  value_sum REAL NOT NULL,
+  last_value REAL NOT NULL,
+  -- How much a counter grew, whatever the aggregation temporality of its points. NULL for the
+  -- other kinds.
+  counter_increase REAL,
+  -- The time the counter grew over. NULL for the other kinds.
+  counter_increase_seconds REAL,
+  -- The buckets of the points of a histogram merged into one, as metric_points.histogram has
+  -- them. NULL for the other kinds.
+  merged_histogram TEXT,
+  PRIMARY KEY (metric_series_id, start_at)
+) WITHOUT ROWID;
+
+-- The columns are those of metric_minute_summaries, for an hour.
+CREATE TABLE IF NOT EXISTS metric_hour_summaries (
+  metric_series_id INTEGER NOT NULL REFERENCES metric_series (id),
+  start_at INTEGER NOT NULL,
+  point_count INTEGER NOT NULL,
+  min_value REAL NOT NULL,
+  max_value REAL NOT NULL,
+  value_sum REAL NOT NULL,
+  last_value REAL NOT NULL,
+  counter_increase REAL,
+  counter_increase_seconds REAL,
+  merged_histogram TEXT,
+  PRIMARY KEY (metric_series_id, start_at)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS metric_summary_progress (
+  -- metric_minute_summaries or metric_hour_summaries.
+  summary_table TEXT PRIMARY KEY,
+  -- Unix nanoseconds. Every minute, or hour, before it is summarized.
+  summarized_until INTEGER NOT NULL
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS attribute_key_counts (
+  -- The UTC date of the records.
+  day TEXT NOT NULL,
+  -- log, span, metric_series, or resource.
+  attribute_owner TEXT NOT NULL,
   key TEXT NOT NULL,
-  -- The JSON type of the values: null, bool, int, float, string, array, or object, or
-  -- mixed for more than one.
-  value_type TEXT NOT NULL,
-  -- How many records have the key.
-  count INTEGER NOT NULL,
-  -- 1 once the key has more distinct values than attribute_values keeps.
+  -- null, bool, int, float, string, array, or object, or mixed for more than one.
+  json_type TEXT NOT NULL,
+  -- How many records of the day have the key. A resource and a series count once a day.
+  record_count INTEGER NOT NULL,
+  -- 1 once the key has more distinct values on the day than attribute_value_counts keeps.
   has_more_values_than_listed INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (key_group, key)
+  PRIMARY KEY (day, attribute_owner, key)
 ) WITHOUT ROWID;
 
-CREATE TABLE IF NOT EXISTS attribute_values (
-  -- As in attribute_keys. span_names holds the names of the spans under the key name.
-  key_group TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS attribute_value_counts (
+  -- The UTC date of the records.
+  day TEXT NOT NULL,
+  -- As in attribute_key_counts.
+  attribute_owner TEXT NOT NULL,
   key TEXT NOT NULL,
   -- JSON.
   value TEXT NOT NULL,
-  -- How many records have the value.
-  count INTEGER NOT NULL,
-  PRIMARY KEY (key_group, key, value)
+  -- How many records of the day have the value.
+  record_count INTEGER NOT NULL,
+  PRIMARY KEY (day, attribute_owner, key, value)
+) WITHOUT ROWID;
+
+-- The writer keeps up to 200 names a day, as attribute_value_counts keeps values.
+CREATE TABLE IF NOT EXISTS span_name_counts (
+  -- The UTC date of the spans.
+  day TEXT NOT NULL,
+  name TEXT NOT NULL,
+  -- How many spans of the day have the name.
+  record_count INTEGER NOT NULL,
+  PRIMARY KEY (day, name)
 ) WITHOUT ROWID;

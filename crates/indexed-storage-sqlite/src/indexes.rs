@@ -63,7 +63,7 @@ pub fn attribute_json_path(key: &str) -> String {
     format!("'$.\"{}\"'", key.replace('\'', "''"))
 }
 
-pub fn apply_indexes_to_day_file(
+pub fn apply_indexes_to_telemetry_file(
     connection: &Connection,
     attributes: &BTreeSet<IndexedAttribute>,
 ) -> rusqlite::Result<()> {

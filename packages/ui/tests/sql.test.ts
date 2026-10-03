@@ -69,7 +69,7 @@ test("layOutSql starts a line at each clause, and at each condition a level deep
     printLayout(
       "select log.logged_at,resource.service from logs log " +
         "left outer join resources resource on resource.id = log.resource_id " +
-        "where log.logged_at > ? and resource.service = $1 or log.severity between 1 and 2 " +
+        "where log.logged_at > ? and resource.service = $1 or log.severity_number between 1 and 2 " +
         "group by resource.service having count(*) > 1 " +
         "order by log.logged_at desc limit 50 offset 10",
     ),
@@ -80,7 +80,7 @@ test("layOutSql starts a line at each clause, and at each condition a level deep
       "left outer join resources resource on resource.id = log.resource_id",
       "where log.logged_at > ?",
       "  and resource.service = $1",
-      "  or log.severity between 1 and 2",
+      "  or log.severity_number between 1 and 2",
       "group by resource.service",
       "having count(*) > 1",
       "order by log.logged_at desc",

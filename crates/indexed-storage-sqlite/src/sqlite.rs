@@ -4,15 +4,18 @@ use std::time::Duration;
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    BatchInbox, IndexedAttribute, MetricRetention, RangeQueries, Result, Storage, StorageSize,
-    TimeRange,
+    BatchInbox, IndexedAttribute, RangeQueries, Result, Storage, StorageSize, TimeRange,
 };
+use otelo_query::Signal;
 
 use crate::day::Day;
 use crate::indexes::Indexes;
-use crate::rollup::ROLLUP_FILE_NAME;
 use crate::state::StateFile;
+use crate::telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
 use crate::{Config, Reader, Writer};
+
+// The daemon has about 50 MB, and SQLite fails an allocation past this rather than grow.
+const SQLITE_HEAP_LIMIT_BYTES: i64 = 16 * 1024 * 1024;
 
 pub struct Sqlite {
     config: Config,
@@ -21,9 +24,15 @@ pub struct Sqlite {
 
 impl Sqlite {
     pub fn open(data_directory: &Path) -> anyhow::Result<Self> {
+        // SAFETY: the call only sets a limit, and SQLite reads it under its own mutex.
+        unsafe {
+            rusqlite::ffi::sqlite3_hard_heap_limit64(SQLITE_HEAP_LIMIT_BYTES);
+        }
         let state = StateFile::open(data_directory)?;
         let mut config = Config::new(data_directory.join("telemetry"));
         config.indexes = Indexes::new(state.indexed_attributes()?);
+        // A reader needs the file, and opens it before the writer has written to it.
+        TelemetryFile::open(&config.directory)?;
         Ok(Self { config, state })
     }
 
@@ -33,21 +42,18 @@ impl Sqlite {
 }
 
 impl Storage for Sqlite {
-    fn oldest_retained_at(&self) -> i64 {
-        self.config.oldest_retained_day(Day::today()).start_at()
-    }
-
-    fn metric_retention(&self) -> MetricRetention {
-        self.config.metric_retention(Day::today())
+    fn oldest_retained_at(&self, signal: Signal) -> i64 {
+        self.config
+            .oldest_retained_days(Day::today())
+            .of_signal(signal)
+            .start_at()
     }
 
     fn size(&self) -> Result<StorageSize> {
-        let is_rollup_file_name = |name: &str| name.starts_with(ROLLUP_FILE_NAME);
         Ok(StorageSize {
-            telemetry_bytes: size_of_files_in_bytes(&self.config.directory, |name| {
-                !is_rollup_file_name(name)
-            })?,
-            rollup_bytes: size_of_files_in_bytes(&self.config.directory, is_rollup_file_name)?,
+            telemetry_bytes: size_of_database_in_bytes(
+                &self.config.directory.join(TELEMETRY_FILE_NAME),
+            )?,
             state_bytes: self.state.size_in_bytes()?,
         })
     }
@@ -80,33 +86,20 @@ impl Storage for Sqlite {
     }
 }
 
-// Counts every file whose name passes, so a write-ahead log is part of the size.
-fn size_of_files_in_bytes(
-    directory: &Path,
-    is_counted_name: impl Fn(&str) -> bool,
-) -> anyhow::Result<u64> {
-    let entries = match std::fs::read_dir(directory) {
-        Ok(entries) => entries,
-        // The writer makes the directory when it starts.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(error) => return Err(error).with_context(|| format!("list {}", directory.display())),
-    };
-    let mut total_bytes = 0;
-    for entry in entries {
-        let entry = entry.with_context(|| format!("list {}", directory.display()))?;
-        if !entry.file_name().to_str().is_some_and(&is_counted_name) {
-            continue;
-        }
-        match entry.metadata() {
-            Ok(metadata) if metadata.is_file() => total_bytes += metadata.len(),
-            Ok(_) => {}
-            // Retention deleted the file between the listing and this read.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("read the size of {}", entry.path().display()));
+// The write-ahead log and its index are part of the database.
+pub fn size_of_database_in_bytes(path: &Path) -> anyhow::Result<u64> {
+    ["", "-wal", "-shm"]
+        .into_iter()
+        .map(|suffix| {
+            let mut path = path.to_owned().into_os_string();
+            path.push(suffix);
+            match std::fs::metadata(&path) {
+                Ok(metadata) => Ok(metadata.len()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+                Err(error) => {
+                    Err(error).with_context(|| format!("read the size of {}", path.display()))
+                }
             }
-        }
-    }
-    Ok(total_bytes)
+        })
+        .sum()
 }

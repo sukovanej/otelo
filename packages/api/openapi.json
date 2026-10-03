@@ -124,7 +124,7 @@
     },
     "/api/indexes/{signal}/{key}": {
       "put": {
-        "summary": "Indexes an attribute of the logs or of the spans in every day file, so a\nquery that compares it reads only the matching records. The writer builds\nthe index within seconds.",
+        "summary": "Indexes an attribute of the logs or of the spans, so a query that\ncompares it reads only the matching records. The writer builds\nthe index within seconds.",
         "operationId": "add_index",
         "parameters": [
           {
@@ -170,7 +170,7 @@
         }
       },
       "delete": {
-        "summary": "Drops the index of an attribute from every day file.",
+        "summary": "Drops the index of an attribute.",
         "operationId": "remove_index",
         "parameters": [
           {
@@ -362,7 +362,7 @@
     },
     "/api/metrics": {
       "get": {
-        "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the attributes, and\nthe resource. A range of metrics can go back 90 days, further than the\nlogs and the spans.",
+        "summary": "The series that have points in the range and that the query keeps, by\nname. The query reads `name`, `service`, `kind`, `unit`, the attributes, and\nthe resource.",
         "operationId": "list_metrics",
         "parameters": [
           {
@@ -2347,7 +2347,7 @@
       },
       "Resolution": {
         "type": "string",
-        "description": "Which points a metric query reads.\n\n`raw` is the points as they arrived. `1m` and `1h` are their summaries\nby the minute and by the hour, which outlive them.",
+        "description": "Which points a metric query reads.\n\n`raw` is the points as they arrived. `1m` and `1h` are their summaries\nby the minute and by the hour, which a long range reads in fewer rows.",
         "enum": [
           "raw",
           "1m",

@@ -10,7 +10,7 @@ use otelo_indexed_storage::{SpanKind, SpanStatus};
 use otelo_query::quote_string;
 use rusqlite::types::Value;
 
-use super::services::{NewestRequest, OperationTally, RequestTally, SpanLocation};
+use super::services::{NewestRequest, OperationTally, RequestTally, SpanRowid};
 use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
 use crate::indexes::attribute_json_path;
@@ -230,7 +230,7 @@ struct CallSpan {
     started_at: i64,
     duration_ns: i64,
     failed: bool,
-    location: SpanLocation,
+    rowid: SpanRowid,
 }
 
 type SpanName = String;
@@ -287,52 +287,41 @@ impl Reader {
             .map(span_attribute)
             .collect::<Vec<_>>()
             .join(", ");
-        self.scan_rows(
-            ["", ""],
-            |day_schema| {
-                format!(
-                    "SELECT span.name, span.kind, span.started_at, span.duration_ns, span.status,
-                            '{}', span.rowid, {attribute_columns}
-                     FROM {day_schema}.spans span
-                     JOIN {day_schema}.resources resource ON resource.id = span.resource_id
-                     WHERE {}",
-                    day_schema.day,
-                    where_clause.sql_for_day(day_schema)
-                )
-            },
-            &where_clause,
-            |row| {
-                let mut attributes = CallAttributes(Default::default());
-                for (index, value) in attributes.0.iter_mut().enumerate() {
-                    *value = match row.get::<_, Value>(7 + index)? {
-                        Value::Text(text) if !text.is_empty() => Some(text),
-                        Value::Integer(number) => Some(number.to_string()),
-                        Value::Real(number) => Some(number.to_string()),
-                        _ => None,
-                    };
-                }
-                let name: String = row.get(0)?;
-                let (target, target_query) = classify_target(&attributes);
-                let (summary, summary_query) =
-                    summarize_call(&attributes, target.target_type, &name);
-                on_call(CallSpan {
-                    target,
-                    target_query,
-                    summary,
-                    summary_query,
-                    name,
-                    kind: SpanKind::from_number(row.get(1)?),
-                    started_at: row.get(2)?,
-                    duration_ns: row.get(3)?,
-                    failed: SpanStatus::from_number(row.get(4)?).is_error(),
-                    location: SpanLocation {
-                        day: row.get(5)?,
-                        rowid: row.get(6)?,
-                    },
-                });
-                Ok(ControlFlow::Continue(()))
-            },
-        )
+        let sql = format!(
+            "SELECT span.name, span.kind, span.started_at, span.duration_ns, span.status_code,
+                    span.rowid, {attribute_columns}
+             FROM spans span
+             JOIN resources resource ON resource.id = span.resource_id
+             WHERE {}",
+            where_clause.sql()
+        );
+        self.scan_rows(&sql, &where_clause, |row| {
+            let mut attributes = CallAttributes(Default::default());
+            for (index, value) in attributes.0.iter_mut().enumerate() {
+                *value = match row.get::<_, Value>(6 + index)? {
+                    Value::Text(text) if !text.is_empty() => Some(text),
+                    Value::Integer(number) => Some(number.to_string()),
+                    Value::Real(number) => Some(number.to_string()),
+                    _ => None,
+                };
+            }
+            let name: String = row.get(0)?;
+            let (target, target_query) = classify_target(&attributes);
+            let (summary, summary_query) = summarize_call(&attributes, target.target_type, &name);
+            on_call(CallSpan {
+                target,
+                target_query,
+                summary,
+                summary_query,
+                name,
+                kind: SpanKind::from_number(row.get(1)?),
+                started_at: row.get(2)?,
+                duration_ns: row.get(3)?,
+                failed: SpanStatus::from_number(row.get(4)?).is_error(),
+                rowid: SpanRowid(row.get(5)?),
+            });
+            Ok(ControlFlow::Continue(()))
+        })
     }
 }
 
@@ -363,7 +352,7 @@ fn keep_busiest_operations(
             operation
                 .newest_request
                 .as_ref()
-                .map(|newest_request| newest_request.location)
+                .map(|newest_request| newest_request.rowid)
         }))?;
     let mut operations_by_target: HashMap<TargetKey, Vec<CallOperation>> = HashMap::new();
     for (key, (summary, kind), operation) in operations {
@@ -372,7 +361,7 @@ fn keep_busiest_operations(
             .map(|newest_request| {
                 (
                     newest_request.detail,
-                    attributes_by_location.remove(&newest_request.location),
+                    attributes_by_location.remove(&newest_request.rowid),
                 )
             })
             .unwrap_or_default();
@@ -425,7 +414,7 @@ pub(super) fn summarize_calls(
                 call.started_at,
                 call.duration_ns,
                 call.failed,
-                call.location,
+                call.rowid,
                 || call.name,
             );
     })?;
@@ -483,7 +472,7 @@ pub(super) fn summarize_call_operation(
             call.started_at,
             call.duration_ns,
             call.failed,
-            call.location,
+            call.rowid,
             || CallNameAndQuery {
                 query: join_terms(&[&call.target_query, &call.summary_query]),
                 name: call.name,
@@ -495,7 +484,7 @@ pub(super) fn summarize_call_operation(
             .add_request(call.duration_ns, call.failed);
         newest_calls.push(Reverse(NewestRequest {
             started_at: call.started_at,
-            location: call.location,
+            rowid: call.rowid,
             detail: (),
         }));
         if newest_calls.len() > MAX_NEWEST_CALL_SPANS {
@@ -503,20 +492,18 @@ pub(super) fn summarize_call_operation(
         }
     })?;
     let (name, query, attributes) = match operation.newest_request {
-        Some(NewestRequest {
-            location, detail, ..
-        }) => (
+        Some(NewestRequest { rowid, detail, .. }) => (
             detail.name,
             detail.query,
             reader
-                .read_span_attributes(std::iter::once(location))?
-                .remove(&location),
+                .read_span_attributes(std::iter::once(rowid))?
+                .remove(&rowid),
         ),
         None => (String::new(), String::new(), None),
     };
-    let locations: Vec<_> = newest_calls
+    let rowids: Vec<_> = newest_calls
         .into_iter()
-        .map(|Reverse(newest_request)| newest_request.location)
+        .map(|Reverse(newest_request)| newest_request.rowid)
         .collect();
     let range = reader.range();
     let first_step_at = range.start_at().div_euclid(step_ns) * step_ns;
@@ -535,6 +522,6 @@ pub(super) fn summarize_call_operation(
         target: target.clone(),
         summary: summary.to_owned(),
         query,
-        spans: reader.read_spans_at(&locations)?,
+        spans: reader.read_spans_at(&rowids)?,
     })
 }

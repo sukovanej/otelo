@@ -2,7 +2,7 @@ mod common;
 
 use std::time::SystemTime;
 
-use common::{Receiver, open_todays_day_file, query_first_column};
+use common::{Receiver, open_telemetry_file, query_first_column};
 use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
@@ -25,25 +25,25 @@ enum Transport {
 
 #[test]
 fn grpc_with_gzip_takes_each_signal() {
-    send_each_signal_and_check_the_day_file(Transport::Grpc);
+    send_each_signal_and_check_the_telemetry_file(Transport::Grpc);
 }
 
 #[test]
 fn http_protobuf_takes_each_signal() {
-    send_each_signal_and_check_the_day_file(Transport::HttpProtobuf);
+    send_each_signal_and_check_the_telemetry_file(Transport::HttpProtobuf);
 }
 
 #[test]
 fn http_json_takes_each_signal() {
-    send_each_signal_and_check_the_day_file(Transport::HttpJson);
+    send_each_signal_and_check_the_telemetry_file(Transport::HttpJson);
 }
 
-fn send_each_signal_and_check_the_day_file(transport: Transport) {
+fn send_each_signal_and_check_the_telemetry_file(transport: Transport) {
     let directory = tempfile::tempdir().unwrap();
     let receiver = Receiver::start_writing_into(directory.path());
     send_each_signal(&receiver, transport);
     receiver.stop_and_wait_for_writer();
-    let connection = open_todays_day_file(directory.path());
+    let connection = open_telemetry_file(directory.path());
 
     let services: Vec<String> =
         query_first_column(&connection, "SELECT service FROM resources ORDER BY id");
@@ -57,7 +57,7 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
     let spans: Vec<String> = query_first_column(
         &connection,
         "SELECT json_object(
-             'name', name, 'kind', kind, 'status', status, 'root', parent_span_id IS NULL,
+             'name', name, 'kind', kind, 'status', status_code, 'root', parent_span_id IS NULL,
              'route', attributes ->> '$.\"http.route\"',
              'scope', attributes ->> '$.\"otel.scope.name\"',
              'description', attributes ->> '$.\"otel.status_description\"')
@@ -90,7 +90,7 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
 
     let logs: Vec<String> = query_first_column(
         &connection,
-        "SELECT json_object('body', body, 'severity', severity,
+        "SELECT json_object('body', body, 'severity', severity_number,
                             'user', attributes ->> '$.\"user.id\"',
                             'scope', attributes ->> '$.\"otel.scope.name\"')
          FROM logs",
@@ -109,16 +109,17 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
 
     let points: Vec<String> = query_first_column(
         &connection,
-        "SELECT json_object('name', series.name, 'kind', series.kind,
-                            'temporality', series.temporality, 'unit', series.unit,
-                            'plan', series.attributes ->> 'plan', 'value', point.value,
+        "SELECT json_object('name', metric_series.name, 'kind', metric_series.kind,
+                            'temporality', metric_series.aggregation_temporality,
+                            'unit', metric_series.unit,
+                            'plan', metric_series.attributes ->> 'plan', 'value', point.value,
                             'counts', point.histogram -> 'counts',
                             'bounds', point.histogram -> 'bounds')
-         FROM points point
-         JOIN series ON series.id = point.series_id
-         JOIN resources resource ON resource.id = series.resource_id
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE resource.service = 'shop'
-         ORDER BY series.name",
+         ORDER BY metric_series.name",
     );
     assert_eq!(
         points,

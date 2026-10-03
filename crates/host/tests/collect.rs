@@ -22,7 +22,6 @@ fn reads_the_machine_the_test_runs_on() {
     let mut collector = Collector::new(host).unwrap();
     let storage_size = StorageSize {
         telemetry_bytes: 1,
-        rollup_bytes: 3,
         state_bytes: 2,
     };
     let first_batch = collector.collect_batch(1, Some(storage_size)).unwrap();

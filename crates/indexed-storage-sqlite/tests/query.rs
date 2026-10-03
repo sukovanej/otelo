@@ -13,7 +13,7 @@ use otelo_indexed_storage::{
     SpanId, SpanKind, SpanStatus, Temporality, TimeRange, TraceContext, TraceId,
     open_batch_channel,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Indexes, Reader, Writer};
+use otelo_indexed_storage_sqlite::{Config, Day, Indexes, Reader, TELEMETRY_FILE_NAME, Writer};
 use otelo_query::{FieldOrigin, MAX_HELP_VALUES, Signal, ValueType, complete_query, parse_query};
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -670,11 +670,12 @@ fn the_catalog_knows_the_attributes_and_their_values() {
 }
 
 #[test]
-fn an_indexed_attribute_has_an_index_in_every_day_file() {
+fn an_indexed_attribute_has_an_index_on_its_table() {
     let indexes = Indexes::new(indexed_attributes(&[(IndexedSignal::Logs, "user.id")]));
     let fixture = Fixture::with_indexes(&indexes);
-    let index_names = |day: Day| -> Vec<String> {
-        let connection = Connection::open(fixture.directory.path().join(day.file_name())).unwrap();
+    let index_names = || -> Vec<String> {
+        let connection =
+            Connection::open(fixture.directory.path().join(TELEMETRY_FILE_NAME)).unwrap();
         connection
             .prepare("SELECT name FROM sqlite_master WHERE name GLOB 'logs_attribute_*'")
             .unwrap()
@@ -683,12 +684,10 @@ fn an_indexed_attribute_has_an_index_in_every_day_file() {
             .collect::<Result<_, _>>()
             .unwrap()
     };
-    let today = Day::today();
-    assert_eq!(index_names(today).len(), 1);
-    assert_eq!(index_names(today.add_days(-1)), index_names(today));
+    assert_eq!(index_names().len(), 1);
 
     let reader = fixture.reader_around_midnight();
-    let index = &index_names(today)[0];
+    let index = &index_names()[0];
     for query in ["user.id = 7", "user.id = 7 OR user.id in (8, 9)"] {
         let plan = reader
             .explain_query(&parse_query(query, Signal::Logs).unwrap())
@@ -725,8 +724,7 @@ fn an_indexed_attribute_has_an_index_in_every_day_file() {
 
     indexes.replace_attributes(BTreeSet::new());
     write_batch(fixture.directory.path(), Vec::new(), &indexes);
-    assert!(index_names(today).is_empty());
-    assert!(index_names(today.add_days(-1)).is_empty());
+    assert!(index_names().is_empty());
 }
 
 #[test]
@@ -859,16 +857,18 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
     };
     assert_eq!(
         query_integer(
-            "SELECT has_more_values_than_listed FROM attribute_keys WHERE key = 'user.id'"
+            "SELECT has_more_values_than_listed FROM attribute_key_counts WHERE key = 'user.id'"
         ),
         1
     );
     assert_eq!(
-        query_integer("SELECT count(*) FROM attribute_values WHERE key = 'user.id'"),
+        query_integer("SELECT count(*) FROM attribute_value_counts WHERE key = 'user.id'"),
         200
     );
     assert_eq!(
-        query_integer("SELECT count FROM attribute_values WHERE key = 'user.id' AND value = '3'"),
+        query_integer(
+            "SELECT record_count FROM attribute_value_counts WHERE key = 'user.id' AND value = '3'"
+        ),
         2
     );
     let user = complete_query("user.id", 7, Signal::Logs, &reader)

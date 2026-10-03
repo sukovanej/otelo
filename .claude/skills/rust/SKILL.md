@@ -24,11 +24,11 @@ The state that cannot happen has no shape to write it in.
 
 - A name says what the thing is, in full. A lone verb almost never does: `open_range`,
   not `read`; `classify_query_error`, not `error`.
-- Functions take a verb *and* what it acts on: `apply_indexes_to_day_file`,
+- Functions take a verb *and* what it acts on: `apply_indexes_to_telemetry_file`,
   `add_point_to_bucket`, `resolve_range`.
 - The verb is the domain action, never the machinery: `spawn_writer`, not `start`.
 - A qualifier is not a description. `oldest` says which, not what: `oldest_retained_at`.
-- Constants name what they hold: `MAX_ATTACHED_DAYS`, not `MAX_DAYS`.
+- Constants name what they hold: `MAX_DELETED_ROWS_PER_TRANSACTION`, not `MAX_ROWS`.
 - A field holding an instant ends in one: `logged_at`, `started_at`, not `time` or `ts`.
 - A binding is named for its role, not its type: an `IndexedAttribute` is an `attribute`,
   and `key.key` means the name is wrong.

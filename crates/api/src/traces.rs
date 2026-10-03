@@ -5,7 +5,7 @@ use otelo_query::Signal;
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::{LookupParams, QueryParams, parse_query};
-use crate::{Api, DefaultSince};
+use crate::{Api, DefaultSince, RequestedRange};
 
 /// Spans, newest first.
 #[utoipa::path(
@@ -23,9 +23,12 @@ pub async fn list_spans(
 ) -> ApiResult<Spans> {
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         100,
         move |opened, limit| Ok(opened.queries.list_spans(&query, limit)?),
@@ -49,9 +52,12 @@ pub async fn list_traces(
 ) -> ApiResult<Traces> {
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Spans],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         50,
         move |opened, limit| Ok(opened.queries.list_traces(&query, limit)?),
@@ -81,9 +87,12 @@ pub async fn get_trace(
     let trace_id =
         TraceId::parse_hex(&trace_id_hex).map_err(|error| ApiError::bad_request(&error))?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::OldestRetained,
+        RequestedRange {
+            signals: &[Signal::Spans, Signal::Logs],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::OldestRetained,
+        },
         params.limit,
         1000,
         move |opened, limit| {

@@ -69,13 +69,13 @@ export interface paths {
         };
         get?: never;
         /**
-         * Indexes an attribute of the logs or of the spans in every day file, so a
-         *     query that compares it reads only the matching records. The writer builds
+         * Indexes an attribute of the logs or of the spans, so a query that
+         *     compares it reads only the matching records. The writer builds
          *     the index within seconds.
          */
         put: operations["add_index"];
         post?: never;
-        /** Drops the index of an attribute from every day file. */
+        /** Drops the index of an attribute. */
         delete: operations["remove_index"];
         options?: never;
         head?: never;
@@ -130,8 +130,7 @@ export interface paths {
         /**
          * The series that have points in the range and that the query keeps, by
          *     name. The query reads `name`, `service`, `kind`, `unit`, the attributes, and
-         *     the resource. A range of metrics can go back 90 days, further than the
-         *     logs and the spans.
+         *     the resource.
          */
         get: operations["list_metrics"];
         put?: never;
@@ -831,7 +830,7 @@ export interface components {
          * @description Which points a metric query reads.
          *
          *     `raw` is the points as they arrived. `1m` and `1h` are their summaries
-         *     by the minute and by the hour, which outlive them.
+         *     by the minute and by the hour, which a long range reads in fewer rows.
          * @enum {string}
          */
         Resolution: "raw" | "1m" | "1h";

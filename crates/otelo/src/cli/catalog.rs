@@ -109,7 +109,7 @@ pub struct IndexArgs {
 enum IndexCommand {
     /// List the indexed attributes
     List,
-    /// Index an attribute of the logs or the spans in every day file
+    /// Index an attribute of the logs or the spans
     Add {
         /// logs or spans
         signal: Signal,

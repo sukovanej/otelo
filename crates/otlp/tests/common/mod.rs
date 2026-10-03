@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 use otelo_indexed_storage::{BatchInbox, BatchSender, open_batch_channel};
-use otelo_indexed_storage_sqlite::{Config, Day, Writer};
+use otelo_indexed_storage_sqlite::{Config, TELEMETRY_FILE_NAME, Writer};
 use rusqlite::Connection;
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
@@ -86,8 +86,8 @@ impl Receiver {
     }
 }
 
-pub fn open_todays_day_file(directory: &Path) -> Connection {
-    Connection::open(directory.join(Day::today().file_name())).unwrap()
+pub fn open_telemetry_file(directory: &Path) -> Connection {
+    Connection::open(directory.join(TELEMETRY_FILE_NAME)).unwrap()
 }
 
 pub fn query_first_column<T: rusqlite::types::FromSql>(

@@ -345,12 +345,12 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
     assert_eq!(is_user_id_indexed(), true);
 
     // The writer builds the index within a second or so.
-    let day_file_path = dir
+    let telemetry_file_path = dir
         .path()
         .join("telemetry")
-        .join(otelo_indexed_storage_sqlite::Day::today().file_name());
+        .join(otelo_indexed_storage_sqlite::TELEMETRY_FILE_NAME);
     let count_attribute_indexes = || -> i64 {
-        rusqlite::Connection::open(&day_file_path)
+        rusqlite::Connection::open(&telemetry_file_path)
             .unwrap()
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE name GLOB 'logs_attribute_*'",

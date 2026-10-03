@@ -195,7 +195,7 @@ impl Compiler<'_> {
                 };
                 let param = self.bind_param(words);
                 return Ok(format!(
-                    "{}.rowid IN (SELECT rowid FROM $day.logs_fts WHERE logs_fts MATCH {param})",
+                    "{}.rowid IN (SELECT rowid FROM log_body_search WHERE log_body_search MATCH {param})",
                     self.aliases.record
                 ));
             }
@@ -218,13 +218,13 @@ impl Compiler<'_> {
         let (record, resource) = (self.aliases.record, self.aliases.resource);
         match builtin_field {
             BuiltinField::Service => format!("{resource}.service"),
-            BuiltinField::Level => format!("{record}.severity"),
+            BuiltinField::Level => format!("{record}.severity_number"),
             BuiltinField::Body => format!("{record}.body"),
             BuiltinField::TraceId => format!("{record}.trace_id"),
             BuiltinField::SpanId => format!("{record}.span_id"),
             BuiltinField::Name => format!("{record}.name"),
             BuiltinField::Kind => format!("{record}.kind"),
-            BuiltinField::Status | BuiltinField::Error => format!("{record}.status"),
+            BuiltinField::Status | BuiltinField::Error => format!("{record}.status_code"),
             BuiltinField::Duration => format!("{record}.duration_ns"),
             BuiltinField::Root => format!("{record}.parent_span_id"),
             BuiltinField::Unit => format!("{record}.unit"),

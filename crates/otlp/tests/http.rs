@@ -2,7 +2,7 @@ mod common;
 
 use std::io::Write;
 
-use common::{Receiver, open_todays_day_file, query_first_column};
+use common::{Receiver, open_telemetry_file, query_first_column};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use otelo_indexed_storage::now_unix_nanos;
@@ -87,7 +87,7 @@ fn takes_a_gzip_json_body_and_answers_in_json() {
     assert_eq!((status, response), (200, json!({"partialSuccess": null})));
     receiver.stop_and_wait_for_writer();
     let names: Vec<String> = query_first_column(
-        &open_todays_day_file(directory.path()),
+        &open_telemetry_file(directory.path()),
         "SELECT name FROM spans",
     );
     assert_eq!(names, ["GET /cart"]);
@@ -131,7 +131,7 @@ fn rejects_a_span_without_ids_and_keeps_the_rest() {
     assert_eq!(response["partialSuccess"]["rejectedSpans"], 1, "{response}");
     receiver.stop_and_wait_for_writer();
     let spans: Vec<String> = query_first_column(
-        &open_todays_day_file(directory.path()),
+        &open_telemetry_file(directory.path()),
         "SELECT resource.service || ' ' || span.name
          FROM spans span
          JOIN resources resource ON resource.id = span.resource_id",
@@ -156,11 +156,11 @@ fn rejects_the_metric_types_the_store_lacks() {
     );
     receiver.stop_and_wait_for_writer();
     let points: Vec<String> = query_first_column(
-        &open_todays_day_file(directory.path()),
-        "SELECT series.name || ' ' || point.value
-         FROM points point
-         JOIN series ON series.id = point.series_id
-         WHERE series.name NOT LIKE 'otelo.%'",
+        &open_telemetry_file(directory.path()),
+        "SELECT metric_series.name || ' ' || point.value
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name NOT LIKE 'otelo.%'",
     );
     assert_eq!(points, ["queue.depth 4.0"]);
 }
@@ -212,17 +212,17 @@ fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
     );
     receiver.stop_and_wait_for_writer();
     let series: Vec<String> = query_first_column(
-        &open_todays_day_file(directory.path()),
-        "SELECT json_object('name', series.name, 'kind', series.kind,
-                            'temporality', series.temporality, 'value', point.value,
+        &open_telemetry_file(directory.path()),
+        "SELECT json_object('name', metric_series.name, 'kind', metric_series.kind,
+                            'temporality', metric_series.aggregation_temporality, 'value', point.value,
                             'scale', point.histogram -> 'scale',
                             'zero', point.histogram -> 'zero_count',
                             'positive', point.histogram -> 'positive',
                             'negative', point.histogram -> 'negative')
-         FROM points point
-         JOIN series ON series.id = point.series_id
-         WHERE series.name NOT LIKE 'otelo.%'
-         ORDER BY series.name",
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         WHERE metric_series.name NOT LIKE 'otelo.%'
+         ORDER BY metric_series.name",
     );
     assert_eq!(
         series,

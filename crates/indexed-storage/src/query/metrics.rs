@@ -7,7 +7,7 @@ use otelo_query::{BuiltinField, Field, Query, Signal, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{Attributes, Distribution, MetricKind, MetricRetention, TimeRange};
+use crate::{Attributes, Distribution, MetricKind, TimeRange};
 
 pub const MAX_BUCKETS_IN_RANGE: i64 = 10_000;
 
@@ -71,7 +71,7 @@ const MAX_MINUTE_RANGE_NS: i64 = 14 * 86_400 * NANOS_PER_SECOND;
 /// Which points a metric query reads.
 ///
 /// `raw` is the points as they arrived. `1m` and `1h` are their summaries
-/// by the minute and by the hour, which outlive them.
+/// by the minute and by the hour, which a long range reads in fewer rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum Resolution {
     #[serde(rename = "raw")]
@@ -84,12 +84,10 @@ pub enum Resolution {
 
 impl Resolution {
     #[must_use]
-    pub const fn choose_finest_kept_for(range: TimeRange, retention: MetricRetention) -> Self {
-        if range.length_ns() <= MAX_RAW_RANGE_NS && range.start_at() >= retention.oldest_raw_at {
+    pub const fn choose_for_range_length(range: TimeRange) -> Self {
+        if range.length_ns() <= MAX_RAW_RANGE_NS {
             Self::Raw
-        } else if range.length_ns() <= MAX_MINUTE_RANGE_NS
-            && range.start_at() >= retention.oldest_minute_at
-        {
+        } else if range.length_ns() <= MAX_MINUTE_RANGE_NS {
             Self::Minute
         } else {
             Self::Hour
