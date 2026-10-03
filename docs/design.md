@@ -31,8 +31,8 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 | Crate | What it holds |
 |---|---|
 | `otelo-query` | the query language: its parser and its completion |
-| `otelo-indexed-storage` | the storage interface: the model of the records, what the queries return, the channel to the writer, and the `Storage` and `RangeQueries` traits |
-| `otelo-indexed-storage-sqlite` | the SQLite backend: the telemetry file, the writer, its rollups and retention, and the queries |
+| `otelo-indexed-storage` | the storage interface: the model of the records, what the queries return, the meters of the pipeline from the receiver to the index, and the `Storage` and `RangeQueries` traits |
+| `otelo-indexed-storage-sqlite` | the SQLite backend: the telemetry file, its storage version and lock, the indexer that builds it from the journal, its rollups and retention, and the queries |
 | `otelo-state` | the state file, `state.sqlite`: the indexed attributes and the hash of the password |
 | `otelo-journal` | the journal of OTLP requests: its frames, its segments, their compression, and the retention ([[../tasks/00023-journal-the-otlp-that-otelo-rece.md]]) |
 | `otelo-otlp` | the OTLP receiver over HTTP and gRPC |
