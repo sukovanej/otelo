@@ -6,7 +6,6 @@ mod metrics;
 mod services;
 mod traces;
 
-use std::fmt;
 use std::ops::ControlFlow;
 
 use anyhow::bail;
@@ -23,8 +22,8 @@ use rusqlite::{Row, ToSql};
 pub use compile::InvalidQuery;
 pub use metrics::{BASELINE_LOOKBACK_NS, metric_kind_from_stored_names, read_series_point};
 
+use crate::Reader;
 use crate::reader::timed_out;
-use crate::{Day, Reader};
 
 pub fn timestamp_from_nanos(unix_nanos: i64) -> Timestamp {
     Timestamp::from_nanosecond(i128::from(unix_nanos))
@@ -43,19 +42,6 @@ pub fn span_id_from_blob(blob: Vec<u8>) -> anyhow::Result<SpanId> {
         .try_into()
         .map_err(|blob: Vec<u8>| anyhow::anyhow!("a span ID of {} bytes", blob.len()))?;
     Ok(SpanId(bytes))
-}
-
-pub const ROLLUP_SCHEMA_NAME: &str = "rollup";
-
-#[derive(Clone, Copy)]
-pub struct DaySchema {
-    pub day: Day,
-}
-
-impl fmt::Display for DaySchema {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "\"{}\"", self.day)
-    }
 }
 
 pub struct WhereClause {
@@ -116,19 +102,11 @@ impl WhereClause {
         self.conditions.push(condition);
     }
 
-    pub fn sql_for_day(&self, day_schema: DaySchema) -> String {
-        self.sql_for_schema(&day_schema.to_string())
-    }
-
-    pub fn sql_for_rollups(&self) -> String {
-        self.sql_for_schema(ROLLUP_SCHEMA_NAME)
-    }
-
-    fn sql_for_schema(&self, schema: &str) -> String {
+    pub fn sql(&self) -> String {
         if self.conditions.is_empty() {
             return "TRUE".into();
         }
-        self.conditions.join(" AND ").replace("$day", schema)
+        self.conditions.join(" AND ")
     }
 
     fn params(&self) -> Vec<(&str, &dyn ToSql)> {
@@ -142,43 +120,10 @@ impl WhereClause {
 impl Reader {
     pub(crate) fn scan_rows(
         &self,
-        [head, tail]: [&str; 2],
-        select_for_day: impl Fn(DaySchema) -> String,
-        where_clause: &WhereClause,
-        mut on_row: impl FnMut(&Row) -> anyhow::Result<ControlFlow<()>>,
-    ) -> anyhow::Result<()> {
-        if self.days().is_empty() {
-            return Ok(());
-        }
-        let sql = format!(
-            "{head}{}{tail}",
-            union_day_selects(self.days(), select_for_day)
-        );
-        let statement_span = new_statement_span(&sql);
-        let _entered = statement_span.enter();
-        let mut statement = self.connection().prepare(&sql)?;
-        let mut rows = statement.query(where_clause.params().as_slice())?;
-        let mut returned_rows = 0_i64;
-        while let Some(row) = rows.next()? {
-            returned_rows += 1;
-            if on_row(row)?.is_break() {
-                break;
-            }
-        }
-        statement_span.record("db.response.returned_rows", returned_rows);
-        Ok(())
-    }
-
-    // The rollups are one file, so they need no SELECT per day.
-    pub(crate) fn scan_rollup_rows(
-        &self,
         sql: &str,
         where_clause: &WhereClause,
         mut on_row: impl FnMut(&Row) -> anyhow::Result<ControlFlow<()>>,
     ) -> anyhow::Result<()> {
-        if !self.has_rollups() {
-            return Ok(());
-        }
         let statement_span = new_statement_span(sql);
         let _entered = statement_span.enter();
         let mut statement = self.connection().prepare(sql)?;
@@ -196,18 +141,12 @@ impl Reader {
 
     pub(crate) fn explain_scan(
         &self,
-        [head, tail]: [&str; 2],
-        select_for_day: impl Fn(DaySchema) -> String,
+        sql: &str,
         where_clause: &WhereClause,
     ) -> anyhow::Result<Vec<String>> {
-        if self.days().is_empty() {
-            return Ok(Vec::new());
-        }
-        let sql = format!(
-            "EXPLAIN QUERY PLAN {head}{}{tail}",
-            union_day_selects(self.days(), select_for_day)
-        );
-        let mut statement = self.connection().prepare(&sql)?;
+        let mut statement = self
+            .connection()
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
         let steps = statement.query_map(where_clause.params().as_slice(), |row| {
             row.get::<_, String>(3)
         })?;
@@ -216,13 +155,12 @@ impl Reader {
 
     pub(crate) fn collect_rows<T>(
         &self,
-        head_and_tail: [&str; 2],
-        select_for_day: impl Fn(DaySchema) -> String,
+        sql: &str,
         where_clause: &WhereClause,
         mut map_row: impl FnMut(&Row) -> anyhow::Result<T>,
     ) -> anyhow::Result<Vec<T>> {
         let mut rows = Vec::new();
-        self.scan_rows(head_and_tail, select_for_day, where_clause, |row| {
+        self.scan_rows(sql, where_clause, |row| {
             rows.push(map_row(row)?);
             Ok(ControlFlow::Continue(()))
         })?;
@@ -239,14 +177,6 @@ pub fn new_statement_span(sql: &str) -> tracing::Span {
         db.query.text = sql,
         db.response.returned_rows = tracing::field::Empty,
     )
-}
-
-// FTS5 and the row ids only work within one file, so each day file gets a SELECT of its own.
-pub fn union_day_selects(days: &[Day], select_for_day: impl Fn(DaySchema) -> String) -> String {
-    days.iter()
-        .map(|&day| select_for_day(DaySchema { day }))
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ")
 }
 
 pub fn truncate_to_limit<T>(rows: &mut Vec<T>, limit: usize) -> bool {

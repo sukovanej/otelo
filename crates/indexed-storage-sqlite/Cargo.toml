@@ -1,6 +1,6 @@
 [package]
 name = "otelo-indexed-storage-sqlite"
-description = "The SQLite backend of otelo's storage: the daily files of the logs, traces, and metrics, and the indexed attributes in the state file"
+description = "The SQLite backend of otelo's storage: one file of the logs, traces, and metrics, its writer and retention, and the indexed attributes in the state file"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

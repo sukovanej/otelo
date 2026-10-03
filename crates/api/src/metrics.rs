@@ -14,8 +14,7 @@ use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
 
 /// The series that have points in the range and that the query keeps, by
 /// name. The query reads `name`, `service`, `kind`, `unit`, the attributes, and
-/// the resource. A range of metrics can go back 90 days, further than the
-/// logs and the spans.
+/// the resource.
 #[utoipa::path(
     get,
     path = "/api/metrics",
@@ -30,14 +29,13 @@ pub async fn list_metrics(
     Query(params): Query<QueryParams>,
 ) -> ApiResult<MetricList> {
     let query = parse_query(params.query.as_deref(), Signal::Metrics)?;
-    let retention = api.storage.metric_retention();
     api.run_limited_metric_range_query(
         params.since,
         params.until,
         params.limit,
         100,
         move |opened, limit| {
-            let resolution = Resolution::choose_finest_kept_for(opened.range, retention);
+            let resolution = Resolution::choose_for_range_length(opened.range);
             Ok(opened.queries.list_metrics(&query, resolution, limit)?)
         },
     )
@@ -117,7 +115,6 @@ pub async fn get_metric_series(
         by: parse_grouping_fields(params.by.as_deref())?,
         top: params.top,
     };
-    let retention = api.storage.metric_retention();
     api.run_limited_metric_range_query(
         params.since,
         params.until,
@@ -130,7 +127,7 @@ pub async fn get_metric_series(
                 step_ns: resolve_step(opened.range, requested_step_ns, 120)?,
                 resolution: params
                     .resolution
-                    .unwrap_or_else(|| Resolution::choose_finest_kept_for(opened.range, retention)),
+                    .unwrap_or_else(|| Resolution::choose_for_range_length(opened.range)),
                 grouping,
             };
             Ok(opened.queries.get_metric_series(&filter, limit)?)

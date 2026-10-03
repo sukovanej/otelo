@@ -11,8 +11,7 @@ use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    DaySchema, WhereClause, span_id_from_blob, timestamp_from_nanos, trace_id_from_blob,
-    truncate_to_limit,
+    WhereClause, span_id_from_blob, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
 
@@ -39,15 +38,17 @@ fn compile_log_query(reader: &Reader, query: &Query) -> anyhow::Result<(WhereCla
     Ok((where_clause, unindexed))
 }
 
-const LOG_LINE_COLUMNS: &str = "log.logged_at, resource.service, log.severity, log.body,
+const LOG_LINE_COLUMNS: &str = "log.logged_at, resource.service, log.severity_number, log.body,
     log.trace_id, log.span_id, log.attributes,
     resource.attributes AS resource_attributes";
 
 pub(super) fn explain_logs(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
     let (where_clause, _) = compile_log_query(reader, query)?;
     reader.explain_scan(
-        ["", " ORDER BY logged_at DESC"],
-        select_logs(LOG_LINE_COLUMNS, &where_clause),
+        &format!(
+            "{} ORDER BY log.logged_at DESC",
+            select_logs(LOG_LINE_COLUMNS, &where_clause)
+        ),
         &where_clause,
     )
 }
@@ -61,16 +62,14 @@ pub(super) fn quote_fts_words(text: &str) -> Option<String> {
     (!words.is_empty()).then(|| words.join(" "))
 }
 
-fn select_logs(columns: &str, where_clause: &WhereClause) -> impl Fn(DaySchema) -> String {
-    move |day_schema| {
-        format!(
-            "SELECT {columns}
-             FROM {day_schema}.logs log
-             JOIN {day_schema}.resources resource ON resource.id = log.resource_id
-             WHERE {}",
-            where_clause.sql_for_day(day_schema)
-        )
-    }
+fn select_logs(columns: &str, where_clause: &WhereClause) -> String {
+    format!(
+        "SELECT {columns}
+         FROM logs log
+         JOIN resources resource ON resource.id = log.resource_id
+         WHERE {}",
+        where_clause.sql()
+    )
 }
 
 struct LogGroupTally {
@@ -101,13 +100,12 @@ fn log_line_from_row(row: &Row) -> anyhow::Result<LogLine> {
 
 pub(super) fn read_logs(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Logs> {
     let (where_clause, unindexed) = compile_log_query(reader, query)?;
-    let tail = format!(" ORDER BY logged_at DESC LIMIT {}", limit + 1);
-    let mut logs = reader.collect_rows(
-        ["", &tail],
+    let sql = format!(
+        "{} ORDER BY log.logged_at DESC LIMIT {}",
         select_logs(LOG_LINE_COLUMNS, &where_clause),
-        &where_clause,
-        log_line_from_row,
-    )?;
+        limit + 1
+    );
+    let mut logs = reader.collect_rows(&sql, &where_clause, log_line_from_row)?;
     let truncated = truncate_to_limit(&mut logs, limit);
     Ok(Logs {
         logs,
@@ -122,49 +120,47 @@ pub(super) fn group_logs(
     limit: usize,
 ) -> anyhow::Result<LogGroups> {
     let (where_clause, unindexed) = compile_log_query(reader, query)?;
-    let columns = "log.logged_at, resource.service, log.severity, log.body";
-    let tail = format!(
-        " ORDER BY logged_at DESC LIMIT {}",
+    let sql = format!(
+        "{} ORDER BY log.logged_at DESC LIMIT {}",
+        select_logs(
+            "log.logged_at, resource.service, log.severity_number, log.body",
+            &where_clause
+        ),
         MAX_GROUPED_LOG_LINES + 1
     );
     let mut groups: HashMap<String, LogGroupTally> = HashMap::new();
     let mut scanned = 0;
     let mut partial = false;
-    reader.scan_rows(
-        ["", &tail],
-        select_logs(columns, &where_clause),
-        &where_clause,
-        |row| {
-            if scanned == MAX_GROUPED_LOG_LINES {
-                partial = true;
-                return Ok(ControlFlow::Break(()));
-            }
-            scanned += 1;
-            let logged_at: i64 = row.get(0)?;
-            let service: String = row.get(1)?;
-            let severity = Severity::from_number(row.get(2)?);
-            let body: String = row.get(3)?;
-            let tally = groups
-                .entry(replace_values_in_message(&body))
-                .or_insert_with(|| LogGroupTally {
-                    count: 0,
-                    severity,
-                    services: BTreeSet::new(),
-                    first_at: logged_at,
-                    last_at: logged_at,
-                    samples: Vec::new(),
-                });
-            tally.count += 1;
-            tally.severity = tally.severity.max(severity);
-            tally.services.insert(service);
-            // Rows come newest first, so each row moves the first line back.
-            tally.first_at = logged_at;
-            if tally.samples.len() < MAX_SAMPLES_PER_GROUP && !tally.samples.contains(&body) {
-                tally.samples.push(body);
-            }
-            Ok(ControlFlow::Continue(()))
-        },
-    )?;
+    reader.scan_rows(&sql, &where_clause, |row| {
+        if scanned == MAX_GROUPED_LOG_LINES {
+            partial = true;
+            return Ok(ControlFlow::Break(()));
+        }
+        scanned += 1;
+        let logged_at: i64 = row.get(0)?;
+        let service: String = row.get(1)?;
+        let severity = Severity::from_number(row.get(2)?);
+        let body: String = row.get(3)?;
+        let tally = groups
+            .entry(replace_values_in_message(&body))
+            .or_insert_with(|| LogGroupTally {
+                count: 0,
+                severity,
+                services: BTreeSet::new(),
+                first_at: logged_at,
+                last_at: logged_at,
+                samples: Vec::new(),
+            });
+        tally.count += 1;
+        tally.severity = tally.severity.max(severity);
+        tally.services.insert(service);
+        // Rows come newest first, so each row moves the first line back.
+        tally.first_at = logged_at;
+        if tally.samples.len() < MAX_SAMPLES_PER_GROUP && !tally.samples.contains(&body) {
+            tally.samples.push(body);
+        }
+        Ok(ControlFlow::Continue(()))
+    })?;
     let mut groups: Vec<LogGroup> = groups
         .into_iter()
         .map(|(template, tally)| LogGroup {

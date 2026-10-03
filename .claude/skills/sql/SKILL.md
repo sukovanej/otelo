@@ -5,22 +5,24 @@ description: How otelo writes SQL. A column has the name of the Rust field that 
 
 # Writing the SQL
 
-The schema is `schema.sql` and `rollup.sql` in `crates/indexed-storage-sqlite/src/`. The statements
-are strings in the Rust sources of that crate.
+The schema is `schema.sql` in `crates/indexed-storage-sqlite/src/`, the one file `telemetry.sqlite`.
+The statements are strings in the Rust sources of that crate.
 
 ## Names
 
 - The names are private to `otelo-indexed-storage-sqlite`. No command runs SQL that a user wrote,
   and no other crate reads the tables. Keep it so.
-- A table is a plural noun: `resources`, `attribute_keys`. A column is singular. Both are
+- A table is a plural noun: `resources`, `attribute_key_counts`. A column is singular. Both are
   snake_case and spelled in full: `attribute`, not `attr`.
+- A name says what the table or the column holds without its comment, and takes the
+  OpenTelemetry name where OpenTelemetry has one: `severity_number`, `aggregation_temporality`.
 - A column has the name of the Rust field that holds it: `logs.logged_at` is
-  `Log::logged_at`, and `attribute_keys.key_group` is a `KeyGroup`.
+  `Log::logged_at`, and `attribute_key_counts.attribute_owner` is an `AttributeOwner`.
 - A column that holds an instant ends in `_at`: `logged_at`, `started_at`, `start_at`.
   Never `ts` or `time`.
 - A quantity says its unit: `duration_ns`.
 - A flag says what is true when it is 1: `has_more_values_than_listed`, not `many_values`.
-- A foreign key is the singular of its table and `_id`: `resource_id`, `series_id`.
+- A foreign key is the singular of its table and `_id`: `resource_id`, `metric_series_id`.
 - An index is its table and its columns: `logs_logged_at`, `spans_trace_id`. The index of
   an attribute is `<table>_attribute_<hash>`.
 
@@ -48,8 +50,8 @@ are strings in the Rust sources of that crate.
 - A statement that does not fit on one line breaks before `FROM`, `JOIN`, `WHERE`,
   `GROUP BY`, and `ORDER BY`.
 - A table alias is the singular of the table: `spans span`, `resources resource`. A row of
-  `minutes` or `hours` is a `summary`. A table the query reads twice says which one:
-  `matching_span`. `series` takes no alias.
+  `metric_minute_summaries` or `metric_hour_summaries` is a `summary`. A table the query reads
+  twice says which one: `matching_span`. `metric_series` takes no alias.
 - A value is a bound parameter, never text in the statement. A query built from parts
   names its parameters, `:since`. A fixed statement numbers them, `?1`.
 - Rust formats only names and numbers of its own into a statement: a table, a column, a
@@ -58,8 +60,7 @@ are strings in the Rust sources of that crate.
   never `2`.
 - The path of an attribute comes from `attribute_json_path`, so the expression is the one
   its index has and SQLite uses the index.
-- The schema of a day file goes in double quotes, `"2026-09-30".spans`. A string goes in
-  single quotes.
+- A string goes in single quotes.
 - `GROUP BY` and `ORDER BY` name their columns, never `1, 2`. To sort by an aggregate,
   name it with `AS`.
 

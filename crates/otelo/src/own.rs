@@ -139,7 +139,7 @@ pub fn install_tracing_subscriber(own_telemetry: Option<&Telemetry>) {
         .with_writer(io::stderr)
         .with_ansi(io::stderr().is_terminal())
         .with_filter(build_env_filter(&[]));
-    // A span on the path from the OTLP receiver to the day files would export itself forever.
+    // A span on the path from the OTLP receiver to the telemetry file would export itself forever.
     let trace_export_layer = own_telemetry.map(|own_telemetry| {
         tracing_opentelemetry::layer()
             .with_tracer(own_telemetry.tracer_provider.tracer("otelo"))

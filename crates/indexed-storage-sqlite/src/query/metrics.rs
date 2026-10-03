@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use std::fmt;
 use std::ops::ControlFlow;
 
 use anyhow::{Context, ensure};
@@ -14,9 +13,9 @@ use otelo_indexed_storage::{
 use otelo_query::{Query, Signal};
 
 use super::compile::{TableAliases, compile_query};
-use super::{ROLLUP_SCHEMA_NAME, WhereClause, timestamp_from_nanos, truncate_to_limit};
+use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
-use crate::rollup::{RollupTable, read_summary, summary_columns_of};
+use crate::rollup::{SummaryTable, convert_to_summary_kind, read_summary, summary_columns_of};
 
 // A counter and a cumulative histogram count from the point before. The apps export every
 // minute, so five minutes before the range hold that point.
@@ -26,11 +25,10 @@ pub const BASELINE_LOOKBACK_NS: i64 = 5 * 60 * 1_000_000_000;
 const MAX_SERIES_IN_A_METRIC_QUERY: usize = 2_000;
 
 const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
-    record: "series",
+    record: "metric_series",
     resource: "resource",
 };
 
-// Series from different day files are one series when these match.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct SeriesKey {
     service: String,
@@ -116,11 +114,11 @@ fn ensure_metrics_query(query: &Query) -> anyhow::Result<()> {
 }
 
 // A summary covers a whole minute or hour, so the one the range starts in is part of it.
-const fn start_of_first_summary(reader: &Reader, table: RollupTable) -> i64 {
+const fn start_of_first_summary(reader: &Reader, table: SummaryTable) -> i64 {
     reader.range().start_at().div_euclid(table.step_ns()) * table.step_ns()
 }
 
-const fn round_step_up_to_whole_summaries(step_ns: i64, table: RollupTable) -> i64 {
+const fn round_step_up_to_whole_summaries(step_ns: i64, table: SummaryTable) -> i64 {
     (step_ns + table.step_ns() - 1).div_euclid(table.step_ns()) * table.step_ns()
 }
 
@@ -131,22 +129,22 @@ pub(super) fn list_metrics(
     limit: usize,
 ) -> anyhow::Result<MetricList> {
     ensure_metrics_query(query)?;
-    let rollup_table = RollupTable::from_resolution(resolution);
-    let (points_table, point_alias, instant_column) = rollup_table
-        .map_or(("points", "point", "recorded_at"), |table| {
+    let summary_table = SummaryTable::from_resolution(resolution);
+    let (points_table, point_alias, instant_column) = summary_table
+        .map_or(("metric_points", "point", "recorded_at"), |table| {
             (table.name(), "summary", "start_at")
         });
     let mut where_clause = WhereClause::new();
     where_clause.push_condition(format!(
         "EXISTS (SELECT 1
-                 FROM $day.{points_table} {point_alias}
-                 WHERE {point_alias}.series_id = series.id
+                 FROM {points_table} {point_alias}
+                 WHERE {point_alias}.metric_series_id = metric_series.id
                    AND {point_alias}.{instant_column} >= :since
                    AND {point_alias}.{instant_column} < :until)"
     ));
     where_clause.push_param(
         ":since",
-        rollup_table.map_or_else(
+        summary_table.map_or_else(
             || reader.range().start_at(),
             |table| start_of_first_summary(reader, table),
         ),
@@ -159,50 +157,33 @@ pub(super) fn list_metrics(
         "q",
         &mut where_clause,
     )?;
-    let select_series_in_schema = |schema: &dyn fmt::Display, conditions: String| {
-        format!(
-            "SELECT series.name, series.kind, series.temporality, series.unit, resource.service,
-                    series.attributes, resource.attributes AS resource_attributes
-             FROM {schema}.series
-             JOIN {schema}.resources resource ON resource.id = series.resource_id
-             WHERE {conditions}"
-        )
-    };
-    let read_series_info = |row: &rusqlite::Row| {
+    let sql = format!(
+        "SELECT metric_series.name, metric_series.kind, metric_series.aggregation_temporality,
+                metric_series.unit, resource.service, metric_series.attributes,
+                resource.attributes AS resource_attributes
+         FROM metric_series
+         JOIN resources resource ON resource.id = metric_series.resource_id
+         WHERE {}
+         ORDER BY metric_series.name, resource.service, metric_series.attributes
+         LIMIT {}",
+        where_clause.sql(),
+        limit + 1
+    );
+    let mut series = reader.collect_rows(&sql, &where_clause, |row| {
         let kind: String = row.get(1)?;
-        let temporality: Option<String> = row.get(2)?;
+        let aggregation_temporality: Option<String> = row.get(2)?;
+        let kind = metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?;
         let attributes: String = row.get(5)?;
         let resource: String = row.get(6)?;
         Ok(SeriesInfo {
             name: row.get(0)?,
-            kind: metric_kind_from_stored_names(&kind, temporality.as_deref())?,
+            kind: summary_table.map_or(kind, |_| convert_to_summary_kind(kind)),
             unit: row.get(3)?,
             service: row.get(4)?,
             attributes: serde_json::from_str(&attributes)?,
             resource: serde_json::from_str(&resource)?,
         })
-    };
-    let head = "SELECT DISTINCT * FROM (";
-    let tail = format!(") ORDER BY name, service, attributes LIMIT {}", limit + 1);
-    let mut series = if rollup_table.is_some() {
-        let sql = format!(
-            "{head}{}{tail}",
-            select_series_in_schema(&ROLLUP_SCHEMA_NAME, where_clause.sql_for_rollups())
-        );
-        let mut series = Vec::new();
-        reader.scan_rollup_rows(&sql, &where_clause, |row| {
-            series.push(read_series_info(row)?);
-            Ok(ControlFlow::Continue(()))
-        })?;
-        series
-    } else {
-        reader.collect_rows(
-            [head, &tail],
-            |day_schema| select_series_in_schema(&day_schema, where_clause.sql_for_day(day_schema)),
-            &where_clause,
-            read_series_info,
-        )?
-    };
+    })?;
     let truncated = truncate_to_limit(&mut series, limit);
     Ok(MetricList { series, truncated })
 }
@@ -218,7 +199,7 @@ pub(super) fn read_metric_buckets(
         "the step makes more than {MAX_BUCKETS_IN_RANGE} buckets in the range; raise the step"
     );
     ensure_metrics_query(&filter.query)?;
-    RollupTable::from_resolution(filter.resolution).map_or_else(
+    SummaryTable::from_resolution(filter.resolution).map_or_else(
         || read_buckets_of_raw_points(reader, filter, limit),
         |table| read_buckets_of_summaries(reader, filter, table, limit),
     )
@@ -242,7 +223,11 @@ fn read_buckets_of_raw_points(
         ":until",
         reader.range().end_at(),
     );
-    where_clause.push_condition_with_param("series.name = :name", ":name", filter.name.clone());
+    where_clause.push_condition_with_param(
+        "metric_series.name = :name",
+        ":name",
+        filter.name.clone(),
+    );
     compile_query(
         &filter.query,
         SERIES_TABLE_ALIASES,
@@ -250,56 +235,51 @@ fn read_buckets_of_raw_points(
         "q",
         &mut where_clause,
     )?;
+    let sql = format!(
+        "SELECT resource.service, metric_series.kind, metric_series.aggregation_temporality,
+                metric_series.unit, metric_series.attributes, resource.attributes,
+                point.recorded_at, point.value, point.histogram
+         FROM metric_series
+         JOIN metric_points point ON point.metric_series_id = metric_series.id
+         JOIN resources resource ON resource.id = metric_series.resource_id
+         WHERE {}
+         ORDER BY point.recorded_at",
+        where_clause.sql()
+    );
     let mut steps_by_series: BTreeMap<SeriesKey, SeriesSteps> = BTreeMap::new();
     let mut series_in_range_count = 0;
     let mut has_more_series_than_read = false;
-    reader.scan_rows(
-        ["", " ORDER BY recorded_at"],
-        |day_schema| {
-            format!(
-                "SELECT resource.service, series.kind, series.temporality, series.unit,
-                        series.attributes, resource.attributes, point.recorded_at, point.value,
-                        point.histogram
-                 FROM {day_schema}.points point
-                 JOIN {day_schema}.series ON series.id = point.series_id
-                 JOIN {day_schema}.resources resource ON resource.id = series.resource_id
-                 WHERE {}",
-                where_clause.sql_for_day(day_schema)
-            )
-        },
-        &where_clause,
-        |row| {
-            let kind: String = row.get(1)?;
-            let temporality: Option<String> = row.get(2)?;
-            let kind = metric_kind_from_stored_names(&kind, temporality.as_deref())?;
-            let series_key = SeriesKey {
-                service: row.get(0)?,
-                kind,
-                unit: row.get(3)?,
-                attributes_json: row.get(4)?,
-                resource_attributes_json: row.get(5)?,
-            };
-            let point = read_series_point(row, 6)?;
-            let series_steps = steps_by_series
-                .entry(series_key)
-                .or_insert_with(|| SeriesSteps::new(kind));
-            let step_start_at = point.recorded_at().div_euclid(step_ns) * step_ns;
-            if point.recorded_at() < range_start_at {
-                series_steps.add_point_before_range(step_start_at, point);
+    reader.scan_rows(&sql, &where_clause, |row| {
+        let kind: String = row.get(1)?;
+        let aggregation_temporality: Option<String> = row.get(2)?;
+        let kind = metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?;
+        let series_key = SeriesKey {
+            service: row.get(0)?,
+            kind,
+            unit: row.get(3)?,
+            attributes_json: row.get(4)?,
+            resource_attributes_json: row.get(5)?,
+        };
+        let point = read_series_point(row, 6)?;
+        let series_steps = steps_by_series
+            .entry(series_key)
+            .or_insert_with(|| SeriesSteps::new(kind));
+        let step_start_at = point.recorded_at().div_euclid(step_ns) * step_ns;
+        if point.recorded_at() < range_start_at {
+            series_steps.add_point_before_range(step_start_at, point);
+            return Ok(ControlFlow::Continue(()));
+        }
+        // A series with points only before the range is not a series of the range.
+        if series_steps.has_no_point_in_range() {
+            if series_in_range_count == MAX_SERIES_IN_A_METRIC_QUERY {
+                has_more_series_than_read = true;
                 return Ok(ControlFlow::Continue(()));
             }
-            // A series with points only before the range is not a series of the range.
-            if series_steps.has_no_point_in_range() {
-                if series_in_range_count == MAX_SERIES_IN_A_METRIC_QUERY {
-                    has_more_series_than_read = true;
-                    return Ok(ControlFlow::Continue(()));
-                }
-                series_in_range_count += 1;
-            }
-            series_steps.add_point(step_start_at, point);
-            Ok(ControlFlow::Continue(()))
-        },
-    )?;
+            series_in_range_count += 1;
+        }
+        series_steps.add_point(step_start_at, point);
+        Ok(ControlFlow::Continue(()))
+    })?;
     let series = steps_by_series
         .into_iter()
         .filter(|(_, series_steps)| !series_steps.has_no_point_in_range())
@@ -321,7 +301,7 @@ fn read_buckets_of_raw_points(
 fn read_buckets_of_summaries(
     reader: &Reader,
     filter: &MetricFilter,
-    table: RollupTable,
+    table: SummaryTable,
     limit: usize,
 ) -> anyhow::Result<MetricSeries> {
     let step_ns = round_step_up_to_whole_summaries(filter.step_ns, table);
@@ -336,7 +316,11 @@ fn read_buckets_of_summaries(
         ":until",
         reader.range().end_at(),
     );
-    where_clause.push_condition_with_param("series.name = :name", ":name", filter.name.clone());
+    where_clause.push_condition_with_param(
+        "metric_series.name = :name",
+        ":name",
+        filter.name.clone(),
+    );
     compile_query(
         &filter.query,
         SERIES_TABLE_ALIASES,
@@ -345,25 +329,27 @@ fn read_buckets_of_summaries(
         &mut where_clause,
     )?;
     let sql = format!(
-        "SELECT resource.service, series.kind, series.temporality, series.unit, series.attributes,
-                resource.attributes, summary.start_at, {}
-         FROM {ROLLUP_SCHEMA_NAME}.{} summary
-         JOIN {ROLLUP_SCHEMA_NAME}.series ON series.id = summary.series_id
-         JOIN {ROLLUP_SCHEMA_NAME}.resources resource ON resource.id = series.resource_id
+        "SELECT resource.service, metric_series.kind, metric_series.aggregation_temporality,
+                metric_series.unit, metric_series.attributes, resource.attributes,
+                summary.start_at, {}
+         FROM metric_series
+         JOIN {} summary ON summary.metric_series_id = metric_series.id
+         JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE {}
          ORDER BY summary.start_at",
         summary_columns_of("summary"),
         table.name(),
-        where_clause.sql_for_rollups()
+        where_clause.sql()
     );
     let mut summaries_by_series: BTreeMap<SeriesKey, BTreeMap<i64, StepSummary>> = BTreeMap::new();
     let mut has_more_series_than_read = false;
-    reader.scan_rollup_rows(&sql, &where_clause, |row| {
+    reader.scan_rows(&sql, &where_clause, |row| {
         let kind: String = row.get(1)?;
-        let temporality: Option<String> = row.get(2)?;
+        let aggregation_temporality: Option<String> = row.get(2)?;
+        let kind = metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?;
         let series_key = SeriesKey {
             service: row.get(0)?,
-            kind: metric_kind_from_stored_names(&kind, temporality.as_deref())?,
+            kind: convert_to_summary_kind(kind),
             unit: row.get(3)?,
             attributes_json: row.get(4)?,
             resource_attributes_json: row.get(5)?,

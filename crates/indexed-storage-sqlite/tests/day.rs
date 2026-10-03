@@ -1,13 +1,11 @@
 use otelo_indexed_storage_sqlite::Day;
 
 #[test]
-fn names_the_file_by_the_utc_date() {
+fn a_day_is_its_utc_date() {
     let day = Day::from_unix_nanos(1_790_000_000 * 1_000_000_000);
-    assert_eq!(day.file_name(), "2026-09-21.sqlite");
-    assert_eq!(Day::from_file_name("2026-09-21.sqlite"), Some(day));
-    assert_eq!(Day::from_file_name("2026-09-21.sqlite-wal"), Some(day));
-    assert_eq!(Day::from_file_name("2026-09-21.sqlite.backup"), None);
-    assert_eq!(Day::from_file_name("state.sqlite"), None);
+    assert_eq!(day.to_string(), "2026-09-21");
+    assert_eq!("2026-09-21".parse::<Day>().unwrap(), day);
+    assert_eq!(day.add_days(1).to_string(), "2026-09-22");
 }
 
 #[test]

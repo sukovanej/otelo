@@ -116,8 +116,8 @@ pub async fn list_indexes(State(api): State<Api>) -> Json<IndexList> {
     Json(api.list_indexed_attributes())
 }
 
-/// Indexes an attribute of the logs or of the spans in every day file, so a
-/// query that compares it reads only the matching records. The writer builds
+/// Indexes an attribute of the logs or of the spans, so a query that
+/// compares it reads only the matching records. The writer builds
 /// the index within seconds.
 #[utoipa::path(
     put,
@@ -138,7 +138,7 @@ pub async fn add_index(
     api.change_index(&signal, &key, IndexChange::Add).await
 }
 
-/// Drops the index of an attribute from every day file.
+/// Drops the index of an attribute.
 #[utoipa::path(
     delete,
     path = "/api/indexes/{signal}/{key}",

@@ -12,21 +12,11 @@ use crate::{IndexedAttribute, Result, SpanKind, TimeRange, TraceId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorageSize {
     pub telemetry_bytes: u64,
-    pub rollup_bytes: u64,
     pub state_bytes: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MetricRetention {
-    pub oldest_raw_at: i64,
-    pub oldest_minute_at: i64,
-    pub oldest_hour_at: i64,
-}
-
 pub trait Storage: Send + Sync {
-    fn oldest_retained_at(&self) -> i64;
-
-    fn metric_retention(&self) -> MetricRetention;
+    fn oldest_retained_at(&self, signal: Signal) -> i64;
 
     fn size(&self) -> Result<StorageSize>;
 

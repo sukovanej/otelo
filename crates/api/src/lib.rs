@@ -19,6 +19,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use jiff::Timestamp;
 use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
+use otelo_query::Signal;
 use tracing::Instrument;
 use tracing::field::Empty;
 use utoipa::OpenApi;
@@ -126,17 +127,17 @@ pub(crate) struct OpenedRange {
     range: TimeRange,
 }
 
+pub(crate) struct RequestedRange {
+    signals: &'static [Signal],
+    since: Option<String>,
+    until: Option<String>,
+    default_since: DefaultSince,
+}
+
 #[derive(Clone, Copy)]
 pub enum DefaultSince {
     HourBeforeNow,
     OldestRetained,
-}
-
-#[derive(Clone, Copy)]
-enum RetentionOf {
-    LogsAndSpans,
-    // The summaries of the metrics outlive the logs, the spans, and the raw points.
-    Metrics,
 }
 
 impl Api {
@@ -157,17 +158,15 @@ impl Api {
 
     async fn run_range_query<T: Send + 'static>(
         &self,
-        since: Option<String>,
-        until: Option<String>,
-        default_since: DefaultSince,
+        requested_range: RequestedRange,
         query: impl FnOnce(OpenedRange) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         self.run_blocking_query(move |api| {
             let range = api.resolve_requested_range(
-                RetentionOf::LogsAndSpans,
-                since.as_deref(),
-                until.as_deref(),
-                default_since,
+                requested_range.signals,
+                requested_range.since.as_deref(),
+                requested_range.until.as_deref(),
+                requested_range.default_since,
             )?;
             query(api.open_range(range)?)
         })
@@ -176,19 +175,17 @@ impl Api {
 
     async fn run_limited_range_query<T: Send + 'static>(
         &self,
-        since: Option<String>,
-        until: Option<String>,
-        default_since: DefaultSince,
+        requested_range: RequestedRange,
         requested_limit: Option<usize>,
         default_limit: usize,
         query: impl FnOnce(OpenedRange, usize) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         self.run_blocking_query(move |api| {
             let range = api.resolve_requested_range(
-                RetentionOf::LogsAndSpans,
-                since.as_deref(),
-                until.as_deref(),
-                default_since,
+                requested_range.signals,
+                requested_range.since.as_deref(),
+                requested_range.until.as_deref(),
+                requested_range.default_since,
             )?;
             let limit = check_limit(requested_limit, default_limit)
                 .map_err(|error| ApiError::bad_request(&error))?;
@@ -207,7 +204,7 @@ impl Api {
     ) -> ApiResult<T> {
         self.run_blocking_query(move |api| {
             let range = api.resolve_requested_range(
-                RetentionOf::Metrics,
+                &[Signal::Metrics],
                 since.as_deref(),
                 until.as_deref(),
                 DefaultSince::HourBeforeNow,
@@ -221,20 +218,25 @@ impl Api {
 
     async fn run_retention_query<T: Send + 'static>(
         &self,
+        signal: Signal,
         query: impl FnOnce(OpenedRange) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
-        self.run_range_query(None, None, DefaultSince::OldestRetained, query)
-            .await
+        self.run_blocking_query(move |api| {
+            let range =
+                api.resolve_requested_range(&[signal], None, None, DefaultSince::OldestRetained)?;
+            query(api.open_range(range)?)
+        })
+        .await
     }
 
     fn resolve_requested_range(
         &self,
-        retention: RetentionOf,
+        signals: &[Signal],
         since: Option<&str>,
         until: Option<&str>,
         default_since: DefaultSince,
     ) -> Result<TimeRange, ApiError> {
-        self.resolve_range_within_retention(retention, since, until, default_since)
+        self.resolve_range_within_retention(signals, since, until, default_since)
             .map_err(|error| ApiError::bad_request(&error))
     }
 
@@ -243,31 +245,10 @@ impl Api {
         Ok(OpenedRange { queries, range })
     }
 
-    pub fn resolve_range(
+    // A range that reads more than one signal starts where the shortest retention starts.
+    pub fn resolve_range_within_retention(
         &self,
-        since: Option<&str>,
-        until: Option<&str>,
-        default_since: DefaultSince,
-    ) -> anyhow::Result<TimeRange> {
-        self.resolve_range_within_retention(RetentionOf::LogsAndSpans, since, until, default_since)
-    }
-
-    pub fn resolve_metric_range(
-        &self,
-        since: Option<&str>,
-        until: Option<&str>,
-    ) -> anyhow::Result<TimeRange> {
-        self.resolve_range_within_retention(
-            RetentionOf::Metrics,
-            since,
-            until,
-            DefaultSince::HourBeforeNow,
-        )
-    }
-
-    fn resolve_range_within_retention(
-        &self,
-        retention: RetentionOf,
+        signals: &[Signal],
         since: Option<&str>,
         until: Option<&str>,
         default_since: DefaultSince,
@@ -283,10 +264,11 @@ impl Api {
             since.is_none_or(|since| since < until),
             "since has to be before until"
         );
-        let oldest_retained_at = match retention {
-            RetentionOf::LogsAndSpans => self.storage.oldest_retained_at(),
-            RetentionOf::Metrics => self.storage.metric_retention().oldest_hour_at,
-        };
+        let oldest_retained_at = signals
+            .iter()
+            .map(|&signal| self.storage.oldest_retained_at(signal))
+            .max()
+            .context("a range reads at least one signal")?;
         ensure!(
             oldest_retained_at < until,
             "the range ends before the oldest telemetry otelo keeps"

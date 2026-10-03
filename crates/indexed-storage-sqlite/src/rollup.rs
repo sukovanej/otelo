@@ -1,29 +1,15 @@
+use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap};
-use std::fs;
-use std::ops::ControlFlow;
-use std::path::{Path, PathBuf};
 
-use anyhow::Context;
 use otelo_indexed_storage::query::Resolution;
 use otelo_indexed_storage::{
     Change, Increase, Level, MetricKind, SeriesSteps, StepSummary, Temporality, TimeRange,
 };
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
+use rusqlite::{OptionalExtension, Row, Transaction, params};
 
-use crate::day::Day;
-use crate::query::{
-    BASELINE_LOOKBACK_NS, WhereClause, metric_kind_from_stored_names, read_series_point,
-};
-use crate::reader::Reader;
-use crate::series::{
-    ResourceId, SeriesCache, SeriesId, SeriesIdentity, StoredSeries, find_or_insert_resource_id,
-    find_or_insert_series_id,
-};
-
-pub const ROLLUP_FILE_NAME: &str = "metrics-rollup.sqlite";
-
-const ROLLUP_SCHEMA: &str = include_str!("rollup.sql");
+use crate::query::{BASELINE_LOOKBACK_NS, metric_kind_from_stored_names, read_series_point};
+use crate::series::MetricSeriesId;
+use crate::telemetry_file::TelemetryFile;
 
 pub const MINUTE_NS: i64 = 60 * 1_000_000_000;
 pub const HOUR_NS: i64 = 60 * MINUTE_NS;
@@ -31,265 +17,192 @@ pub const HOUR_NS: i64 = 60 * MINUTE_NS;
 // A batch may reach the writer a while after its points were recorded.
 const LATE_BATCH_WAIT_NS: i64 = 2 * MINUTE_NS;
 
-const SUMMARY_COLUMNS: &str = "count, min, max, sum, last, increase, seconds, histogram";
+const SUMMARY_COLUMNS: &str = "point_count, min_value, max_value, value_sum, last_value, \
+                               counter_increase, counter_increase_seconds, merged_histogram";
 
-pub enum RollupProgress {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Progress {
     CaughtUp,
     MoreIsDue,
 }
 
 #[derive(Clone, Copy)]
-pub enum RollupTable {
-    Minutes,
-    Hours,
+pub enum SummaryTable {
+    Minute,
+    Hour,
 }
 
-impl RollupTable {
+impl SummaryTable {
     pub const fn from_resolution(resolution: Resolution) -> Option<Self> {
         match resolution {
             Resolution::Raw => None,
-            Resolution::Minute => Some(Self::Minutes),
-            Resolution::Hour => Some(Self::Hours),
+            Resolution::Minute => Some(Self::Minute),
+            Resolution::Hour => Some(Self::Hour),
         }
     }
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Minutes => "minutes",
-            Self::Hours => "hours",
+            Self::Minute => "metric_minute_summaries",
+            Self::Hour => "metric_hour_summaries",
         }
     }
 
     pub const fn step_ns(self) -> i64 {
         match self {
-            Self::Minutes => MINUTE_NS,
-            Self::Hours => HOUR_NS,
+            Self::Minute => MINUTE_NS,
+            Self::Hour => HOUR_NS,
         }
     }
 }
 
-// Series from different day files are one series of the rollups when these match.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct SeriesKey {
-    service: String,
-    resource_attributes_json: String,
-    name: String,
-    kind: MetricKind,
-    unit: String,
-    attributes_json: String,
-}
-
-pub struct Rollups {
-    telemetry_directory: PathBuf,
-    connection: Connection,
-    resource_ids_by_hash: HashMap<i64, ResourceId>,
-    series_cache: SeriesCache,
-}
-
-impl Rollups {
-    pub fn open(telemetry_directory: &Path) -> anyhow::Result<Self> {
-        let path = telemetry_directory.join(ROLLUP_FILE_NAME);
-        let connection =
-            Connection::open(&path).with_context(|| format!("open {}", path.display()))?;
-        connection
-            .execute_batch(ROLLUP_SCHEMA)
-            .with_context(|| format!("create the schema in {}", path.display()))?;
-        Ok(Self {
-            telemetry_directory: telemetry_directory.to_owned(),
-            connection,
-            resource_ids_by_hash: HashMap::new(),
-            series_cache: SeriesCache::default(),
-        })
-    }
-
+impl TelemetryFile {
     // At most an hour of minutes and one hour at a time, so the writer takes batches in between.
-    pub fn roll_up_next_due(
-        &mut self,
-        now: i64,
-        oldest_raw_at: i64,
-    ) -> anyhow::Result<RollupProgress> {
+    pub fn roll_up_next_due(&mut self, now: i64, oldest_point_at: i64) -> anyhow::Result<Progress> {
         let minutes_due_until = (now - LATE_BATCH_WAIT_NS).div_euclid(MINUTE_NS) * MINUTE_NS;
-        let Some(minutes_rolled_until) = self.read_minutes_rolled_until(oldest_raw_at)? else {
-            return Ok(RollupProgress::CaughtUp);
+        let Some(minutes_summarized_until) = self.read_minutes_summarized_until(oldest_point_at)?
+        else {
+            return Ok(Progress::CaughtUp);
         };
-        let minutes_rolled_until = if minutes_rolled_until < minutes_due_until {
-            let end_of_hour = (minutes_rolled_until.div_euclid(HOUR_NS) + 1) * HOUR_NS;
+        let minutes_summarized_until = if minutes_summarized_until < minutes_due_until {
+            let end_of_hour = (minutes_summarized_until.div_euclid(HOUR_NS) + 1) * HOUR_NS;
             let minute_range =
-                TimeRange::new(minutes_rolled_until, end_of_hour.min(minutes_due_until))?;
-            self.roll_up_minutes(minute_range)?;
+                TimeRange::new(minutes_summarized_until, end_of_hour.min(minutes_due_until))?;
+            self.summarize_minutes(minute_range)?;
             minute_range.end_at()
         } else {
-            minutes_rolled_until
+            minutes_summarized_until
         };
 
-        let hours_due_until = minutes_rolled_until.div_euclid(HOUR_NS) * HOUR_NS;
-        let hours_rolled_until = match self.read_rolled_until(RollupTable::Hours)? {
-            Some(rolled_until) => rolled_until,
+        let hours_due_until = minutes_summarized_until.div_euclid(HOUR_NS) * HOUR_NS;
+        let hours_summarized_until = match self.read_summarized_until(SummaryTable::Hour)? {
+            Some(summarized_until) => summarized_until,
             None => self
                 .read_start_of_first_minute()?
                 .map_or(hours_due_until, |first_minute_start_at| {
                     first_minute_start_at.div_euclid(HOUR_NS) * HOUR_NS
                 }),
         };
-        let hours_rolled_until = if hours_rolled_until < hours_due_until {
-            self.roll_up_hour(hours_rolled_until)?;
-            hours_rolled_until + HOUR_NS
+        let hours_summarized_until = if hours_summarized_until < hours_due_until {
+            self.summarize_hour(hours_summarized_until)?;
+            hours_summarized_until + HOUR_NS
         } else {
-            hours_rolled_until
+            hours_summarized_until
         };
         Ok(
-            if minutes_rolled_until < minutes_due_until || hours_rolled_until < hours_due_until {
-                RollupProgress::MoreIsDue
+            if minutes_summarized_until < minutes_due_until
+                || hours_summarized_until < hours_due_until
+            {
+                Progress::MoreIsDue
             } else {
-                RollupProgress::CaughtUp
+                Progress::CaughtUp
             },
         )
     }
 
-    fn read_minutes_rolled_until(&self, oldest_raw_at: i64) -> anyhow::Result<Option<i64>> {
-        let rolled_until = match self.read_rolled_until(RollupTable::Minutes)? {
-            Some(rolled_until) => Some(rolled_until),
-            None => self.find_start_of_oldest_day_file()?,
+    fn read_minutes_summarized_until(&self, oldest_point_at: i64) -> anyhow::Result<Option<i64>> {
+        let summarized_until = match self.read_summarized_until(SummaryTable::Minute)? {
+            Some(summarized_until) => Some(summarized_until),
+            None => self
+                .connection()
+                .query_row("SELECT min(recorded_at) FROM metric_points", [], |row| {
+                    row.get::<_, Option<i64>>(0)
+                })?
+                .map(|first_recorded_at| first_recorded_at.div_euclid(MINUTE_NS) * MINUTE_NS),
         };
-        // A daemon that was down for longer than the raw points are kept starts again at the
-        // oldest of them.
-        Ok(rolled_until.map(|rolled_until| rolled_until.max(oldest_raw_at)))
+        // A daemon that was down for longer than the points are kept starts again at the oldest
+        // of them.
+        Ok(summarized_until.map(|summarized_until| summarized_until.max(oldest_point_at)))
     }
 
-    fn find_start_of_oldest_day_file(&self) -> anyhow::Result<Option<i64>> {
-        let mut oldest_day = None;
-        for entry in fs::read_dir(&self.telemetry_directory)? {
-            let file_name = entry?.file_name();
-            let day = file_name
-                .to_str()
-                .filter(|name| name.strip_suffix(".sqlite").is_some())
-                .and_then(Day::from_file_name);
-            oldest_day = oldest_day.into_iter().chain(day).min();
-        }
-        Ok(oldest_day.map(Day::start_at))
-    }
-
-    fn read_rolled_until(&self, table: RollupTable) -> anyhow::Result<Option<i64>> {
+    fn read_summarized_until(&self, table: SummaryTable) -> anyhow::Result<Option<i64>> {
         Ok(self
-            .connection
-            .prepare_cached("SELECT rolled_until FROM cursors WHERE rollup = ?1")?
+            .connection()
+            .prepare_cached(
+                "SELECT summarized_until FROM metric_summary_progress WHERE summary_table = ?1",
+            )?
             .query_row([table.name()], |row| row.get(0))
             .optional()?)
     }
 
     fn read_start_of_first_minute(&self) -> anyhow::Result<Option<i64>> {
-        Ok(self
-            .connection
-            .query_row("SELECT min(start_at) FROM minutes", [], |row| row.get(0))?)
+        Ok(self.connection().query_row(
+            "SELECT min(start_at) FROM metric_minute_summaries",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
-    fn roll_up_minutes(&mut self, minute_range: TimeRange) -> anyhow::Result<()> {
-        let steps_by_series = self.sum_up_raw_points_by_minute(minute_range)?;
-        let transaction = self.connection.transaction()?;
-        for (series_key, series_steps) in steps_by_series {
+    fn summarize_minutes(&mut self, minute_range: TimeRange) -> anyhow::Result<()> {
+        let steps_by_series = self.sum_up_points_by_minute(minute_range)?;
+        let transaction = self.connection_mut().transaction()?;
+        for (series_id, series_steps) in steps_by_series {
             if series_steps.has_no_point_in_range() {
                 continue;
             }
-            let stored_resource = find_or_insert_resource_id(
-                &transaction,
-                &mut self.resource_ids_by_hash,
-                &series_key.service,
-                &series_key.resource_attributes_json,
-            )?;
-            let stored_series = find_or_insert_series_id(
-                &transaction,
-                &mut self.series_cache,
-                stored_resource.id(),
-                &SeriesIdentity {
-                    name: &series_key.name,
-                    kind: convert_to_rollup_kind(series_key.kind),
-                    unit: &series_key.unit,
-                    attributes_json: &series_key.attributes_json,
-                },
-            )?;
-            let (StoredSeries::Found(series_id) | StoredSeries::Inserted(series_id)) =
-                stored_series
-            else {
-                continue;
-            };
             for (minute_start_at, summary) in series_steps.into_summaries_by_step() {
                 write_summary(
                     &transaction,
-                    RollupTable::Minutes,
+                    SummaryTable::Minute,
                     series_id,
                     minute_start_at,
                     &summary,
                 )?;
             }
         }
-        write_rolled_until(&transaction, RollupTable::Minutes, minute_range.end_at())?;
+        write_summarized_until(&transaction, SummaryTable::Minute, minute_range.end_at())?;
         transaction.commit()?;
         Ok(())
     }
 
-    fn sum_up_raw_points_by_minute(
+    fn sum_up_points_by_minute(
         &self,
         minute_range: TimeRange,
-    ) -> anyhow::Result<BTreeMap<SeriesKey, SeriesSteps>> {
+    ) -> anyhow::Result<BTreeMap<MetricSeriesId, SeriesSteps>> {
         let since = minute_range.start_at().saturating_sub(BASELINE_LOOKBACK_NS);
-        let until = minute_range.end_at();
-        let reader = Reader::open(&self.telemetry_directory, TimeRange::new(since, until)?)?;
-        let mut where_clause = WhereClause::new();
-        where_clause.push_condition_with_param("point.recorded_at >= :since", ":since", since);
-        where_clause.push_condition_with_param("point.recorded_at < :until", ":until", until);
-        let mut steps_by_series: BTreeMap<SeriesKey, SeriesSteps> = BTreeMap::new();
-        reader.scan_rows(
-            ["", " ORDER BY recorded_at"],
-            |day_schema| {
-                format!(
-                    "SELECT resource.service, resource.attributes, series.name, series.kind,
-                            series.temporality, series.unit, series.attributes, point.recorded_at,
-                            point.value, point.histogram
-                     FROM {day_schema}.points point
-                     JOIN {day_schema}.series ON series.id = point.series_id
-                     JOIN {day_schema}.resources resource ON resource.id = series.resource_id
-                     WHERE {}",
-                    where_clause.sql_for_day(day_schema)
-                )
-            },
-            &where_clause,
-            |row| {
-                let kind: String = row.get(3)?;
-                let temporality: Option<String> = row.get(4)?;
-                let kind = metric_kind_from_stored_names(&kind, temporality.as_deref())?;
-                let series_key = SeriesKey {
-                    service: row.get(0)?,
-                    resource_attributes_json: row.get(1)?,
-                    name: row.get(2)?,
-                    kind,
-                    unit: row.get(5)?,
-                    attributes_json: row.get(6)?,
-                };
-                let point = read_series_point(row, 7)?;
-                let series_steps = steps_by_series
-                    .entry(series_key)
-                    .or_insert_with(|| SeriesSteps::new(kind));
-                let minute_start_at = point.recorded_at().div_euclid(MINUTE_NS) * MINUTE_NS;
-                if point.recorded_at() >= minute_range.start_at() {
-                    series_steps.add_point(minute_start_at, point);
-                } else {
-                    series_steps.add_point_before_range(minute_start_at, point);
-                }
-                Ok(ControlFlow::Continue(()))
-            },
+        // CROSS JOIN keeps metric_series the outer loop, so the points come by their primary key.
+        let mut statement = self.connection().prepare_cached(
+            "SELECT metric_series.id, metric_series.kind, metric_series.aggregation_temporality,
+                    point.recorded_at, point.value, point.histogram
+             FROM metric_series
+             CROSS JOIN metric_points point ON point.metric_series_id = metric_series.id
+             WHERE point.recorded_at >= ?1 AND point.recorded_at < ?2
+             ORDER BY metric_series.id, point.recorded_at",
         )?;
+        let mut rows = statement.query([since, minute_range.end_at()])?;
+        let mut steps_by_series: BTreeMap<MetricSeriesId, SeriesSteps> = BTreeMap::new();
+        while let Some(row) = rows.next()? {
+            let kind: String = row.get(1)?;
+            let aggregation_temporality: Option<String> = row.get(2)?;
+            let kind = metric_kind_from_stored_names(&kind, aggregation_temporality.as_deref())?;
+            let point = read_series_point(row, 3)?;
+            let series_steps = steps_by_series
+                .entry(row.get(0)?)
+                .or_insert_with(|| SeriesSteps::new(kind));
+            let minute_start_at = point.recorded_at().div_euclid(MINUTE_NS) * MINUTE_NS;
+            if point.recorded_at() >= minute_range.start_at() {
+                series_steps.add_point(minute_start_at, point);
+            } else {
+                series_steps.add_point_before_range(minute_start_at, point);
+            }
+        }
         Ok(steps_by_series)
     }
 
-    fn roll_up_hour(&mut self, hour_start_at: i64) -> anyhow::Result<()> {
-        let transaction = self.connection.transaction()?;
-        let mut summaries_by_series: BTreeMap<SeriesId, StepSummary> = BTreeMap::new();
+    fn summarize_hour(&mut self, hour_start_at: i64) -> anyhow::Result<()> {
+        let transaction = self.connection_mut().transaction()?;
+        let mut summaries_by_series: BTreeMap<MetricSeriesId, StepSummary> = BTreeMap::new();
         {
+            // CROSS JOIN keeps metric_series the outer loop, so the minutes come by their primary
+            // key.
             let mut select_minutes = transaction.prepare_cached(&format!(
-                "SELECT series_id, {SUMMARY_COLUMNS}
-                 FROM minutes
-                 WHERE start_at >= ?1 AND start_at < ?2
-                 ORDER BY start_at"
+                "SELECT summary.metric_series_id, {}
+                 FROM metric_series
+                 CROSS JOIN metric_minute_summaries summary
+                   ON summary.metric_series_id = metric_series.id
+                 WHERE summary.start_at >= ?1 AND summary.start_at < ?2
+                 ORDER BY summary.metric_series_id, summary.start_at",
+                summary_columns_of("summary")
             ))?;
             let mut rows = select_minutes.query([hour_start_at, hour_start_at + HOUR_NS])?;
             while let Some(row) = rows.next()? {
@@ -305,42 +218,20 @@ impl Rollups {
         for (series_id, summary) in summaries_by_series {
             write_summary(
                 &transaction,
-                RollupTable::Hours,
+                SummaryTable::Hour,
                 series_id,
                 hour_start_at,
                 &summary,
             )?;
         }
-        write_rolled_until(&transaction, RollupTable::Hours, hour_start_at + HOUR_NS)?;
+        write_summarized_until(&transaction, SummaryTable::Hour, hour_start_at + HOUR_NS)?;
         transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn delete_summaries_before(
-        &mut self,
-        oldest_minute_at: i64,
-        oldest_hour_at: i64,
-    ) -> anyhow::Result<()> {
-        let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "DELETE FROM minutes WHERE start_at < ?1",
-            [oldest_minute_at],
-        )?;
-        transaction.execute("DELETE FROM hours WHERE start_at < ?1", [oldest_hour_at])?;
-        transaction.execute_batch(
-            "DELETE FROM series WHERE id NOT IN
-               (SELECT series_id FROM minutes UNION SELECT series_id FROM hours);
-             DELETE FROM resources WHERE id NOT IN (SELECT resource_id FROM series);",
-        )?;
-        transaction.commit()?;
-        self.resource_ids_by_hash.clear();
-        self.series_cache = SeriesCache::default();
         Ok(())
     }
 }
 
 // A summary holds what each step added, whatever the points of the series counted.
-const fn convert_to_rollup_kind(kind: MetricKind) -> MetricKind {
+pub const fn convert_to_summary_kind(kind: MetricKind) -> MetricKind {
     match kind {
         MetricKind::Gauge | MetricKind::UpDown => kind,
         MetricKind::Counter(_) => MetricKind::Counter(Temporality::Delta),
@@ -348,34 +239,38 @@ const fn convert_to_rollup_kind(kind: MetricKind) -> MetricKind {
     }
 }
 
-fn write_rolled_until(
+fn write_summarized_until(
     transaction: &Transaction,
-    table: RollupTable,
-    rolled_until: i64,
+    table: SummaryTable,
+    summarized_until: i64,
 ) -> anyhow::Result<()> {
     transaction
-        .prepare_cached("INSERT OR REPLACE INTO cursors (rollup, rolled_until) VALUES (?1, ?2)")?
-        .execute(params![table.name(), rolled_until])?;
+        .prepare_cached(
+            "INSERT OR REPLACE INTO metric_summary_progress (summary_table, summarized_until)
+             VALUES (?1, ?2)",
+        )?
+        .execute(params![table.name(), summarized_until])?;
     Ok(())
 }
 
-// Rolling a step up again replaces its row, so it gives the same row.
+// Summarizing a step again replaces its row, so it gives the same row.
 fn write_summary(
     transaction: &Transaction,
-    table: RollupTable,
-    series_id: SeriesId,
+    table: SummaryTable,
+    series_id: MetricSeriesId,
     start_at: i64,
     summary: &StepSummary,
 ) -> anyhow::Result<()> {
-    let (increase_amount, elapsed_seconds, histogram_json) = match &summary.change {
+    let (counter_increase, counter_increase_seconds, merged_histogram_json) = match &summary.change
+    {
         Change::Nothing => (None, None, None),
         Change::Increase(increase) => (Some(increase.amount), Some(increase.elapsed_seconds), None),
         Change::Distribution(histogram) => (None, None, Some(serde_json::to_string(histogram)?)),
     };
     transaction
         .prepare_cached(&format!(
-            "INSERT OR REPLACE INTO {} (series_id, start_at, {SUMMARY_COLUMNS})
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO {} (metric_series_id, start_at, {SUMMARY_COLUMNS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             table.name()
         ))?
         .execute(params![
@@ -386,19 +281,23 @@ fn write_summary(
             summary.level.max,
             summary.level.sum,
             summary.level.last,
-            increase_amount,
-            elapsed_seconds,
-            histogram_json,
+            counter_increase,
+            counter_increase_seconds,
+            merged_histogram_json,
         ])?;
     Ok(())
 }
 
 pub fn read_summary(row: &Row, first_summary_column: usize) -> anyhow::Result<StepSummary> {
-    let count: i64 = row.get(first_summary_column)?;
-    let increase_amount: Option<f64> = row.get(first_summary_column + 5)?;
-    let elapsed_seconds: Option<f64> = row.get(first_summary_column + 6)?;
-    let histogram_json: Option<String> = row.get(first_summary_column + 7)?;
-    let change = match (increase_amount, elapsed_seconds, histogram_json) {
+    let point_count: i64 = row.get(first_summary_column)?;
+    let counter_increase: Option<f64> = row.get(first_summary_column + 5)?;
+    let counter_increase_seconds: Option<f64> = row.get(first_summary_column + 6)?;
+    let merged_histogram_json: Option<String> = row.get(first_summary_column + 7)?;
+    let change = match (
+        counter_increase,
+        counter_increase_seconds,
+        merged_histogram_json,
+    ) {
         (Some(amount), Some(elapsed_seconds), _) => Change::Increase(Increase {
             amount,
             elapsed_seconds,
@@ -408,7 +307,7 @@ pub fn read_summary(row: &Row, first_summary_column: usize) -> anyhow::Result<St
     };
     Ok(StepSummary {
         level: Level {
-            count: count.cast_unsigned(),
+            count: point_count.cast_unsigned(),
             min: row.get(first_summary_column + 1)?,
             max: row.get(first_summary_column + 2)?,
             sum: row.get(first_summary_column + 3)?,

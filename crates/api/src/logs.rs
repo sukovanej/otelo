@@ -4,7 +4,7 @@ use otelo_query::Signal;
 
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_query};
-use crate::{Api, DefaultSince};
+use crate::{Api, DefaultSince, RequestedRange};
 
 /// Log lines, newest first.
 #[utoipa::path(
@@ -22,9 +22,12 @@ pub async fn list_logs(
 ) -> ApiResult<Logs> {
     let query = parse_query(params.query.as_deref(), Signal::Logs)?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Logs],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         100,
         move |opened, limit| Ok(opened.queries.list_logs(&query, limit)?),
@@ -50,9 +53,12 @@ pub async fn list_log_groups(
 ) -> ApiResult<LogGroups> {
     let query = parse_query(params.query.as_deref(), Signal::Logs)?;
     api.run_limited_range_query(
-        params.since,
-        params.until,
-        DefaultSince::HourBeforeNow,
+        RequestedRange {
+            signals: &[Signal::Logs],
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
         params.limit,
         50,
         move |opened, limit| Ok(opened.queries.list_log_groups(&query, limit)?),

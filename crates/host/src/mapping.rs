@@ -509,7 +509,6 @@ fn metrics_of_unit(recorded_at: i64, unit: &Unit) -> TickMetrics {
 fn push_storage_size(metrics: &mut TickMetrics, storage_size: StorageSize) {
     for (file_kind, bytes) in [
         ("telemetry", storage_size.telemetry_bytes),
-        ("rollup", storage_size.rollup_bytes),
         ("state", storage_size.state_bytes),
     ] {
         metrics.push_level(

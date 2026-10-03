@@ -8,7 +8,9 @@ use otelo_indexed_storage::{
     IndexedCounts, Metric, MetricKind, NumberPoint, Points, RangeQueries, Records, Resource,
     Temporality, TimeRange, open_batch_channel,
 };
-use otelo_indexed_storage_sqlite::{Config, Day, Reader, RollupProgress, Rollups, Writer};
+use otelo_indexed_storage_sqlite::{
+    Config, Day, Progress, Reader, TELEMETRY_FILE_NAME, TelemetryFile, Writer,
+};
 use otelo_query::{Signal, parse_query};
 use rusqlite::Connection;
 
@@ -22,7 +24,7 @@ fn ten_tomorrow() -> i64 {
     Day::today().add_days(1).start_at() + 10 * HOUR
 }
 
-fn oldest_raw_at() -> i64 {
+fn oldest_point_at() -> i64 {
     Day::today().add_days(-6).start_at()
 }
 
@@ -44,12 +46,9 @@ fn write_metrics(directory: &Path, metrics: Vec<Metric>) {
 }
 
 fn roll_up_all_due(directory: &Path, now: i64) -> usize {
-    let mut rollups = Rollups::open(directory).unwrap();
+    let mut file = TelemetryFile::open(directory).unwrap();
     let mut passes = 1;
-    while matches!(
-        rollups.roll_up_next_due(now, oldest_raw_at()).unwrap(),
-        RollupProgress::MoreIsDue
-    ) {
+    while file.roll_up_next_due(now, oldest_point_at()).unwrap() == Progress::MoreIsDue {
         passes += 1;
         assert!(passes < 1000, "the rollups never finish");
     }
@@ -373,15 +372,16 @@ fn an_hour_adds_up_its_minutes() {
 
 // Without the counters the writer sends about itself when it stops.
 fn query_summary_rows(directory: &Path, table: &str) -> Vec<String> {
-    let connection = Connection::open(directory.join("metrics-rollup.sqlite")).unwrap();
+    let connection = Connection::open(directory.join(TELEMETRY_FILE_NAME)).unwrap();
     let sql = format!(
-        "SELECT json_array(series.name, summary.start_at, summary.count, summary.min,
-                           summary.max, summary.sum, summary.last, summary.increase,
-                           summary.seconds, summary.histogram)
+        "SELECT json_array(metric_series.name, summary.start_at, summary.point_count,
+                           summary.min_value, summary.max_value, summary.value_sum,
+                           summary.last_value, summary.counter_increase,
+                           summary.counter_increase_seconds, summary.merged_histogram)
          FROM {table} summary
-         JOIN series ON series.id = summary.series_id
-         WHERE series.name NOT LIKE 'otelo.%'
-         ORDER BY series.name, summary.start_at"
+         JOIN metric_series ON metric_series.id = summary.metric_series_id
+         WHERE metric_series.name NOT LIKE 'otelo.%'
+         ORDER BY metric_series.name, summary.start_at"
     );
     connection
         .prepare(&sql)
@@ -399,19 +399,25 @@ fn rolling_a_minute_up_again_gives_the_same_rows() {
     let now = ten_tomorrow() + HOUR + 5 * MINUTE;
     roll_up_all_due(directory.path(), now);
     let (minute_rows, hour_rows) = (
-        query_summary_rows(directory.path(), "minutes"),
-        query_summary_rows(directory.path(), "hours"),
+        query_summary_rows(directory.path(), "metric_minute_summaries"),
+        query_summary_rows(directory.path(), "metric_hour_summaries"),
     );
     assert_eq!(minute_rows.len(), 9);
     assert_eq!(hour_rows.len(), 5);
 
-    Connection::open(directory.path().join("metrics-rollup.sqlite"))
+    Connection::open(directory.path().join(TELEMETRY_FILE_NAME))
         .unwrap()
-        .execute("DELETE FROM cursors", [])
+        .execute("DELETE FROM metric_summary_progress", [])
         .unwrap();
     roll_up_all_due(directory.path(), now);
-    assert_eq!(query_summary_rows(directory.path(), "minutes"), minute_rows);
-    assert_eq!(query_summary_rows(directory.path(), "hours"), hour_rows);
+    assert_eq!(
+        query_summary_rows(directory.path(), "metric_minute_summaries"),
+        minute_rows
+    );
+    assert_eq!(
+        query_summary_rows(directory.path(), "metric_hour_summaries"),
+        hour_rows
+    );
 }
 
 #[test]
@@ -504,32 +510,4 @@ fn lists_the_series_that_have_summaries_in_the_range() {
         ["queue.lag gauge"]
     );
     assert!(list_series_of_hour(ten_tomorrow() + 2 * HOUR, "").is_empty());
-}
-
-#[test]
-fn deletes_the_summaries_past_their_retention_and_the_series_without_any() {
-    let directory = tempfile::tempdir().unwrap();
-    write_metrics(directory.path(), metrics_of_each_kind());
-    roll_up_all_due(directory.path(), ten_tomorrow() + HOUR + 5 * MINUTE);
-    let mut rollups = Rollups::open(directory.path()).unwrap();
-
-    // The second minute and the hour are still kept.
-    rollups
-        .delete_summaries_before(ten_tomorrow() + MINUTE, ten_tomorrow())
-        .unwrap();
-    assert_eq!(query_summary_rows(directory.path(), "minutes").len(), 4);
-    assert_eq!(query_summary_rows(directory.path(), "hours").len(), 5);
-
-    rollups
-        .delete_summaries_before(ten_tomorrow() + HOUR, ten_tomorrow() + HOUR)
-        .unwrap();
-    let connection = Connection::open(directory.path().join("metrics-rollup.sqlite")).unwrap();
-    let remaining_row_count: i64 = connection
-        .query_row(
-            "SELECT (SELECT count(*) FROM series) + (SELECT count(*) FROM resources)",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(remaining_row_count, 0);
 }

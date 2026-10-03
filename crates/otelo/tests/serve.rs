@@ -67,8 +67,12 @@ fn receives_otlp_on_its_own_ports() {
         .unwrap();
     assert_eq!(response.status(), 200);
     stop_daemon(daemon, StopSignal::Term);
-    let day = otelo_indexed_storage_sqlite::Day::today().file_name();
-    let connection = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
+    let connection = rusqlite::Connection::open(
+        dir.path()
+            .join("telemetry")
+            .join(otelo_indexed_storage_sqlite::TELEMETRY_FILE_NAME),
+    )
+    .unwrap();
     let body: String = connection
         .query_row("SELECT body FROM logs", [], |row| row.get(0))
         .unwrap();
@@ -78,14 +82,16 @@ fn receives_otlp_on_its_own_ports() {
 #[test]
 fn traces_itself() {
     let dir = tempfile::tempdir().unwrap();
-    // A first run leaves the day file, so the query has one to read.
-    stop_daemon(start_daemon(dir.path()), StopSignal::Term);
     let daemon = start_daemon_with_args(dir.path(), &["--own-telemetry", "self"]);
     let response = send_get_request(&daemon.api_addr, "/api/logs?q=level%20%3E%3D%20warn");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     stop_daemon(daemon, StopSignal::Term);
-    let day = otelo_indexed_storage_sqlite::Day::today().file_name();
-    let connection = rusqlite::Connection::open(dir.path().join("telemetry").join(day)).unwrap();
+    let connection = rusqlite::Connection::open(
+        dir.path()
+            .join("telemetry")
+            .join(otelo_indexed_storage_sqlite::TELEMETRY_FILE_NAME),
+    )
+    .unwrap();
     let request: (Vec<u8>, Vec<u8>, String) = connection
         .query_row(
             "SELECT trace_id, span_id, spans.attributes FROM spans
@@ -109,7 +115,7 @@ fn traces_itself() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(children, ["open reader", "SELECT"]);
-    // The rollups of the metrics read the day files too, and trace none of it.
+    // The rollups and the retention of the writer trace none of their statements.
     let spans_outside_a_request: i64 = connection
         .query_row(
             "SELECT count(*) FROM spans WHERE parent_span_id IS NULL AND name != 'GET /api/logs'",
@@ -135,19 +141,21 @@ fn traces_itself() {
 fn collects_the_metrics_of_its_host_when_it_starts() {
     let directory = tempfile::tempdir().unwrap();
     let daemon = start_daemon_with_args(directory.path(), &["--own-telemetry", "self"]);
-    let day = otelo_indexed_storage_sqlite::Day::today().file_name();
-    let day_file_path = directory.path().join("telemetry").join(day);
-    let select_host_metrics = "SELECT series.name, series.kind, resource.attributes
-         FROM points point
-         JOIN series ON series.id = point.series_id
-         JOIN resources resource ON resource.id = series.resource_id
-         WHERE resource.service = 'otelo' AND series.name IN
+    let telemetry_file_path = directory
+        .path()
+        .join("telemetry")
+        .join(otelo_indexed_storage_sqlite::TELEMETRY_FILE_NAME);
+    let select_host_metrics = "SELECT metric_series.name, metric_series.kind, resource.attributes
+         FROM metric_points point
+         JOIN metric_series ON metric_series.id = point.metric_series_id
+         JOIN resources resource ON resource.id = metric_series.resource_id
+         WHERE resource.service = 'otelo' AND metric_series.name IN
              ('system.memory.limit', 'process.cpu.time', 'otelo.storage.size')
-         GROUP BY series.name
-         ORDER BY series.name";
+         GROUP BY metric_series.name
+         ORDER BY metric_series.name";
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let rows: Vec<(String, String, String)> = loop {
-        let rows = rusqlite::Connection::open(&day_file_path)
+        let rows = rusqlite::Connection::open(&telemetry_file_path)
             .and_then(|connection| {
                 connection
                     .prepare(select_host_metrics)?
@@ -178,7 +186,7 @@ fn collects_the_metrics_of_its_host_when_it_starts() {
             ("system.memory.limit", "updown"),
         ]
     );
-    let connection = rusqlite::Connection::open(&day_file_path).unwrap();
+    let connection = rusqlite::Connection::open(&telemetry_file_path).unwrap();
     let resource_attributes: Vec<String> = connection
         .prepare("SELECT attributes FROM resources WHERE service = 'otelo'")
         .unwrap()

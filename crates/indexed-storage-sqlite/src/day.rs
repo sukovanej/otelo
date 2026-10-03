@@ -2,7 +2,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use jiff::civil::{Date, date};
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ValueRef};
+use rusqlite::ToSql;
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 
 const NANOS_PER_DAY: i64 = 86_400 * 1_000_000_000;
 const UNIX_EPOCH_DATE: Date = date(1970, 1, 1);
@@ -29,21 +30,6 @@ impl Day {
     #[must_use]
     pub const fn add_days(self, days: i64) -> Self {
         Self(self.0 + days)
-    }
-
-    // A file per day lets retention delete whole files.
-    #[must_use]
-    pub fn file_name(self) -> String {
-        format!("{self}.sqlite")
-    }
-
-    #[must_use]
-    pub fn from_file_name(name: &str) -> Option<Self> {
-        let stem = name
-            .strip_suffix(".sqlite")
-            .or_else(|| name.strip_suffix(".sqlite-wal"))
-            .or_else(|| name.strip_suffix(".sqlite-shm"))?;
-        stem.parse().ok()
     }
 
     fn date(self) -> Date {
@@ -74,5 +60,11 @@ impl FromSql for Day {
             .as_str()?
             .parse()
             .map_err(|error: jiff::Error| FromSqlError::Other(Box::new(error)))
+    }
+}
+
+impl ToSql for Day {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.to_string()))
     }
 }
