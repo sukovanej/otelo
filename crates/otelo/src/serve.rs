@@ -59,6 +59,11 @@ pub struct ServeArgs {
     /// receiver, `off`, or the http:// URL of another OTLP/HTTP receiver
     #[arg(long, default_value = "self")]
     own_telemetry: Destination,
+
+    /// Serve the API without a password, for local development; the HTTP server
+    /// has to listen on a loopback address
+    #[arg(long)]
+    unsafe_no_auth: bool,
 }
 
 struct Listeners {
@@ -78,6 +83,11 @@ impl Listeners {
 }
 
 pub fn run_daemon(args: ServeArgs) -> anyhow::Result<()> {
+    ensure!(
+        !args.unsafe_no_auth || args.api_addr.ip().is_loopback(),
+        "--unsafe-no-auth needs a loopback address for --listen, not {}",
+        args.api_addr
+    );
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -128,12 +138,16 @@ async fn serve_until_shutdown(
     std::fs::create_dir_all(&args.data_dir)
         .with_context(|| format!("make the data directory {}", args.data_dir.display()))?;
     let state = Arc::new(StateFile::open(&args.data_dir)?);
-    ensure!(
-        state.has_password()?,
-        "{} has no password; `otelo init --data {}` makes one",
-        args.data_dir.display(),
-        args.data_dir.display()
-    );
+    if args.unsafe_no_auth {
+        tracing::warn!("the API needs no password: --unsafe-no-auth");
+    } else {
+        ensure!(
+            state.has_password()?,
+            "{} has no password; `otelo init --data {}` makes one",
+            args.data_dir.display(),
+            args.data_dir.display()
+        );
+    }
     let storage = Sqlite::open(&args.data_dir, state.indexed_attributes()?)?;
     let (journal, journal_threads) = JournalFiles::open(otelo_journal_files::Config::new(
         args.data_dir.join(JOURNAL_DIRECTORY_NAME),
@@ -157,7 +171,7 @@ async fn serve_until_shutdown(
         "listening"
     );
     let serve_api = async {
-        axum::serve(api_listener, build_daemon_router(api))
+        axum::serve(api_listener, build_daemon_router(api, args.unsafe_no_auth))
             .with_graceful_shutdown(shutdown.clone().cancelled_owned())
             .await
             .context("serve HTTP")
@@ -259,12 +273,16 @@ async fn bind_listener(addr: SocketAddr) -> anyhow::Result<TcpListener> {
         .with_context(|| format!("listen on {addr}"))
 }
 
-fn build_daemon_router(api: Api) -> Router {
-    Router::new()
+fn build_daemon_router(api: Api, unsafe_no_auth: bool) -> Router {
+    let router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .merge(api::build_router(api.clone()))
-        .fallback(ui::serve_ui)
-        .layer(middleware::from_fn_with_state(api, api::require_password))
+        .fallback(ui::serve_ui);
+    if unsafe_no_auth {
+        router
+    } else {
+        router.layer(middleware::from_fn_with_state(api, api::require_password))
+    }
 }
 
 fn listen_for_shutdown_signal() -> io::Result<impl Future<Output = ()>> {

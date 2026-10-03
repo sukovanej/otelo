@@ -51,6 +51,18 @@ pub fn make_password(data_dir: &Path) -> String {
 
 pub fn start_daemon_with_args(data_dir: &Path, args: &[&str]) -> Daemon {
     let password = make_password(data_dir);
+    spawn_daemon(data_dir, args, password)
+}
+
+pub fn start_daemon_without_auth(data_dir: &Path) -> Daemon {
+    spawn_daemon(
+        data_dir,
+        &["--own-telemetry", "off", "--unsafe-no-auth"],
+        String::new(),
+    )
+}
+
+fn spawn_daemon(data_dir: &Path, args: &[&str], password: String) -> Daemon {
     let mut child = Command::new(env!("CARGO_BIN_EXE_otelo"))
         .args([
             "serve",

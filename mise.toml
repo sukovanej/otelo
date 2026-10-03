@@ -32,11 +32,8 @@ dir = "packages/app"
 run = "pnpm exec vite"
 
 [tasks."serve:dev"]
-description = "Run the daemon on :7070 with its data in target/dev, where it sends its own logs and traces. The first run keeps the password of the UI in target/dev/password"
-run = [
-  "test -f target/dev/password || (mkdir -p target/dev && cargo run -q -- init --data target/dev --new-password > target/dev/password)",
-  "cargo run -q -- serve --data target/dev",
-]
+description = "Run the daemon on :7070 without a password, with its data in target/dev, where it sends its own logs and traces"
+run = "cargo run -q -- serve --data target/dev --unsafe-no-auth"
 
 [tasks."api:generate"]
 description = "Write the OpenAPI spec of the daemon to packages/api, and the TypeScript types of it"
