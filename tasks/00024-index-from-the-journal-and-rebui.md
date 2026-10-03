@@ -7,6 +7,8 @@ dependencies:
 - ./00023-journal-the-otlp-that-otelo-rece.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/37
 ---
 # Index from the journal and rebuild with otelo reindex
 
