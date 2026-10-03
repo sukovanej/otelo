@@ -124,11 +124,18 @@ pub fn index_journal_until_caught_up(
 }
 
 #[derive(Default)]
+enum JournalRead {
+    #[default]
+    Idle,
+    Reading(Frames),
+    FailedAt(Instant),
+}
+
+#[derive(Default)]
 struct SignalCursor {
     indexed_position: Option<Position>,
     newest_journal_received_at: Option<i64>,
-    frames: Option<Frames>,
-    read_failed_at: Option<Instant>,
+    journal_read: JournalRead,
 }
 
 struct IndexerState {
@@ -241,16 +248,14 @@ impl IndexerState {
     }
 
     fn index_next_frames_or_log(&mut self, signal: Signal) -> Progress {
-        if self
-            .cursor(signal)
-            .read_failed_at
-            .is_some_and(|failed_at| failed_at.elapsed() < RETRY_AFTER_READ_FAILURE)
+        if let JournalRead::FailedAt(failed_at) = self.cursor(signal).journal_read
+            && failed_at.elapsed() < RETRY_AFTER_READ_FAILURE
         {
             return Progress::CaughtUp;
         }
         self.index_next_frames(signal).unwrap_or_else(|error| {
             tracing::error!(signal = signal.name(), "index the journal: {error:#}");
-            self.cursor_mut(signal).read_failed_at = Some(Instant::now());
+            self.cursor_mut(signal).journal_read = JournalRead::FailedAt(Instant::now());
             Progress::CaughtUp
         })
     }
@@ -261,11 +266,15 @@ impl IndexerState {
             .oldest_retained_days(Day::today())
             .of_signal(signal)
             .start_at();
-        let mut frames = if let Some(frames) = self.cursor_mut(signal).frames.take() {
-            frames
-        } else {
-            let from = resume_position(self.cursor(signal).indexed_position, oldest_retained_at);
-            self.journal.read_frames(signal, Some(from))?
+        let mut frames = match std::mem::take(&mut self.cursor_mut(signal).journal_read) {
+            JournalRead::Reading(frames) => frames,
+            JournalRead::Idle | JournalRead::FailedAt(_) => {
+                let from = choose_resume_position(
+                    self.cursor(signal).indexed_position,
+                    oldest_retained_at,
+                );
+                self.journal.read_frames(signal, Some(from))?
+            }
         };
         let read_frames = frames
             .by_ref()
@@ -312,7 +321,6 @@ impl IndexerState {
         meters.record_index_transaction(signal, transaction_started_at.elapsed());
         let cursor = &mut self.cursors[signal_index(signal)];
         cursor.indexed_position = Some(last_frame.position_after);
-        cursor.read_failed_at = None;
         let index_lag = if caught_up {
             Duration::ZERO
         } else {
@@ -327,7 +335,7 @@ impl IndexerState {
         if caught_up {
             return Ok(Progress::CaughtUp);
         }
-        cursor.frames = Some(frames);
+        cursor.journal_read = JournalRead::Reading(frames);
         Ok(Progress::MoreIsDue)
     }
 
@@ -438,7 +446,7 @@ impl IndexerState {
 
 // The journal keeps longer than the index, and its hours before the retention hold nothing to
 // index, so they are not read.
-fn resume_position(indexed_position: Option<Position>, oldest_retained_at: i64) -> Position {
+fn choose_resume_position(indexed_position: Option<Position>, oldest_retained_at: i64) -> Position {
     let oldest_retained_position = Position {
         segment_hour: Hour::containing(oldest_retained_at),
         byte_offset: 0,

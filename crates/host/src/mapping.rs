@@ -9,6 +9,7 @@ use opentelemetry_proto::tonic::metrics::v1::{
 use otelo_indexed_storage::{
     DURATION_BUCKET_BOUNDS_SECONDS, DurationCounts, PipelineReading, SignalReading, StorageSize,
 };
+use otelo_query::Signal;
 
 use crate::identity::{HostIdentity, string_key_value};
 use crate::snapshot::{
@@ -76,8 +77,10 @@ impl SnapshotMapper {
         if let Some(storage_size) = storage_size {
             push_storage_size(&mut otelo_metrics, storage_size);
         }
-        for signal_reading in pipeline.iter().flat_map(|pipeline| &pipeline.signals) {
-            push_pipeline_of_signal(&mut otelo_metrics, signal_reading);
+        if let Some(pipeline) = pipeline {
+            for signal in Signal::ALL {
+                push_pipeline_of_signal(&mut otelo_metrics, signal, pipeline.of_signal(signal));
+            }
         }
         let mut resource_metrics =
             vec![self.resource_metrics_of_service(OTELO_SERVICE_NAME, otelo_metrics)];
@@ -598,8 +601,8 @@ fn push_storage_size(metrics: &mut TickMetrics, storage_size: StorageSize) {
 }
 
 #[expect(clippy::cast_precision_loss, reason = "a count below 2^53")]
-fn push_pipeline_of_signal(metrics: &mut TickMetrics, reading: &SignalReading) {
-    let signal = ("otelo.signal", reading.signal.name());
+fn push_pipeline_of_signal(metrics: &mut TickMetrics, signal: Signal, reading: &SignalReading) {
+    let signal = ("otelo.signal", signal.name());
     let with_outcome = |outcome| [signal, ("otelo.telemetry.outcome", outcome)];
     for (outcome, total) in [
         ("journaled", reading.requests.journaled),

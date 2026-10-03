@@ -131,7 +131,7 @@ fn skips_the_frames_received_before_the_retention() {
     .unwrap();
     assert_eq!(read_log_bodies(&telemetry_directory), ["frame 1"]);
     assert_eq!(
-        meters.read_pipeline().signals[0].frames,
+        meters.read_pipeline().logs.frames,
         FrameCounts {
             indexed: 1,
             skipped: 1,
@@ -164,7 +164,7 @@ fn skips_a_frame_that_does_not_decode() {
     )
     .unwrap();
     assert_eq!(read_log_bodies(&telemetry_directory), ["frame 0"]);
-    assert_eq!(meters.read_pipeline().signals[0].frames.undecodable, 1);
+    assert_eq!(meters.read_pipeline().logs.frames.undecodable, 1);
     opened.threads.stop_and_join().unwrap();
 }
 
@@ -204,7 +204,7 @@ fn indexes_each_frame_once_the_journal_synced_it() {
         read_log_bodies(&telemetry_directory),
         ["frame 0", "frame 1", "frame 2"]
     );
-    let logs_reading = meters.read_pipeline().signals[0];
+    let logs_reading = meters.read_pipeline().logs;
     assert_eq!(logs_reading.frames.indexed, 3);
     assert_eq!(logs_reading.records.written, 3);
     assert_eq!(logs_reading.index_lag, Duration::ZERO);

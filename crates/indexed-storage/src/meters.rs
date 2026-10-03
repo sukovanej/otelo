@@ -44,7 +44,6 @@ impl DurationCounts {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SignalReading {
-    pub signal: Signal,
     pub requests: RequestCounts,
     pub journaled_bytes: u64,
     pub journal_sync_waits: DurationCounts,
@@ -56,7 +55,20 @@ pub struct SignalReading {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PipelineReading {
-    pub signals: [SignalReading; 3],
+    pub logs: SignalReading,
+    pub spans: SignalReading,
+    pub metrics: SignalReading,
+}
+
+impl PipelineReading {
+    #[must_use]
+    pub const fn of_signal(&self, signal: Signal) -> &SignalReading {
+        match signal {
+            Signal::Logs => &self.logs,
+            Signal::Spans => &self.spans,
+            Signal::Metrics => &self.metrics,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -96,7 +108,8 @@ impl DurationHistogram {
             .position(|&bound| seconds <= bound)
             .unwrap_or(DURATION_BUCKET_BOUNDS_SECONDS.len());
         self.bucket_counts[bucket].fetch_add(1, Ordering::Relaxed);
-        self.sum_ns.fetch_add(nanos_of(duration), Ordering::Relaxed);
+        self.sum_ns
+            .fetch_add(convert_to_nanos(duration), Ordering::Relaxed);
     }
 
     fn read_counts(&self) -> DurationCounts {
@@ -166,13 +179,15 @@ impl PipelineMeters {
     pub fn set_index_lag(&self, signal: Signal, lag: Duration) {
         self.of_signal(signal)
             .index_lag_ns
-            .store(nanos_of(lag), Ordering::Relaxed);
+            .store(convert_to_nanos(lag), Ordering::Relaxed);
     }
 
     #[must_use]
     pub fn read_pipeline(&self) -> PipelineReading {
         PipelineReading {
-            signals: Signal::ALL.map(|signal| self.read_signal(signal)),
+            logs: self.read_signal(Signal::Logs),
+            spans: self.read_signal(Signal::Spans),
+            metrics: self.read_signal(Signal::Metrics),
         }
     }
 
@@ -180,7 +195,6 @@ impl PipelineMeters {
         let meters = self.of_signal(signal);
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
         SignalReading {
-            signal,
             requests: RequestCounts {
                 journaled: load(&meters.journaled_requests),
                 refused: load(&meters.refused_requests),
@@ -211,6 +225,6 @@ impl PipelineMeters {
     }
 }
 
-fn nanos_of(duration: Duration) -> u64 {
+fn convert_to_nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }

@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS attribute_value_counts (
   PRIMARY KEY (day, attribute_owner, key, value)
 ) WITHOUT ROWID;
 
--- The writer keeps up to 200 names a day, as attribute_value_counts keeps values.
+-- The indexer keeps up to 200 names a day, as attribute_value_counts keeps values.
 CREATE TABLE IF NOT EXISTS span_name_counts (
   -- The UTC date of the spans.
   day TEXT NOT NULL,

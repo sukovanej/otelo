@@ -348,7 +348,7 @@ fn a_request_the_journal_cannot_keep_is_unavailable_and_counted_as_refused() {
             .contains("the disk is full"),
         "{response}"
     );
-    let spans_reading = meters.read_pipeline().signals[1];
+    let spans_reading = meters.read_pipeline().spans;
     assert_eq!(
         spans_reading.requests,
         RequestCounts {

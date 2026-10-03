@@ -4,7 +4,7 @@ pub const STORAGE_VERSION: i64 = 1;
 
 // The xxh3 of schema.sql at STORAGE_VERSION. A test fails when the schema changes and the hash
 // does not, so a change of the schema bumps both.
-pub const SCHEMA_HASH_AT_STORAGE_VERSION: u64 = 0xcfc0_6ccc_5b0f_3829;
+pub const SCHEMA_HASH_AT_STORAGE_VERSION: u64 = 0x33a8_ca11_6b80_a14b;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct OtherStorageVersion {
