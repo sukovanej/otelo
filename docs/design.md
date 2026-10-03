@@ -32,7 +32,7 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 |---|---|
 | `otelo-query` | the query language: its parser and its completion |
 | `otelo-indexed-storage` | the storage interface: the model of the records, what the queries return, the channel to the writer, and the `Storage` and `RangeQueries` traits |
-| `otelo-indexed-storage-sqlite` | the SQLite backend: the day files, the writer, the queries, and the indexed attributes in the state file, `state.sqlite` |
+| `otelo-indexed-storage-sqlite` | the SQLite backend: the telemetry file, the writer, its rollups and retention, the queries, and the indexed attributes in the state file, `state.sqlite` |
 | `otelo-journal` | the journal of OTLP requests: its frames, its segments, their compression, and the retention ([[../tasks/00023-journal-the-otlp-that-otelo-rece.md]]) |
 | `otelo-otlp` | the OTLP receiver over HTTP and gRPC |
 | `otelo-host` | the host collector: the readers of the machine, of its services, and of otelo itself, and the mapping from what they read to metric points |
@@ -44,7 +44,7 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 A journal and an index ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
 
 - The journal keeps the OTLP export requests as protobuf, in hourly segments per signal, compressed with zstd once the hour ends. It is the only telemetry that has to outlive a change of the storage, and it keeps 30 days by default.
-- The index is one SQLite file, `telemetry.sqlite`, that an indexer builds from the journal: FTS5 for log search, spans indexed by `trace_id`, metrics in a `series` table and a narrow `points` table, and their 1-minute and 1-hour rollups ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Each signal has its own retention, 7 days by default, and retention deletes rows.
+- The index is one SQLite file, `telemetry.sqlite`, that an indexer builds from the journal: FTS5 for log search, spans indexed by `trace_id`, metrics in a `metric_series` table and a narrow `metric_points` table, and their 1-minute and 1-hour summaries ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Each signal has its own retention, 7 days by default. Retention deletes rows in small transactions, and an incremental vacuum gives the pages back after a retention was lowered ([[../tasks/00022-keep-the-index-in-one-sqlite-fil.md]]).
 - The index carries a storage version. After a change of the storage, the daemon does not start on an index of another version, and `otelo reindex` rebuilds it from the journal.
 - One state file for the indexed attributes, and later the users and tokens. A journal cannot rebuild it, so it has migrations ([[../tasks/00025-log-in-with-a-static-password.md]]).
 
