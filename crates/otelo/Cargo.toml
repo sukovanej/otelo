@@ -15,6 +15,7 @@ opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 serde = { workspace = true }
+rpassword = { workspace = true }
 rust-embed = { workspace = true }
 serde_json = { workspace = true }
 otelo-api = { workspace = true }

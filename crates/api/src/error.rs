@@ -25,6 +25,20 @@ impl ApiError {
         }
     }
 
+    pub const fn unauthorized(message: String) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message,
+        }
+    }
+
+    pub const fn forbidden(message: String) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message,
+        }
+    }
+
     pub const fn not_found(message: String) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,

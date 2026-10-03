@@ -35,6 +35,8 @@ type Schemas = components["schemas"];
 
 type ErrorBody = Schemas["ErrorBody"];
 
+type LoginBody = Schemas["LoginBody"];
+
 type HttpMethod = "get" | "put" | "post" | "delete";
 
 type OkBody<P extends keyof paths, M extends HttpMethod> = paths[P][M] extends {
@@ -168,8 +170,18 @@ export const addIndex = (signal: IndexedSignal, key: string) =>
     `/api/indexes/${signal}/${encodeURIComponent(key)}`,
   );
 
+export const logIn = (password: string) =>
+  sendRequest("POST", "/api/login", undefined, { password } satisfies LoginBody).then(
+    () => undefined,
+  );
+
+export const logOut = () => sendRequest("POST", "/api/logout").then(() => undefined);
+
 export const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
+
+export const isUnauthorizedError = (error: unknown) =>
+  error instanceof ApiError && error.status === 401;
 
 class ApiError extends Error {
   constructor(
@@ -181,10 +193,25 @@ class ApiError extends Error {
 }
 
 async function requestJson<T>(method: string, path: string, signal?: AbortSignal): Promise<T> {
+  const response = await sendRequest(method, path, signal);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the spec names the type of each path
+  return (await response.json()) as T;
+}
+
+async function sendRequest(
+  method: string,
+  path: string,
+  signal?: AbortSignal,
+  requestBody?: object,
+): Promise<Response> {
   const response = await fetch(path, {
     method,
     signal: signal ?? null,
-    headers: { accept: "application/json" },
+    headers:
+      requestBody === undefined
+        ? { accept: "application/json" }
+        : { accept: "application/json", "content-type": "application/json" },
+    body: requestBody === undefined ? null : JSON.stringify(requestBody),
   });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
@@ -197,6 +224,5 @@ async function requestJson<T>(method: string, path: string, signal?: AbortSignal
     }
     throw new ApiError(response.status, message);
   }
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the spec names the type of each path
-  return (await response.json()) as T;
+  return response;
 }

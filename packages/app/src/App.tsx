@@ -1,7 +1,12 @@
 import type { RouteSectionProps } from "@solidjs/router";
+import { useQueryClient } from "@tanstack/solid-query";
 import { For } from "solid-js";
 
+import { logOut } from "@otelo/api";
 import { LogoIcon, LogsIcon, MetricsIcon, ServicesIcon, TracesIcon } from "@otelo/icons";
+import { Button } from "@otelo/ui";
+
+import { askForLogin } from "./login";
 
 const SECTIONS = [
   { href: "/services", label: "Services", icon: ServicesIcon },
@@ -11,6 +16,13 @@ const SECTIONS = [
 ] as const;
 
 export default function App(props: RouteSectionProps) {
+  const queryClient = useQueryClient();
+  const endSession = async () => {
+    await logOut();
+    queryClient.clear();
+    askForLogin();
+  };
+
   return (
     <div class="flex h-dvh flex-col">
       <header class="flex h-12 shrink-0 items-center gap-6 border-b border-line bg-surface px-4">
@@ -31,6 +43,9 @@ export default function App(props: RouteSectionProps) {
             )}
           </For>
         </nav>
+        <Button variant="ghost" size="sm" class="ml-auto" onClick={() => void endSession()}>
+          Log out
+        </Button>
       </header>
       <main class="flex min-h-0 flex-1 flex-col bg-page">{props.children}</main>
     </div>

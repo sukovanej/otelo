@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "otelo",
-    "description": "Query the logs, traces, and metrics that otelo keeps.",
+    "description": "Query the logs, traces, and metrics that otelo keeps. Every path but `POST /api/login` needs the session that the login starts, as the cookie `otelo_session` or as `Authorization: Bearer <session>`.",
     "license": {
       "name": ""
     },
@@ -222,6 +222,48 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/login": {
+      "post": {
+        "summary": "Trades the password for a session, which the answer sets as the cookie\n`otelo_session`. The daemon checks one password a second, and a wrong\none answers after that second.",
+        "operationId": "log_in",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The session is in the cookie `otelo_session`"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logout": {
+      "post": {
+        "summary": "Ends the session of the request.",
+        "operationId": "log_out",
+        "responses": {
+          "204": {
+            "description": "The session has ended"
           }
         }
       }
@@ -2014,6 +2056,18 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "LoginBody": {
+        "type": "object",
+        "description": "The password that `otelo init` printed.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       },

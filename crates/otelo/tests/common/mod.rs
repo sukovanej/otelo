@@ -1,9 +1,10 @@
 #![allow(dead_code, reason = "each test file uses a part")]
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, ChildStderr, Command, Stdio};
+use std::path::Path;
+use std::process::{Child, ChildStderr, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 pub struct Daemon {
@@ -12,6 +13,9 @@ pub struct Daemon {
     pub api_addr: String,
     pub otlp_http_addr: String,
     pub otlp_grpc_addr: String,
+    pub password: String,
+    pub config_dir: tempfile::TempDir,
+    pub session_token: String,
 }
 
 impl Drop for Daemon {
@@ -22,12 +26,33 @@ impl Drop for Daemon {
     }
 }
 
-pub fn start_daemon(data_dir: &std::path::Path) -> Daemon {
+pub fn start_daemon(data_dir: &Path) -> Daemon {
     // So a test finds only the telemetry it wrote.
     start_daemon_with_args(data_dir, &["--own-telemetry", "off"])
 }
 
-pub fn start_daemon_with_args(data_dir: &std::path::Path, args: &[&str]) -> Daemon {
+pub fn init_data_dir(data_dir: &Path, init_args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_otelo"))
+        .arg("init")
+        .arg("--data")
+        .arg(data_dir)
+        .args(init_args)
+        .output()
+        .unwrap()
+}
+
+pub fn make_password(data_dir: &Path) -> String {
+    let output = init_data_dir(data_dir, &["--new-password"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+pub fn start_daemon_with_args(data_dir: &Path, args: &[&str]) -> Daemon {
+    let password = make_password(data_dir);
     let mut child = Command::new(env!("CARGO_BIN_EXE_otelo"))
         .args([
             "serve",
@@ -61,25 +86,109 @@ pub fn start_daemon_with_args(data_dir: &std::path::Path, args: &[&str]) -> Daem
             .unwrap()
             .to_owned()
     };
+    let api_addr = read_log_field("addr");
+    let config_dir = tempfile::tempdir().unwrap();
+    let login = log_in_with_cli(&api_addr, config_dir.path(), &password);
+    assert!(
+        login.status.success(),
+        "{}",
+        String::from_utf8_lossy(&login.stderr)
+    );
+    let session_token = read_saved_session_token(config_dir.path(), &api_addr).unwrap();
     Daemon {
-        api_addr: read_log_field("addr"),
+        api_addr,
         otlp_http_addr: read_log_field("otlp_http"),
         otlp_grpc_addr: read_log_field("otlp_grpc"),
         child,
         stderr,
+        password,
+        config_dir,
+        session_token,
     }
 }
 
-pub fn send_get_request(addr: &str, path: &str) -> String {
+pub fn log_in_with_cli(api_addr: &str, config_dir: &Path, password: &str) -> Output {
+    let mut login = Command::new(env!("CARGO_BIN_EXE_otelo"))
+        .arg("login")
+        .env("OTELO_URL", format!("http://{api_addr}"))
+        .env("XDG_CONFIG_HOME", config_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(login.stdin.take().unwrap(), "{password}").unwrap();
+    login.wait_with_output().unwrap()
+}
+
+pub fn read_saved_session_token(config_dir: &Path, api_addr: &str) -> Option<String> {
+    let sessions = std::fs::read(config_dir.join("otelo/sessions.json")).ok()?;
+    let sessions: serde_json::Value = serde_json::from_slice(&sessions).unwrap();
+    Some(sessions[format!("http://{api_addr}")].as_str()?.to_owned())
+}
+
+impl Daemon {
+    pub fn otelo_command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_otelo"));
+        command
+            .env("OTELO_URL", format!("http://{}", self.api_addr))
+            .env("XDG_CONFIG_HOME", self.config_dir.path());
+        command
+    }
+
+    pub fn bearer_header(&self) -> String {
+        format!("Bearer {}", self.session_token)
+    }
+}
+
+pub fn send_request(addr: &str, method: &str, path: &str, headers: &[(&str, &str)]) -> String {
+    send_request_with_body(addr, method, path, headers, "")
+}
+
+pub fn send_request_with_body(
+    addr: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> String {
+    let mut head = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+    if !body.is_empty() {
+        let _ = write!(head, "Content-Length: {}\r\n", body.len());
+    }
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
+        let _ = write!(head, "Host: {addr}\r\n");
+    }
+    for (name, value) in headers {
+        let _ = write!(head, "{name}: {value}\r\n");
+    }
+    head.push_str("\r\n");
+    head.push_str(body);
     let mut stream = TcpStream::connect(addr).unwrap();
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
-    )
-    .unwrap();
+    stream.write_all(head.as_bytes()).unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     response
+}
+
+pub fn send_get_request(daemon: &Daemon, path: &str) -> String {
+    send_request(
+        &daemon.api_addr,
+        "GET",
+        path,
+        &[("Authorization", &daemon.bearer_header())],
+    )
+}
+
+pub fn find_header_value<'a>(response: &'a str, name: &str) -> Option<&'a str> {
+    let (head, _) = response.split_once("\r\n\r\n")?;
+    head.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.eq_ignore_ascii_case(name).then(|| value.trim())
+    })
 }
 
 #[derive(Clone, Copy)]

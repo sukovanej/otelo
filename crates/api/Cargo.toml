@@ -13,7 +13,7 @@ serde = { workspace = true }
 otelo-query = { workspace = true }
 otelo-state = { workspace = true }
 otelo-indexed-storage = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { workspace = true }

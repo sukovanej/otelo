@@ -1,8 +1,13 @@
 import { createRouter, useNavigate } from "@solidjs/router";
 import { render } from "@solidjs/web";
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
+import { Show } from "solid-js";
+
+import { isUnauthorizedError } from "@otelo/api";
 
 import App from "./App";
+import { askForLogin, finishLogin, isLoginNeeded } from "./login";
+import LoginPage from "./LoginPage";
 import LogsPage from "./logs/LogsPage";
 import MetricsPage from "./metrics/MetricsPage";
 import ServicePage from "./services/ServicePage";
@@ -13,7 +18,14 @@ import TracesPage from "./traces/TracesPage";
 import "@otelo/ui/fonts.css";
 import "./app.css";
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => {
+      if (isUnauthorizedError(error)) askForLogin();
+    },
+  }),
+  defaultOptions: { queries: { retry: false } },
+});
 
 const Router = createRouter({
   routes: [
@@ -44,7 +56,19 @@ if (!root) throw new Error("index.html has no #root");
 render(
   () => (
     <QueryClientProvider client={queryClient}>
-      <Router>{(props) => <App {...props} />}</Router>
+      <Show
+        when={!isLoginNeeded()}
+        fallback={
+          <LoginPage
+            onLogin={() => {
+              queryClient.clear();
+              finishLogin();
+            }}
+          />
+        }
+      >
+        <Router>{(props) => <App {...props} />}</Router>
+      </Show>
     </QueryClientProvider>
   ),
   root,

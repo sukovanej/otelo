@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
-use axum::Router;
+use anyhow::{Context, ensure};
 use axum::routing::get;
+use axum::{Router, middleware};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
@@ -22,9 +22,9 @@ use otelo_otlp::Intake;
 use otelo_state::StateFile;
 
 #[cfg(target_os = "macos")]
-const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
+pub const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
 #[cfg(not(target_os = "macos"))]
-const DEFAULT_DATA_DIR: &str = "/var/lib/otelo";
+pub const DEFAULT_DATA_DIR: &str = "/var/lib/otelo";
 
 // An OTLP batch can hold a few hundred kilobytes, so the queue stays at tens of megabytes.
 const TELEMETRY_QUEUE_BATCHES: usize = 64;
@@ -128,6 +128,12 @@ async fn serve_until_shutdown(
     std::fs::create_dir_all(&args.data_dir)
         .with_context(|| format!("make the data directory {}", args.data_dir.display()))?;
     let state = Arc::new(StateFile::open(&args.data_dir)?);
+    ensure!(
+        state.has_password()?,
+        "{} has no password; `otelo init --data {}` makes one",
+        args.data_dir.display(),
+        args.data_dir.display()
+    );
     let storage = Sqlite::open(&args.data_dir, state.indexed_attributes()?)?;
     let (journal, journal_threads) = JournalFiles::open(otelo_journal_files::Config::new(
         args.data_dir.join(JOURNAL_DIRECTORY_NAME),
@@ -137,10 +143,7 @@ async fn serve_until_shutdown(
     let writer = storage.spawn_writer(inbox)?;
     let intake = Intake::new(Arc::clone(&journal), batch_sender);
     let storage: Arc<dyn Storage> = Arc::new(storage);
-    let api = Api {
-        storage: Arc::clone(&storage),
-        state: Arc::clone(&state),
-    };
+    let api = Api::new(Arc::clone(&storage), Arc::clone(&state));
     let Listeners {
         api: api_listener,
         otlp_http,
@@ -259,8 +262,9 @@ async fn bind_listener(addr: SocketAddr) -> anyhow::Result<TcpListener> {
 fn build_daemon_router(api: Api) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .merge(api::build_router(api))
+        .merge(api::build_router(api.clone()))
         .fallback(ui::serve_ui)
+        .layer(middleware::from_fn_with_state(api, api::require_session))
 }
 
 fn listen_for_shutdown_signal() -> io::Result<impl Future<Output = ()>> {
