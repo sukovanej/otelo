@@ -1,6 +1,6 @@
 import { createMemo, createSignal, flush, For, Show } from "solid-js";
 
-import { CheckIcon, ChevronIcon } from "@otelo/icons";
+import { CheckIcon, ChevronIcon, MinusIcon, PlusIcon } from "@otelo/icons";
 
 import Button from "../Button";
 import { cx, option, plain, popover, type Size, sizes } from "../classes";
@@ -13,6 +13,7 @@ import {
   moveRangeToNow,
   type Range,
   RANGE_PRESETS,
+  resizeRange,
   resolveRange,
   shiftRange,
   splitRangeLabel,
@@ -55,6 +56,17 @@ export default function RangePicker(props: RangePickerProps) {
     const lengthMs = rangeLengthMs();
     return lengthMs === undefined ? "" : ` by ${formatHumanDuration(lengthMs)}`;
   };
+  const stepButtonClasses = () =>
+    cx(
+      SEGMENT_CLASSES,
+      SHIFT_BUTTON_CLASSES[props.size ?? "md"],
+      "flex items-center justify-center",
+    );
+  const describeResize = (step: 1 | -1) => {
+    const direction = step === 1 ? "Longer" : "Shorter";
+    const resized = resizeRange(range(), step, Date.now());
+    return resized ? `${direction}: ${formatRangeLabel(resized, Date.now())}` : direction;
+  };
   const changeRange = (next: Range | undefined) => {
     if (next) props.onChange(next.since, next.until);
   };
@@ -92,17 +104,23 @@ export default function RangePicker(props: RangePickerProps) {
       <div class="flex">
         <button
           type="button"
-          class={cx(
-            SEGMENT_CLASSES,
-            SHIFT_BUTTON_CLASSES[props.size ?? "md"],
-            "flex items-center justify-center",
-          )}
+          class={stepButtonClasses()}
           aria-label={`Earlier${shiftLabelSuffix()}`}
           title={`Earlier${shiftLabelSuffix()}`}
           disabled={rangeLengthMs() === undefined}
           onClick={() => changeRange(shiftRange(range(), -1, Date.now()))}
         >
           <ChevronIcon direction="left" size={13} />
+        </button>
+        <button
+          type="button"
+          class={stepButtonClasses()}
+          aria-label={describeResize(-1)}
+          title={describeResize(-1)}
+          disabled={resizeRange(range(), -1, Date.now()) === undefined}
+          onClick={() => changeRange(resizeRange(range(), -1, Date.now()))}
+        >
+          <MinusIcon size={13} />
         </button>
         <button
           ref={trigger}
@@ -126,11 +144,17 @@ export default function RangePicker(props: RangePickerProps) {
         </button>
         <button
           type="button"
-          class={cx(
-            SEGMENT_CLASSES,
-            SHIFT_BUTTON_CLASSES[props.size ?? "md"],
-            "flex items-center justify-center",
-          )}
+          class={stepButtonClasses()}
+          aria-label={describeResize(1)}
+          title={describeResize(1)}
+          disabled={resizeRange(range(), 1, Date.now()) === undefined}
+          onClick={() => changeRange(resizeRange(range(), 1, Date.now()))}
+        >
+          <PlusIcon size={13} />
+        </button>
+        <button
+          type="button"
+          class={stepButtonClasses()}
           aria-label={`Later${shiftLabelSuffix()}`}
           title={endsNow() ? "The range ends now" : `Later${shiftLabelSuffix()}`}
           disabled={endsNow() || rangeLengthMs() === undefined}

@@ -7,6 +7,7 @@ import {
   formatRangeLabel,
   moveRangeToNow,
   parseDuration,
+  resizeRange,
   resolveRange,
   shiftRange,
   splitRangeLabel,
@@ -251,12 +252,53 @@ test("splitRangeLabel dims the days and the dash", () => {
   ]);
 });
 
+test("resizeRange steps a range that ends now by minutes, hours, then days", () => {
+  expect(lengthenRangeToNow("1h")).toBe("2h");
+  expect(lengthenRangeToNow("2h")).toBe("3h");
+  expect(lengthenRangeToNow("5m")).toBe("10m");
+  expect(lengthenRangeToNow("55m")).toBe("1h");
+  expect(lengthenRangeToNow("90m")).toBe("2h");
+  expect(lengthenRangeToNow("23h")).toBe("1d");
+  expect(lengthenRangeToNow("7d")).toBe("8d");
+  expect(lengthenRangeToNow("2m")).toBe("5m");
+});
+
+test("resizeRange shortens a range that ends now down to five minutes", () => {
+  expect(shortenRangeToNow("3h")).toBe("2h");
+  expect(shortenRangeToNow("1h")).toBe("55m");
+  expect(shortenRangeToNow("1d")).toBe("23h");
+  expect(shortenRangeToNow("90m")).toBe("1h");
+  expect(shortenRangeToNow("10m")).toBe("5m");
+  expect(shortenRangeToNow("5m")).toBeUndefined();
+  expect(shortenRangeToNow("soon")).toBeUndefined();
+});
+
+test("resizeRange keeps the end of a range in the past", () => {
+  const range = { since: toIso(onSeptember30(8)), until: toIso(onSeptember30(9)) };
+  expect(resizeRange(range, 1, SEPTEMBER_30_NOON_MS)).toEqual({
+    since: toIso(onSeptember30(7)),
+    until: toIso(onSeptember30(9)),
+  });
+  expect(resizeRange(range, -1, SEPTEMBER_30_NOON_MS)).toEqual({
+    since: toIso(onSeptember30(8, 5)),
+    until: toIso(onSeptember30(9)),
+  });
+});
+
 test("formatRangeLabel shows a range it cannot read as it is", () => {
   expect(formatRangeLabel({ since: "soon", until: UNTIL_NOW }, SEPTEMBER_30_NOON_MS)).toBe("soon");
   expect(formatRangeLabel({ since: "soon", until: "later" }, SEPTEMBER_30_NOON_MS)).toBe(
     "soon – later",
   );
 });
+
+function lengthenRangeToNow(since: string): string | undefined {
+  return resizeRange({ since, until: UNTIL_NOW }, 1, SEPTEMBER_30_NOON_MS)?.since;
+}
+
+function shortenRangeToNow(since: string): string | undefined {
+  return resizeRange({ since, until: UNTIL_NOW }, -1, SEPTEMBER_30_NOON_MS)?.since;
+}
 
 function onSeptember30(hours: number, minutes = 0, seconds = 0): Date {
   return new Date(2026, 8, 30, hours, minutes, seconds);
