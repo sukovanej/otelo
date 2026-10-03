@@ -87,9 +87,9 @@ impl Api {
         tokio::task::spawn_blocking(move || -> Result<IndexList, ApiError> {
             let _entered = span.enter();
             match change {
-                IndexChange::Add => api.storage.add_index(&attribute)?,
+                IndexChange::Add => api.state.add_indexed_attribute(&attribute)?,
                 IndexChange::Remove => {
-                    if !api.storage.remove_index(&attribute)? {
+                    if !api.state.remove_indexed_attribute(&attribute)? {
                         return Err(ApiError::not_found(format!(
                             "{} {} has no index",
                             attribute.signal(),
@@ -98,6 +98,8 @@ impl Api {
                     }
                 }
             }
+            api.storage
+                .replace_indexed_attributes(api.state.indexed_attributes()?);
             Ok(api.list_indexed_attributes())
         })
         .await

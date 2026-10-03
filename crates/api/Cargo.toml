@@ -11,6 +11,7 @@ axum = { workspace = true }
 jiff = { workspace = true }
 serde = { workspace = true }
 otelo-query = { workspace = true }
+otelo-state = { workspace = true }
 otelo-indexed-storage = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

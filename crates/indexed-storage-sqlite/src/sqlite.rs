@@ -4,13 +4,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    BatchInbox, IndexSize, IndexedAttribute, RangeQueries, Result, Storage, TimeRange,
+    BatchInbox, IndexedAttribute, RangeQueries, Result, Storage, TimeRange,
 };
 use otelo_query::Signal;
 
 use crate::day::Day;
 use crate::indexes::Indexes;
-use crate::state::StateFile;
 use crate::telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
 use crate::{Config, Reader, Writer};
 
@@ -19,21 +18,22 @@ const SQLITE_HEAP_LIMIT_BYTES: i64 = 16 * 1024 * 1024;
 
 pub struct Sqlite {
     config: Config,
-    state: StateFile,
 }
 
 impl Sqlite {
-    pub fn open(data_directory: &Path) -> anyhow::Result<Self> {
+    pub fn open(
+        data_directory: &Path,
+        indexed_attributes: BTreeSet<IndexedAttribute>,
+    ) -> anyhow::Result<Self> {
         // SAFETY: the call only sets a limit, and SQLite reads it under its own mutex.
         unsafe {
             rusqlite::ffi::sqlite3_hard_heap_limit64(SQLITE_HEAP_LIMIT_BYTES);
         }
-        let state = StateFile::open(data_directory)?;
         let mut config = Config::new(data_directory.join("telemetry"));
-        config.indexes = Indexes::new(state.indexed_attributes()?);
+        config.indexes = Indexes::new(indexed_attributes);
         // A reader needs the file, and opens it before the writer has written to it.
         TelemetryFile::open(&config.directory)?;
-        Ok(Self { config, state })
+        Ok(Self { config })
     }
 
     pub fn spawn_writer(&self, inbox: BatchInbox) -> anyhow::Result<Writer> {
@@ -49,13 +49,10 @@ impl Storage for Sqlite {
             .start_at()
     }
 
-    fn size(&self) -> Result<IndexSize> {
-        Ok(IndexSize {
-            telemetry_bytes: size_of_database_in_bytes(
-                &self.config.directory.join(TELEMETRY_FILE_NAME),
-            )?,
-            state_bytes: self.state.size_in_bytes()?,
-        })
+    fn size_in_bytes(&self) -> Result<u64> {
+        Ok(size_of_database_in_bytes(
+            &self.config.directory.join(TELEMETRY_FILE_NAME),
+        )?)
     }
 
     fn open_range(&self, range: TimeRange, time_limit: Duration) -> Result<Box<dyn RangeQueries>> {
@@ -69,25 +66,13 @@ impl Storage for Sqlite {
         self.config.indexes.attributes()
     }
 
-    fn add_index(&self, attribute: &IndexedAttribute) -> Result<()> {
-        self.state.add_indexed_attribute(attribute)?;
-        self.config
-            .indexes
-            .replace_attributes(self.state.indexed_attributes()?);
-        Ok(())
-    }
-
-    fn remove_index(&self, attribute: &IndexedAttribute) -> Result<bool> {
-        let removed = self.state.remove_indexed_attribute(attribute)?;
-        self.config
-            .indexes
-            .replace_attributes(self.state.indexed_attributes()?);
-        Ok(removed)
+    fn replace_indexed_attributes(&self, attributes: BTreeSet<IndexedAttribute>) {
+        self.config.indexes.replace_attributes(attributes);
     }
 }
 
 // The write-ahead log and its index are part of the database.
-pub fn size_of_database_in_bytes(path: &Path) -> anyhow::Result<u64> {
+fn size_of_database_in_bytes(path: &Path) -> anyhow::Result<u64> {
     ["", "-wal", "-shm"]
         .into_iter()
         .map(|suffix| {

@@ -10,29 +10,22 @@ use crate::query::{
 use crate::{IndexedAttribute, Result, SpanKind, TimeRange, TraceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IndexSize {
-    pub telemetry_bytes: u64,
-    pub state_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorageSize {
     pub journal_bytes: u64,
-    pub index: IndexSize,
+    pub telemetry_bytes: u64,
+    pub state_bytes: u64,
 }
 
 pub trait Storage: Send + Sync {
     fn oldest_retained_at(&self, signal: Signal) -> i64;
 
-    fn size(&self) -> Result<IndexSize>;
+    fn size_in_bytes(&self) -> Result<u64>;
 
     fn open_range(&self, range: TimeRange, time_limit: Duration) -> Result<Box<dyn RangeQueries>>;
 
     fn indexed_attributes(&self) -> BTreeSet<IndexedAttribute>;
 
-    fn add_index(&self, attribute: &IndexedAttribute) -> Result<()>;
-
-    fn remove_index(&self, attribute: &IndexedAttribute) -> Result<bool>;
+    fn replace_indexed_attributes(&self, attributes: BTreeSet<IndexedAttribute>);
 }
 
 pub trait RangeQueries: Catalog {

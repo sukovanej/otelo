@@ -1,0 +1,18 @@
+[package]
+name = "otelo-state"
+description = "The state file of otelo, state.sqlite: what no journal can rebuild, such as the indexed attributes"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+rusqlite = { workspace = true }
+otelo-query = { workspace = true }
+otelo-indexed-storage = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

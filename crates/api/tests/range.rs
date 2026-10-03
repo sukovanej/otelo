@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use jiff::Timestamp;
@@ -6,6 +7,7 @@ use otelo_api::{
 };
 use otelo_indexed_storage_sqlite::{Day, Sqlite};
 use otelo_query::Signal;
+use otelo_state::StateFile;
 
 const HOUR_NS: i64 = 3600 * 1_000_000_000;
 
@@ -26,7 +28,8 @@ fn parses_durations_and_timestamps() {
 fn caps_the_range_at_the_retention_of_its_signals() {
     let dir = tempfile::tempdir().unwrap();
     let api = Api {
-        storage: Arc::new(Sqlite::open(dir.path()).unwrap()),
+        storage: Arc::new(Sqlite::open(dir.path(), BTreeSet::new()).unwrap()),
+        state: Arc::new(StateFile::open(dir.path()).unwrap()),
     };
     let range = api
         .resolve_range_within_retention(

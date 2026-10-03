@@ -20,6 +20,7 @@ use axum::{Json, Router};
 use jiff::Timestamp;
 use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
 use otelo_query::Signal;
+use otelo_state::StateFile;
 use tracing::Instrument;
 use tracing::field::Empty;
 use utoipa::OpenApi;
@@ -58,6 +59,7 @@ struct OpenApiInfo;
 #[derive(Clone)]
 pub struct Api {
     pub storage: Arc<dyn Storage>,
+    pub state: Arc<StateFile>,
 }
 
 fn build_query_routes() -> OpenApiRouter<Api> {
