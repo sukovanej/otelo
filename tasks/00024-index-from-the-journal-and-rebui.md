@@ -1,5 +1,5 @@
 ---
-status: todo
+status: in_progress
 created: 2026-10-03T14:55:04Z
 parent: ./00021-rebuild-the-index-from-a-journal.md
 dependencies:
