@@ -229,3 +229,44 @@ fn collects_the_metrics_of_its_host_when_it_starts() {
         .filter(|json| json.contains("os.type"));
     assert!(with_host.count() >= 2, "{resource_attributes:?}");
 }
+
+#[test]
+fn does_not_start_on_telemetry_of_another_storage_version() {
+    let dir = tempfile::tempdir().unwrap();
+    common::make_password(dir.path());
+    std::fs::create_dir_all(dir.path().join("telemetry")).unwrap();
+    let connection =
+        rusqlite::Connection::open(dir.path().join("telemetry/telemetry.sqlite")).unwrap();
+    connection
+        .execute_batch("CREATE TABLE logs (body TEXT NOT NULL)")
+        .unwrap();
+    drop(connection);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_otelo"))
+        .args([
+            "serve",
+            "--listen",
+            "127.0.0.1:0",
+            "--otlp-http",
+            "127.0.0.1:0",
+        ])
+        .args([
+            "--otlp-grpc",
+            "127.0.0.1:0",
+            "--own-telemetry",
+            "off",
+            "--data",
+        ])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains(&format!(
+            "telemetry.sqlite has storage version 0 and this otelo writes {}. Stop otelo and run \
+             otelo reindex.",
+            otelo_indexed_storage_sqlite::STORAGE_VERSION
+        )),
+        "{stderr}"
+    );
+}

@@ -18,6 +18,7 @@ use crate::series::{
     MetricSeriesId, ResourceId, SeriesCache, SeriesIdentity, StoredSeries,
     find_or_insert_resource_id, find_or_insert_series_id,
 };
+use crate::version::{OtherStorageVersion, STORAGE_VERSION};
 
 pub const TELEMETRY_FILE_NAME: &str = "telemetry.sqlite";
 
@@ -114,9 +115,19 @@ impl TelemetryFile {
         let connection =
             Connection::open(&path).with_context(|| format!("open {}", path.display()))?;
         keep_small_page_cache(&connection)?;
+        let found_version: i64 =
+            connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let has_tables: bool =
+            connection.query_row("SELECT count(*) > 0 FROM sqlite_master", [], |row| {
+                row.get(0)
+            })?;
+        if found_version != STORAGE_VERSION && (has_tables || found_version != 0) {
+            return Err(OtherStorageVersion { found_version }.into());
+        }
         connection
             .execute_batch(SCHEMA)
             .with_context(|| format!("create the schema in {}", path.display()))?;
+        connection.pragma_update(None, "user_version", STORAGE_VERSION)?;
         Ok(Self {
             connection,
             cached_rows: CachedRows::default(),
