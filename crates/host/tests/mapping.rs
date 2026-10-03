@@ -1,10 +1,12 @@
 use std::time::Duration;
 
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use otelo_host::{
     CgroupMemory, Cpu, CpuTicks, Filesystem, HostIdentity, Interface, LaunchdJob, LoadAverage,
     Memory, Pid, Process, ProcessUsage, Services, Snapshot, SnapshotMapper, Swap, Unit,
 };
 use otelo_indexed_storage::{Batch, Points, StorageSize, Temporality};
+use otelo_otlp::map::map_metrics_request;
 use serde_json::{Value, json};
 
 const TICK_AT: i64 = 1_790_769_600_000_000_000;
@@ -54,6 +56,10 @@ struct PointRow {
     value: f64,
 }
 
+fn map_request_to_batch(request: ExportMetricsServiceRequest) -> Batch {
+    map_metrics_request(request).batch
+}
+
 fn collect_point_rows(batch: &Batch) -> Vec<PointRow> {
     let mut rows = Vec::new();
     for records in batch {
@@ -81,7 +87,9 @@ fn collect_point_rows(batch: &Batch) -> Vec<PointRow> {
 }
 
 fn map_to_point_rows(snapshot_mapper: &mut SnapshotMapper, snapshot: &Snapshot) -> Vec<PointRow> {
-    collect_point_rows(&snapshot_mapper.map_snapshot_to_batch(TICK_AT, snapshot, None))
+    collect_point_rows(&map_request_to_batch(
+        snapshot_mapper.map_snapshot_to_request(TICK_AT, snapshot, None),
+    ))
 }
 
 fn values_by_attribute(rows: &[PointRow], name: &str, key: &str) -> Vec<(String, f64)> {
@@ -424,7 +432,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
         anonymous_bytes: 45_000_000,
         charged_bytes: 171_000_000,
     });
-    let batch = snapshot_mapper.map_snapshot_to_batch(
+    let batch = map_request_to_batch(snapshot_mapper.map_snapshot_to_request(
         TICK_AT,
         &Snapshot {
             services: Services::Cgroups {
@@ -438,7 +446,7 @@ fn a_unit_is_a_service_with_the_attributes_of_the_host() {
             ..idle_machine()
         },
         None,
-    );
+    ));
     let services: Vec<&str> = batch
         .iter()
         .map(|records| records.resource.service.as_str())
@@ -562,10 +570,8 @@ fn the_size_of_the_storage_is_a_level_by_kind_of_file() {
         telemetry_bytes: 52_000_000,
         state_bytes: 8192,
     };
-    let rows = collect_point_rows(&snapshot_mapper.map_snapshot_to_batch(
-        TICK_AT,
-        &idle_machine(),
-        Some(storage_size),
+    let rows = collect_point_rows(&map_request_to_batch(
+        snapshot_mapper.map_snapshot_to_request(TICK_AT, &idle_machine(), Some(storage_size)),
     ));
     assert_eq!(
         values_by_attribute(&rows, "otelo.storage.size", "otelo.storage.file"),

@@ -2,10 +2,15 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
 
 use otelo_indexed_storage::{BatchInbox, BatchSender, open_batch_channel};
 use otelo_indexed_storage_sqlite::{Config, TELEMETRY_FILE_NAME, Writer};
+use otelo_journal::Journal;
+use otelo_journal_files::{JournalFiles, JournalThreads};
+use otelo_otlp::Intake;
 use rusqlite::Connection;
+use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
@@ -19,22 +24,68 @@ pub struct Receiver {
     servers: Vec<JoinHandle<anyhow::Result<()>>>,
     sender: BatchSender,
     writer: Option<Writer>,
+    pub journal: Arc<dyn Journal>,
+    journal_threads: Option<JournalThreads>,
+    _journal_directory: Option<TempDir>,
+}
+
+pub struct TestJournal {
+    journal: Arc<dyn Journal>,
+    threads: Option<JournalThreads>,
+    directory: Option<TempDir>,
+}
+
+impl TestJournal {
+    pub fn open_in(directory: &Path) -> Self {
+        let (journal, threads) =
+            JournalFiles::open(otelo_journal_files::Config::new(directory.join("journal")))
+                .unwrap();
+        Self {
+            journal,
+            threads: Some(threads),
+            directory: None,
+        }
+    }
+
+    pub fn open_in_temporary_directory() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = Self::open_in(directory.path());
+        Self {
+            directory: Some(directory),
+            ..journal
+        }
+    }
+
+    pub fn of(journal: Arc<dyn Journal>) -> Self {
+        Self {
+            journal,
+            threads: None,
+            directory: None,
+        }
+    }
 }
 
 impl Receiver {
     pub fn start_writing_into(directory: &Path) -> Self {
         let (sender, inbox) = open_batch_channel(64);
         let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
-        Self::start_servers(sender, Some(writer))
+        Self::start_servers(sender, Some(writer), TestJournal::open_in(directory))
     }
 
     // Nothing reads the channel of one batch, so the second batch finds it full.
     pub fn start_with_full_queue() -> (Self, BatchInbox) {
         let (sender, inbox) = open_batch_channel(1);
-        (Self::start_servers(sender, None), inbox)
+        let journal = TestJournal::open_in_temporary_directory();
+        (Self::start_servers(sender, None, journal), inbox)
     }
 
-    fn start_servers(sender: BatchSender, writer: Option<Writer>) -> Self {
+    pub fn start_with_journal(journal: TestJournal) -> (Self, BatchInbox) {
+        let (sender, inbox) = open_batch_channel(64);
+        (Self::start_servers(sender, None, journal), inbox)
+    }
+
+    fn start_servers(sender: BatchSender, writer: Option<Writer>, journal: TestJournal) -> Self {
+        let intake = Intake::new(Arc::clone(&journal.journal), sender.clone());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -48,12 +99,12 @@ impl Receiver {
             let servers = vec![
                 tokio::spawn(otelo_otlp::serve_http(
                     http_listener,
-                    sender.clone(),
+                    intake.clone(),
                     shutdown.clone(),
                 )),
                 tokio::spawn(otelo_otlp::serve_grpc(
                     grpc_listener,
-                    sender.clone(),
+                    intake,
                     shutdown.clone(),
                 )),
             ];
@@ -67,6 +118,9 @@ impl Receiver {
             servers,
             sender,
             writer,
+            journal: journal.journal,
+            journal_threads: journal.threads,
+            _journal_directory: journal.directory,
         }
     }
 
@@ -82,6 +136,9 @@ impl Receiver {
         drop(self.sender);
         if let Some(writer) = self.writer {
             writer.join().unwrap();
+        }
+        if let Some(journal_threads) = self.journal_threads {
+            journal_threads.stop_and_join().unwrap();
         }
     }
 }

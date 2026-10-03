@@ -80,6 +80,26 @@ fn receives_otlp_on_its_own_ports() {
 }
 
 #[test]
+fn journals_the_otlp_it_receives_and_the_host_metrics() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(dir.path());
+    let response = ureq::post(format!("http://{}/v1/logs", daemon.otlp_http_addr))
+        .header("Content-Type", "application/json")
+        .send(r#"{"resourceLogs": []}"#)
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    stop_daemon(daemon, StopSignal::Term);
+    for signal_directory in ["logs", "metrics"] {
+        let segment_bytes: u64 =
+            std::fs::read_dir(dir.path().join("journal").join(signal_directory))
+                .unwrap()
+                .map(|entry| entry.unwrap().metadata().unwrap().len())
+                .sum();
+        assert!(segment_bytes > 0, "{signal_directory}");
+    }
+}
+
+#[test]
 fn traces_itself() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_daemon_with_args(dir.path(), &["--own-telemetry", "self"]);

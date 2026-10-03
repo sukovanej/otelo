@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
-use otelo_indexed_storage::{
-    Attributes, Batch, Metric, NumberPoint, Points, Records, StorageSize, Temporality,
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_proto::tonic::metrics::v1::{
+    AggregationTemporality, Gauge, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+    metric, number_data_point,
 };
+use otelo_indexed_storage::StorageSize;
 
-use crate::identity::HostIdentity;
+use crate::identity::{HostIdentity, string_key_value};
 use crate::snapshot::{
     Cpu, CpuTicks, Filesystem, Interface, LaunchdJob, Memory, Pid, Process, ProcessUsage, Services,
     Snapshot, Unit,
@@ -50,12 +53,12 @@ impl SnapshotMapper {
         }
     }
 
-    pub fn map_snapshot_to_batch(
+    pub fn map_snapshot_to_request(
         &mut self,
         recorded_at: i64,
         snapshot: &Snapshot,
         storage_size: Option<StorageSize>,
-    ) -> Batch {
+    ) -> ExportMetricsServiceRequest {
         let mut otelo_metrics = TickMetrics::new(recorded_at);
         self.push_cpu_utilization(&mut otelo_metrics, snapshot.cpu);
         push_load_average(&mut otelo_metrics, snapshot);
@@ -67,19 +70,26 @@ impl SnapshotMapper {
         if let Some(storage_size) = storage_size {
             push_storage_size(&mut otelo_metrics, storage_size);
         }
-        let mut batch = vec![self.records_of_service(OTELO_SERVICE_NAME, otelo_metrics)];
+        let mut resource_metrics =
+            vec![self.resource_metrics_of_service(OTELO_SERVICE_NAME, otelo_metrics)];
         for (service, tick_metrics) in self.map_services(recorded_at, &snapshot.services) {
-            batch.push(self.records_of_service(&service, tick_metrics));
+            resource_metrics.push(self.resource_metrics_of_service(&service, tick_metrics));
         }
-        batch
+        ExportMetricsServiceRequest { resource_metrics }
     }
 
-    fn records_of_service(&self, service: &str, tick_metrics: TickMetrics) -> Records {
-        Records {
-            resource: self.host.resource_of_service(service),
-            logs: Vec::new(),
-            spans: Vec::new(),
-            metrics: tick_metrics.metrics,
+    fn resource_metrics_of_service(
+        &self,
+        service: &str,
+        tick_metrics: TickMetrics,
+    ) -> ResourceMetrics {
+        ResourceMetrics {
+            resource: Some(self.host.resource_of_service(service)),
+            scope_metrics: vec![ScopeMetrics {
+                metrics: tick_metrics.metrics,
+                ..ScopeMetrics::default()
+            }],
+            ..ResourceMetrics::default()
         }
     }
 
@@ -266,31 +276,45 @@ impl TickMetrics {
         name: &str,
         unit: &str,
         attribute_pairs: &[(&str, &str)],
-        value: f64,
-        points_of_kind: fn(Vec<NumberPoint>) -> Points,
+        value: number_data_point::Value,
+        data_of_kind: fn(Vec<NumberDataPoint>) -> metric::Data,
     ) {
-        let mut attributes = Attributes::new();
-        for &(key, value) in attribute_pairs {
-            attributes.insert(key, value);
-        }
+        let recorded_at = u64::try_from(self.recorded_at).unwrap_or(0);
+        let point = NumberDataPoint {
+            attributes: attribute_pairs
+                .iter()
+                .map(|&(key, value)| string_key_value(key, value.to_owned()))
+                .collect(),
+            time_unix_nano: recorded_at,
+            value: Some(value),
+            ..NumberDataPoint::default()
+        };
         self.metrics.push(Metric {
             name: name.into(),
             unit: unit.into(),
-            attributes,
-            points: points_of_kind(vec![NumberPoint {
-                recorded_at: self.recorded_at,
-                value,
-            }]),
+            data: Some(data_of_kind(vec![point])),
+            ..Metric::default()
         });
     }
 
     fn push_gauge(&mut self, name: &str, unit: &str, attribute_pairs: &[(&str, &str)], value: f64) {
-        self.push_point(name, unit, attribute_pairs, value, Points::Gauge);
+        self.push_point(
+            name,
+            unit,
+            attribute_pairs,
+            number_data_point::Value::AsDouble(value),
+            |data_points| metric::Data::Gauge(Gauge { data_points }),
+        );
     }
 
-    #[expect(clippy::cast_precision_loss, reason = "a level far below 2^53")]
     fn push_level(&mut self, name: &str, unit: &str, attribute_pairs: &[(&str, &str)], value: u64) {
-        self.push_point(name, unit, attribute_pairs, value as f64, Points::UpDown);
+        self.push_point(
+            name,
+            unit,
+            attribute_pairs,
+            number_data_point::Value::AsInt(i64::try_from(value).unwrap_or(i64::MAX)),
+            |data_points| cumulative_sum(data_points, false),
+        );
     }
 
     fn push_counter(
@@ -300,10 +324,22 @@ impl TickMetrics {
         attribute_pairs: &[(&str, &str)],
         total: f64,
     ) {
-        self.push_point(name, unit, attribute_pairs, total, |points| {
-            Points::Counter(Temporality::Cumulative, points)
-        });
+        self.push_point(
+            name,
+            unit,
+            attribute_pairs,
+            number_data_point::Value::AsDouble(total),
+            |data_points| cumulative_sum(data_points, true),
+        );
     }
+}
+
+const fn cumulative_sum(data_points: Vec<NumberDataPoint>, is_monotonic: bool) -> metric::Data {
+    metric::Data::Sum(Sum {
+        data_points,
+        aggregation_temporality: AggregationTemporality::Cumulative as i32,
+        is_monotonic,
+    })
 }
 
 fn push_load_average(metrics: &mut TickMetrics, snapshot: &Snapshot) {

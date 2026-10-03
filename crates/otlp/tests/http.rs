@@ -2,10 +2,18 @@ mod common;
 
 use std::io::Write;
 
-use common::{Receiver, open_telemetry_file, query_first_column};
+use std::sync::Arc;
+
+use common::{Receiver, TestJournal, open_telemetry_file, query_first_column};
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use otelo_indexed_storage::now_unix_nanos;
+use otelo_journal::{Frames, Journal, Position, SyncTicket};
+use otelo_query::Signal;
+use prost::Message;
 use serde_json::{Value, json};
 
 fn post_body(
@@ -254,4 +262,113 @@ fn a_full_queue_rejects_the_whole_request() {
         "{second_response}"
     );
     receiver.stop_and_wait_for_writer();
+}
+
+const fn any_value(value: any_value::Value) -> AnyValue {
+    AnyValue { value: Some(value) }
+}
+
+#[test]
+fn json_and_protobuf_of_one_request_give_the_same_frame() {
+    let directory = tempfile::tempdir().unwrap();
+    let receiver = Receiver::start_writing_into(directory.path());
+    let logged_at = now_unix_nanos();
+    let json_body = json!({"resourceLogs": [{"scopeLogs": [{"logRecords": [{
+        "timeUnixNano": logged_at.to_string(),
+        "body": {"stringValue": "cart is empty"},
+        "attributes": [{"key": "cart.items", "value": {"intValue": "0"}}],
+        "traceId": TRACE_ID_HEX,
+        "spanId": SPAN_ID_HEX,
+    }]}]}]});
+    let request = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            scope_logs: vec![ScopeLogs {
+                log_records: vec![LogRecord {
+                    time_unix_nano: u64::try_from(logged_at).unwrap(),
+                    body: Some(any_value(any_value::Value::StringValue(
+                        "cart is empty".into(),
+                    ))),
+                    attributes: vec![KeyValue {
+                        key: "cart.items".into(),
+                        value: Some(any_value(any_value::Value::IntValue(0))),
+                        ..KeyValue::default()
+                    }],
+                    trace_id: hex_to_bytes(TRACE_ID_HEX),
+                    span_id: hex_to_bytes(SPAN_ID_HEX),
+                    ..LogRecord::default()
+                }],
+                ..ScopeLogs::default()
+            }],
+            ..ResourceLogs::default()
+        }],
+    };
+
+    let (json_status, _) = post_json(&receiver, "/v1/logs", &json_body);
+    let (protobuf_status, _) = post_body(
+        &receiver,
+        "/v1/logs",
+        &[("Content-Type", "application/x-protobuf")],
+        &request.encode_to_vec(),
+    );
+    let frames: Vec<_> = receiver
+        .journal
+        .read_frames(Signal::Logs, None)
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    receiver.stop_and_wait_for_writer();
+
+    assert_eq!((json_status, protobuf_status), (200, 200));
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].request, frames[1].request);
+    assert_eq!(
+        ExportLogsServiceRequest::decode(frames[0].request.as_slice()).unwrap(),
+        request
+    );
+}
+
+fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|start| u8::from_str_radix(&hex[start..start + 2], 16).unwrap())
+        .collect()
+}
+
+struct FailingJournal;
+
+impl Journal for FailingJournal {
+    fn append_frame(&self, _: Signal, _: i64, _: &[u8]) -> anyhow::Result<SyncTicket> {
+        Err(anyhow::anyhow!("the disk is full"))
+    }
+
+    fn read_frames(&self, _: Signal, _: Option<Position>) -> anyhow::Result<Frames> {
+        Ok(Box::new(std::iter::empty()))
+    }
+
+    fn size_in_bytes(&self) -> anyhow::Result<u64> {
+        Ok(0)
+    }
+}
+
+#[test]
+fn a_request_the_journal_cannot_keep_is_unavailable_and_stays_out_of_the_store() {
+    let (receiver, inbox) = Receiver::start_with_journal(TestJournal::of(Arc::new(FailingJournal)));
+    let body = traces_request(
+        &json!([]),
+        &json!([span_json("a", TRACE_ID_HEX, SPAN_ID_HEX)]),
+    );
+
+    let (status, response) = post_json(&receiver, "/v1/traces", &body);
+    receiver.stop_and_wait_for_writer();
+
+    assert_eq!(status, 503);
+    assert_eq!(response["code"], 14, "{response}");
+    assert!(
+        response["message"]
+            .as_str()
+            .unwrap()
+            .contains("the disk is full"),
+        "{response}"
+    );
+    assert_eq!(inbox.take_queued_batches().count(), 0);
 }

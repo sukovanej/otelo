@@ -1,5 +1,6 @@
 use otelo_host::{Collector, HostIdentity};
 use otelo_indexed_storage::{Batch, Points, StorageSize};
+use otelo_otlp::map::map_metrics_request;
 
 fn newest_value(batch: &Batch, service: &str, name: &str) -> Option<f64> {
     batch
@@ -24,8 +25,16 @@ fn reads_the_machine_the_test_runs_on() {
         telemetry_bytes: 1,
         state_bytes: 2,
     };
-    let first_batch = collector.collect_batch(1, Some(storage_size)).unwrap();
-    let second_batch = collector.collect_batch(2, Some(storage_size)).unwrap();
+    let mut collect_batch = |recorded_at| {
+        map_metrics_request(
+            collector
+                .collect_request(recorded_at, Some(storage_size))
+                .unwrap(),
+        )
+        .batch
+    };
+    let first_batch = collect_batch(1);
+    let second_batch = collect_batch(2);
     for batch in [&first_batch, &second_batch] {
         assert_eq!(batch[0].resource.service, "otelo");
         assert!(newest_value(batch, "otelo", "system.memory.limit").unwrap() > 0.0);
