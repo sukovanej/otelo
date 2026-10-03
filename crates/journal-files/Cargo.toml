@@ -1,0 +1,23 @@
+[package]
+name = "otelo-journal-files"
+description = "The journal of otelo on the local filesystem: frames in an hourly segment per signal, synced in groups, compressed with zstd once the hour ends, and deleted past the retention"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+crc32c = { workspace = true }
+jiff = { workspace = true }
+otelo-journal = { workspace = true }
+otelo-query = { workspace = true }
+tracing = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+crc32c = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true
