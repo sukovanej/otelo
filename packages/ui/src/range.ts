@@ -14,6 +14,8 @@ const MINUTE_MS = 60 * SECOND_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
+const RESIZE_STEPS_MS = [5 * MINUTE_MS, HOUR_MS, DAY_MS] as const;
+
 const UNIT_MS: Record<string, number> = {
   ms: 1,
   s: SECOND_MS,
@@ -118,6 +120,20 @@ export function shiftRange(range: Range, step: 1 | -1, nowMs: number): Range | u
   };
 }
 
+export function resizeRange(range: Range, step: 1 | -1, nowMs: number): Range | undefined {
+  const resolved = resolveRange(range, nowMs);
+  if (!resolved) return undefined;
+  const lengthMs = resolved.endMs - resolved.startMs;
+  const nextLengthMs = step === 1 ? lengthenToNextStep(lengthMs) : shortenToPreviousStep(lengthMs);
+  if (nextLengthMs === undefined) return undefined;
+  if (range.until === UNTIL_NOW)
+    return { since: formatApiDuration(nextLengthMs), until: UNTIL_NOW };
+  return {
+    since: new Date(resolved.endMs - nextLengthMs).toISOString(),
+    until: new Date(resolved.endMs).toISOString(),
+  };
+}
+
 export function splitRangeLabel(range: Range, nowMs: number): RangeLabelPart[] {
   const preset = findPreset(range);
   if (preset) return [toPlainPart(preset.label)];
@@ -157,6 +173,17 @@ function parseInstant(text: string, nowMs: number): number | undefined {
   // Date reads three fractional digits at most everywhere.
   const instantMs = Date.parse(text.replace(/(\.\d{3})\d+/, "$1"));
   return Number.isNaN(instantMs) ? undefined : instantMs;
+}
+
+function lengthenToNextStep(lengthMs: number): number {
+  const stepMs =
+    RESIZE_STEPS_MS.findLast((candidateMs) => candidateMs <= lengthMs) ?? RESIZE_STEPS_MS[0];
+  return (Math.floor(lengthMs / stepMs) + 1) * stepMs;
+}
+
+function shortenToPreviousStep(lengthMs: number): number | undefined {
+  const stepMs = RESIZE_STEPS_MS.findLast((candidateMs) => candidateMs < lengthMs);
+  return stepMs && (Math.ceil(lengthMs / stepMs) - 1) * stepMs;
 }
 
 function isSameDay(date: Date, otherDate: Date): boolean {
