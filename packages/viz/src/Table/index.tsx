@@ -19,9 +19,23 @@ import {
 import { sortRows } from "../sort";
 import TableRow, { type RowTone, type TreeLevel } from "./table-row";
 
-interface SortOrder {
+export interface TableSortOrder {
   readonly columnId: string;
   readonly descending: boolean;
+}
+
+export type TableSorting = TableSortingInTable | TableSortingAtSource;
+
+interface TableSortingInTable {
+  readonly kind: "table";
+  readonly initialOrder: TableSortOrder;
+}
+
+interface TableSortingAtSource {
+  readonly kind: "source";
+  readonly order: TableSortOrder;
+  readonly columnIds: ReadonlyArray<string>;
+  readonly onSort: (order: TableSortOrder) => void;
 }
 
 interface TableProps<R> {
@@ -29,7 +43,7 @@ interface TableProps<R> {
   readonly rows: ReadonlyArray<R>;
   readonly rowKey: (row: R) => string;
   readonly columns: ReadonlyArray<Column<R>>;
-  readonly initialSort?: SortOrder;
+  readonly sorting?: TableSorting | undefined;
   readonly href?: (row: R) => string;
   readonly onRowClick?: (row: R) => void;
   readonly selectedKey?: Accessor<string | undefined>;
@@ -41,13 +55,18 @@ interface TableProps<R> {
 }
 
 export default function Table<R>(props: TableProps<R>) {
-  const [sortOrder, setSortOrder] = createSignal<SortOrder | undefined>(
-    untrack(() => props.initialSort),
+  const [tableOrder, setTableOrder] = createSignal<TableSortOrder | undefined>(
+    untrack(() => (props.sorting?.kind === "table" ? props.sorting.initialOrder : undefined)),
   );
-  const isSortable = (column: Column<R>) =>
-    props.initialSort !== undefined && pickSortValueReader(column) !== undefined;
+  const sortOrder = () => (props.sorting?.kind === "source" ? props.sorting.order : tableOrder());
+  const isSortable = (column: Column<R>) => {
+    const sorting = props.sorting;
+    if (sorting?.kind === "table") return pickSortValueReader(column) !== undefined;
+    if (sorting?.kind === "source") return sorting.columnIds.includes(column.id);
+    return false;
+  };
   const sortedRows = createMemo(() => {
-    const order = sortOrder();
+    const order = tableOrder();
     const sortColumn = props.columns.find((column) => column.id === order?.columnId);
     const readSortValue = sortColumn && pickSortValueReader(sortColumn);
     return order && readSortValue
@@ -70,12 +89,12 @@ export default function Table<R>(props: TableProps<R>) {
     const key = props.selectedKey?.();
     return key === undefined ? {} : { [key]: true };
   }, {});
-  const sortByColumn = (columnId: string) =>
-    setSortOrder((order) =>
-      order?.columnId === columnId
-        ? { columnId, descending: !order.descending }
-        : { columnId, descending: true },
-    );
+  const sortByColumn = (columnId: string) => {
+    const order = toggleSortOrder(sortOrder(), columnId);
+    const sorting = props.sorting;
+    if (sorting?.kind === "source") sorting.onSort(order);
+    else setTableOrder(order);
+  };
 
   return (
     <div
@@ -166,6 +185,12 @@ export default function Table<R>(props: TableProps<R>) {
       </For>
     </div>
   );
+}
+
+function toggleSortOrder(order: TableSortOrder | undefined, columnId: string): TableSortOrder {
+  return order?.columnId === columnId
+    ? { columnId, descending: !order.descending }
+    : { columnId, descending: true };
 }
 
 function haveSameEntries(

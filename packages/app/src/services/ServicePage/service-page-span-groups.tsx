@@ -86,7 +86,7 @@ export default function ServicePageSpanGroups(props: ServicePageSpanGroupsProps)
         rows={props.groups.groups}
         rowKey={(group) => JSON.stringify(group.values)}
         columns={columns()}
-        initialSort={{ columnId: "total", descending: true }}
+        sorting={{ kind: "table", initialOrder: { columnId: "total", descending: true } }}
         href={props.groupHref}
         onRowClick={props.onOpenGroup}
         loading={props.loading}

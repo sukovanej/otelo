@@ -16,4 +16,4 @@ pub use metrics::{
 pub use services::{Service, ServiceBucket, ServiceStats, ServiceSummary, Services};
 pub use span_groups::{Latency, SpanBucket, SpanGroup, SpanGroupingField, SpanGroups, SpanStats};
 pub use template::replace_values_in_message;
-pub use traces::{Spans, Trace, TraceSpan, TraceSummary, Traces};
+pub use traces::{SpanSort, Spans, Trace, TraceSpan, TraceSummary, Traces};

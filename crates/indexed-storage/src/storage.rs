@@ -5,7 +5,7 @@ use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
     AttributeKeys, LogGroups, Logs, MetricFilter, MetricList, MetricSeries, Resolution, Service,
-    Services, SpanGroupingField, SpanGroups, Spans, Trace, Traces,
+    Services, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
 };
 use crate::{IndexedAttribute, Result, TimeRange, TraceId};
 
@@ -33,7 +33,7 @@ pub trait RangeQueries: Catalog {
 
     fn list_log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups>;
 
-    fn list_spans(&self, query: &Query, limit: usize) -> Result<Spans>;
+    fn list_spans(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Spans>;
 
     fn list_span_groups(
         &self,
@@ -43,7 +43,7 @@ pub trait RangeQueries: Catalog {
         limit: usize,
     ) -> Result<SpanGroups>;
 
-    fn list_traces(&self, query: &Query, limit: usize) -> Result<Traces>;
+    fn list_traces(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Traces>;
 
     fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>>;
 

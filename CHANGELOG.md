@@ -7,6 +7,12 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.1...main)
 
+### Added
+
+- `otelo spans --sort` and `otelo traces --sort` list the `newest`, `oldest`,
+  `longest`, or `shortest` first, and `/api/spans` and `/api/traces` take the
+  same `sort`. A click on Time or Duration on the traces page sorts by it.
+
 ## [0.0.1](https://github.com/sukovanej/otelo/releases/tag/v0.0.1) - 2026-10-03
 
 The first release.

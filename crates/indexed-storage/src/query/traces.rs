@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -5,7 +7,43 @@ use utoipa::ToSchema;
 use super::LogLine;
 use crate::{Attributes, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId};
 
-/// Traces by their root span, newest first.
+/// The order of a list of spans, or of traces by their root span.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SpanSort {
+    #[default]
+    Newest,
+    Oldest,
+    Longest,
+    Shortest,
+}
+
+impl SpanSort {
+    pub const ALL: [Self; 4] = [Self::Newest, Self::Oldest, Self::Longest, Self::Shortest];
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Newest => "newest",
+            Self::Oldest => "oldest",
+            Self::Longest => "longest",
+            Self::Shortest => "shortest",
+        }
+    }
+}
+
+impl FromStr for SpanSort {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|sort| sort.name() == name)
+            .ok_or_else(|| format!("{name:?} is not a sort: newest, oldest, longest, or shortest"))
+    }
+}
+
+/// Traces by their root span, in the order the request asked for.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Traces {
     pub traces: Vec<TraceSummary>,
@@ -38,7 +76,7 @@ pub struct TraceSummary {
     pub resource: Attributes,
 }
 
-/// Spans, newest first.
+/// Spans, in the order the request asked for.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Spans {
     pub spans: Vec<TraceSpan>,

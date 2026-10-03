@@ -19,6 +19,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use jiff::Timestamp;
+use otelo_indexed_storage::query::SpanSort;
 use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
 use otelo_query::Signal;
 use otelo_state::StateFile;
@@ -46,8 +47,8 @@ pub(crate) const QUERY_TIME_LIMIT: Duration = Duration::from_secs(10);
 
 const HOUR_NS: i64 = 3_600_000_000_000;
 
-// The `signal` query parameters refer to the Signal schema, and no body holds one, so only
-// this list puts it in the spec.
+// The `signal` and `sort` query parameters refer to the Signal and SpanSort schemas, and no
+// body holds one, so only this list puts them in the spec.
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -56,7 +57,7 @@ const HOUR_NS: i64 = 3_600_000_000_000;
             the login and the logout needs the password of `otelo init`, as the cookie \
             `otelo_password` or as `Authorization: Bearer <password>`."
     ),
-    components(schemas(SignalName))
+    components(schemas(SignalName, SpanSort))
 )]
 struct OpenApiInfo;
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::ensure;
-use otelo_indexed_storage::query::{Spans, Trace, TraceSpan, TraceSummary, Traces};
+use otelo_indexed_storage::query::{SpanSort, Spans, Trace, TraceSpan, TraceSummary, Traces};
 use otelo_indexed_storage::{Attributes, SpanKind, SpanStatus, TraceId};
 use otelo_query::{BuiltinField, Expression, Field, Operator, Query, Signal};
 use rusqlite::Row;
@@ -41,6 +41,15 @@ fn select_spans(where_clause: &WhereClause) -> String {
          WHERE {}",
         where_clause.sql()
     )
+}
+
+const fn pick_order_columns(sort: SpanSort) -> &'static str {
+    match sort {
+        SpanSort::Newest => "span.started_at DESC",
+        SpanSort::Oldest => "span.started_at",
+        SpanSort::Longest => "span.duration_ns DESC, span.started_at DESC",
+        SpanSort::Shortest => "span.duration_ns, span.started_at DESC",
+    }
 }
 
 fn trace_span_from_row(row: &Row) -> anyhow::Result<TraceSpan> {
@@ -140,11 +149,17 @@ impl Reader {
     }
 }
 
-pub(super) fn read_spans(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Spans> {
+pub(super) fn read_spans(
+    reader: &Reader,
+    query: &Query,
+    sort: SpanSort,
+    limit: usize,
+) -> anyhow::Result<Spans> {
     let (where_clause, unindexed) = compile_span_query(reader, query)?;
     let sql = format!(
-        "{} ORDER BY span.started_at DESC LIMIT {}",
+        "{} ORDER BY {} LIMIT {}",
         select_spans(&where_clause),
+        pick_order_columns(sort),
         limit + 1
     );
     let mut spans = reader.collect_rows(&sql, &where_clause, trace_span_from_row)?;
@@ -156,7 +171,12 @@ pub(super) fn read_spans(reader: &Reader, query: &Query, limit: usize) -> anyhow
     })
 }
 
-pub(super) fn read_traces(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Traces> {
+pub(super) fn read_traces(
+    reader: &Reader,
+    query: &Query,
+    sort: SpanSort,
+    limit: usize,
+) -> anyhow::Result<Traces> {
     ensure_query_over_spans(query)?;
     let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
     where_clause.push_condition("span.parent_span_id IS NULL".into());
@@ -190,9 +210,10 @@ pub(super) fn read_traces(reader: &Reader, query: &Query, limit: usize) -> anyho
          FROM spans span
          JOIN resources resource ON resource.id = span.resource_id
          WHERE {}
-         ORDER BY span.started_at DESC
+         ORDER BY {}
          LIMIT {}",
         where_clause.sql(),
+        pick_order_columns(sort),
         limit + 1
     );
     let mut roots = reader.collect_rows(&sql, &where_clause, |row| {

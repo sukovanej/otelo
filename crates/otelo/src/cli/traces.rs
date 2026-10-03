@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use otelo_indexed_storage::SpanId;
 use otelo_indexed_storage::query::{
-    SpanGroupingField, SpanGroups, Spans, Trace, TraceSpan, Traces,
+    SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, TraceSpan, Traces,
 };
 use otelo_query::Signal;
 
@@ -22,6 +22,11 @@ pub struct SpansArgs {
     #[arg(long)]
     by: Option<String>,
 
+    /// The order of the spans: newest or oldest by start, longest or shortest
+    /// by duration [default: newest]
+    #[arg(long, conflicts_with = "by")]
+    sort: Option<SpanSort>,
+
     #[command(flatten)]
     range: RangeArgs,
 
@@ -35,6 +40,7 @@ pub fn print_spans(args: &SpansArgs) -> anyhow::Result<()> {
     }
     let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
+    params.push(("sort", args.sort.map(|sort| sort.name().to_owned())));
     let answer: Spans = args.client.get("/api/spans", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {
@@ -108,6 +114,11 @@ pub struct TracesArgs {
     /// shell
     query: Vec<String>,
 
+    /// The order of the traces by their root span: newest or oldest by start,
+    /// longest or shortest by duration [default: newest]
+    #[arg(long)]
+    sort: Option<SpanSort>,
+
     #[command(flatten)]
     range: RangeArgs,
 
@@ -118,6 +129,7 @@ pub struct TracesArgs {
 pub fn print_traces(args: &TracesArgs) -> anyhow::Result<()> {
     let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
+    params.push(("sort", args.sort.map(|sort| sort.name().to_owned())));
     let answer: Traces = args.client.get("/api/traces", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {

@@ -248,7 +248,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Spans, newest first. */
+        /** Spans in the order of `sort`, newest first when it is missing. */
         get: operations["list_spans"];
         put?: never;
         post?: never;
@@ -288,7 +288,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Traces with a span that the query keeps, by their root span, newest first. */
+        /**
+         * Traces with a span that the query keeps, by their root span, in the order of
+         *     `sort`, newest first when it is missing.
+         */
         get: operations["list_traces"];
         put?: never;
         post?: never;
@@ -866,6 +869,11 @@ export interface components {
             /** @description The attributes the query compares that have no index. */
             unindexed: string[];
         };
+        /**
+         * @description The order of a list of spans, or of traces by their root span.
+         * @enum {string}
+         */
+        SpanSort: "newest" | "oldest" | "longest" | "shortest";
         /** @description The count, the failures, and the durations of some spans. */
         SpanStats: {
             /** Format: int64 */
@@ -882,7 +890,7 @@ export interface components {
              */
             total_ns: number;
         };
-        /** @description Spans, newest first. */
+        /** @description Spans, in the order the request asked for. */
         Spans: {
             spans: components["schemas"]["TraceSpan"][];
             /** @description More spans match than the limit let through. */
@@ -968,7 +976,7 @@ export interface components {
             started_at: string;
             trace_id: string;
         };
-        /** @description Traces by their root span, newest first. */
+        /** @description Traces by their root span, in the order the request asked for. */
         Traces: {
             traces: components["schemas"]["TraceSummary"][];
             /** @description More traces match than the limit let through. */
@@ -1489,10 +1497,15 @@ export interface operations {
                 /** @description The most rows to return. */
                 limit?: number;
                 /**
-                 * @description The records to keep, such as `http.route = "/matches" OR user.id = 7`.
-                 *     Every record when missing.
+                 * @description The spans to keep, such as `service = "api" duration > 500ms`. Every
+                 *     span when missing.
                  */
                 q?: string;
+                /**
+                 * @description The order: `newest` or `oldest` by start, `longest` or `shortest` by
+                 *     duration. A trace goes by its root span. `newest` when missing.
+                 */
+                sort?: components["schemas"]["SpanSort"];
             };
             header?: never;
             path?: never;
@@ -1585,10 +1598,15 @@ export interface operations {
                 /** @description The most rows to return. */
                 limit?: number;
                 /**
-                 * @description The records to keep, such as `http.route = "/matches" OR user.id = 7`.
-                 *     Every record when missing.
+                 * @description The spans to keep, such as `service = "api" duration > 500ms`. Every
+                 *     span when missing.
                  */
                 q?: string;
+                /**
+                 * @description The order: `newest` or `oldest` by start, `longest` or `shortest` by
+                 *     duration. A trace goes by its root span. `newest` when missing.
+                 */
+                sort?: components["schemas"]["SpanSort"];
             };
             header?: never;
             path?: never;

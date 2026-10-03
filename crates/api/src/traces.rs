@@ -1,21 +1,40 @@
 use axum::extract::{Path, Query, State};
 use otelo_indexed_storage::TraceId;
-use otelo_indexed_storage::query::{SpanGroupingField, SpanGroups, Spans, Trace, Traces};
+use otelo_indexed_storage::query::{SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces};
 use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::params::{
-    LookupParams, QueryParams, parse_field_list, parse_query, parse_step_ns, resolve_step,
-};
+use crate::params::{LookupParams, parse_field_list, parse_query, parse_step_ns, resolve_step};
 use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 
-/// Spans, newest first.
+/// The range, the limit, the query, and the order of a list of spans or traces.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SpanListParams {
+    /// The start of the range: a duration before now, such as `1h`, or an
+    /// RFC 3339 timestamp. One hour before `until` when missing.
+    since: Option<String>,
+    /// The end of the range, in the form of `since`. Now when missing.
+    until: Option<String>,
+    /// The most rows to return.
+    limit: Option<usize>,
+    /// The spans to keep, such as `service = "api" duration > 500ms`. Every
+    /// span when missing.
+    #[serde(rename = "q")]
+    #[param(rename = "q")]
+    query: Option<String>,
+    /// The order: `newest` or `oldest` by start, `longest` or `shortest` by
+    /// duration. A trace goes by its root span. `newest` when missing.
+    sort: Option<SpanSort>,
+}
+
+/// Spans in the order of `sort`, newest first when it is missing.
 #[utoipa::path(
     get,
     path = "/api/spans",
-    params(QueryParams),
+    params(SpanListParams),
     responses(
         (status = 200, body = Spans),
         (status = 400, body = ErrorBody),
@@ -23,9 +42,10 @@ use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 )]
 pub async fn list_spans(
     State(api): State<Api>,
-    Query(params): Query<QueryParams>,
+    Query(params): Query<SpanListParams>,
 ) -> ApiResult<Spans> {
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
+    let sort = params.sort.unwrap_or_default();
     api.run_limited_range_query(
         RequestedRange {
             signals: RangeSignals::One(Signal::Spans),
@@ -35,7 +55,7 @@ pub async fn list_spans(
         },
         params.limit,
         100,
-        move |opened, limit| Ok(opened.queries.list_spans(&query, limit)?),
+        move |opened, limit| Ok(opened.queries.list_spans(&query, sort, limit)?),
     )
     .await
 }
@@ -106,11 +126,12 @@ pub async fn list_span_groups(
     .await
 }
 
-/// Traces with a span that the query keeps, by their root span, newest first.
+/// Traces with a span that the query keeps, by their root span, in the order of
+/// `sort`, newest first when it is missing.
 #[utoipa::path(
     get,
     path = "/api/traces",
-    params(QueryParams),
+    params(SpanListParams),
     responses(
         (status = 200, body = Traces),
         (status = 400, body = ErrorBody),
@@ -118,9 +139,10 @@ pub async fn list_span_groups(
 )]
 pub async fn list_traces(
     State(api): State<Api>,
-    Query(params): Query<QueryParams>,
+    Query(params): Query<SpanListParams>,
 ) -> ApiResult<Traces> {
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
+    let sort = params.sort.unwrap_or_default();
     api.run_limited_range_query(
         RequestedRange {
             signals: RangeSignals::One(Signal::Spans),
@@ -130,7 +152,7 @@ pub async fn list_traces(
         },
         params.limit,
         50,
-        move |opened, limit| Ok(opened.queries.list_traces(&query, limit)?),
+        move |opened, limit| Ok(opened.queries.list_traces(&query, sort, limit)?),
     )
     .await
 }
