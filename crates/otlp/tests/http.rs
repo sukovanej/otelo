@@ -157,9 +157,9 @@ fn rejects_the_metric_types_the_store_lacks() {
     receiver.stop_and_wait_for_writer();
     let points: Vec<String> = query_first_column(
         &open_telemetry_file(directory.path()),
-        "SELECT metric_series.name || ' ' || point.value
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+        "SELECT metric_series.name || ' ' || metric_point.value
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name NOT LIKE 'otelo.%'",
     );
     assert_eq!(points, ["queue.depth 4.0"]);
@@ -214,13 +214,13 @@ fn keeps_the_kind_of_a_sum_and_the_buckets_of_an_exponential_histogram() {
     let series: Vec<String> = query_first_column(
         &open_telemetry_file(directory.path()),
         "SELECT json_object('name', metric_series.name, 'kind', metric_series.kind,
-                            'temporality', metric_series.aggregation_temporality, 'value', point.value,
-                            'scale', point.histogram -> 'scale',
-                            'zero', point.histogram -> 'zero_count',
-                            'positive', point.histogram -> 'positive',
-                            'negative', point.histogram -> 'negative')
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+                            'temporality', metric_series.aggregation_temporality, 'value', metric_point.value,
+                            'scale', metric_point.histogram -> 'scale',
+                            'zero', metric_point.histogram -> 'zero_count',
+                            'positive', metric_point.histogram -> 'positive',
+                            'negative', metric_point.histogram -> 'negative')
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name NOT LIKE 'otelo.%'
          ORDER BY metric_series.name",
     );

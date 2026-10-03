@@ -226,7 +226,7 @@ fn map_log_record(record: LogRecord, scope: &Attributes) -> Log {
     }
     Log {
         logged_at,
-        severity: Severity::from_number(record.severity_number),
+        severity_number: Severity::from_number(record.severity_number),
         body,
         trace_context: TraceContext::from_otlp_bytes(&record.trace_id, &record.span_id),
         attributes,
@@ -259,7 +259,7 @@ fn map_span_with_valid_ids(span: OtlpSpan, scope: &Attributes) -> Option<Span> {
             span.end_time_unix_nano
                 .saturating_sub(span.start_time_unix_nano),
         ),
-        status: SpanStatus::from_number(status.code),
+        status_code: SpanStatus::from_number(status.code),
         attributes,
         events,
     })

@@ -29,7 +29,7 @@ const TRACE_ID_HEX: &str = "abababababababababababababababab";
 fn log(logged_at: i64, severity: Severity, body: &str, attributes: &Value) -> Log {
     Log {
         logged_at,
-        severity,
+        severity_number: severity,
         body: body.into(),
         trace_context: TraceContext::None,
         attributes: attributes_from_json(attributes.clone()),
@@ -51,7 +51,7 @@ fn span(
         kind: SpanKind::Server,
         started_at,
         duration_ns: 10_000_000,
-        status: SpanStatus::Unset,
+        status_code: SpanStatus::Unset,
         attributes: Attributes::new(),
         events: Vec::new(),
     }
@@ -193,7 +193,7 @@ impl Fixture {
             today_at + 2 * SECOND,
             "SELECT languages",
         );
-        failed.status = SpanStatus::Error;
+        failed.status_code = SpanStatus::Error;
         failed.kind = SpanKind::Client;
         failed.attributes = attributes_from_json(json!({"db.system": "sqlite"}));
         let mut matches = span(

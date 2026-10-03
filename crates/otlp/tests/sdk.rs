@@ -112,11 +112,11 @@ fn send_each_signal_and_check_the_telemetry_file(transport: Transport) {
         "SELECT json_object('name', metric_series.name, 'kind', metric_series.kind,
                             'temporality', metric_series.aggregation_temporality,
                             'unit', metric_series.unit,
-                            'plan', metric_series.attributes ->> 'plan', 'value', point.value,
-                            'counts', point.histogram -> 'counts',
-                            'bounds', point.histogram -> 'bounds')
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+                            'plan', metric_series.attributes ->> 'plan', 'value', metric_point.value,
+                            'counts', metric_point.histogram -> 'counts',
+                            'bounds', metric_point.histogram -> 'bounds')
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE resource.service = 'shop'
          ORDER BY metric_series.name",

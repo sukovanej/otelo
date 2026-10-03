@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use jiff::Timestamp;
-use otelo_api::{Api, DefaultSince, convert_to_unix_nanos, parse_duration, parse_time};
+use otelo_api::{
+    Api, DefaultSince, RangeSignals, convert_to_unix_nanos, parse_duration, parse_time,
+};
 use otelo_indexed_storage_sqlite::{Day, Sqlite};
 use otelo_query::Signal;
 
@@ -28,7 +30,7 @@ fn caps_the_range_at_the_retention_of_its_signals() {
     };
     let range = api
         .resolve_range_within_retention(
-            &[Signal::Logs],
+            RangeSignals::One(Signal::Logs),
             Some("30d"),
             None,
             DefaultSince::HourBeforeNow,
@@ -37,7 +39,7 @@ fn caps_the_range_at_the_retention_of_its_signals() {
     assert_eq!(range.start_at(), Day::today().add_days(-6).start_at());
     let range = api
         .resolve_range_within_retention(
-            &[Signal::Metrics],
+            RangeSignals::One(Signal::Metrics),
             None,
             None,
             DefaultSince::OldestRetained,
@@ -46,7 +48,7 @@ fn caps_the_range_at_the_retention_of_its_signals() {
     assert_eq!(range.start_at(), Day::today().add_days(-6).start_at());
     assert!(
         api.resolve_range_within_retention(
-            &[Signal::Spans],
+            RangeSignals::One(Signal::Spans),
             Some("1h"),
             Some("2h"),
             DefaultSince::HourBeforeNow
@@ -55,7 +57,7 @@ fn caps_the_range_at_the_retention_of_its_signals() {
     );
     assert!(
         api.resolve_range_within_retention(
-            &[Signal::Spans, Signal::Logs],
+            RangeSignals::SpansAndLogs,
             Some("30d"),
             Some("20d"),
             DefaultSince::HourBeforeNow

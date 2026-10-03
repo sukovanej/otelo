@@ -1,10 +1,12 @@
 use otelo_indexed_storage::AttributeValue;
 use otelo_indexed_storage::query::{Attribute, AttributeKeys};
-use otelo_query::{BuiltinField, Catalog, Field, FieldValues, KeyInfo, Signal, Value, ValueInfo};
+use otelo_query::{
+    BuiltinField, Catalog, Field, FieldValues, KeyInfo, Signal, Value, ValueInfo, ValueType,
+};
 use rusqlite::params;
 
 use crate::Reader;
-use crate::catalog::{AttributeOwner, MAX_VALUES_PER_KEY, json_type_from_stored_name};
+use crate::catalog::{AttributeOwner, MAX_SPAN_NAMES_PER_DAY, json_type_from_stored_name};
 use crate::day::Day;
 
 const MAX_CATALOG_ROWS: usize = 500;
@@ -45,7 +47,7 @@ impl Reader {
         let (first_day, last_day) = self.days_of_range();
         let mut statement = self.connection().prepare(&format!(
             "SELECT key,
-                    CASE WHEN count(DISTINCT json_type) > 1 THEN 'mixed' ELSE min(json_type) END,
+                    CASE WHEN count(DISTINCT json_type) > 1 THEN ?4 ELSE min(json_type) END,
                     sum(record_count) AS total_record_count
              FROM attribute_key_counts
              WHERE attribute_owner = ?1 AND day >= ?2 AND day <= ?3
@@ -53,13 +55,16 @@ impl Reader {
              ORDER BY total_record_count DESC, key
              LIMIT {MAX_CATALOG_ROWS}"
         ))?;
-        let rows = statement.query_map(params![owner.name(), first_day, last_day], |row| {
-            Ok(KeyInfo {
-                key: row.get(0)?,
-                value_type: json_type_from_stored_name(&row.get::<_, String>(1)?),
-                count: row.get::<_, i64>(2)?.cast_unsigned(),
-            })
-        })?;
+        let rows = statement.query_map(
+            params![owner.name(), first_day, last_day, ValueType::Mixed.name()],
+            |row| {
+                Ok(KeyInfo {
+                    key: row.get(0)?,
+                    value_type: json_type_from_stored_name(&row.get::<_, String>(1)?),
+                    count: row.get::<_, i64>(2)?.cast_unsigned(),
+                })
+            },
+        )?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -128,7 +133,7 @@ impl Reader {
                                 FROM span_name_counts
                                 WHERE day >= ?1 AND day <= ?2
                                 GROUP BY day
-                                HAVING count(*) >= {MAX_VALUES_PER_KEY})"
+                                HAVING count(*) >= {MAX_SPAN_NAMES_PER_DAY})"
             ),
             params![first_day, last_day],
             |row| row.get(0),

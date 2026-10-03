@@ -33,7 +33,7 @@ fn resource(service: &str) -> Resource {
 fn log(logged_at: i64, body: &str, attributes: serde_json::Value) -> Log {
     Log {
         logged_at,
-        severity: Severity::INFO,
+        severity_number: Severity::INFO,
         body: body.into(),
         trace_context: TraceContext::None,
         attributes: serde_json::from_value(attributes).unwrap(),
@@ -49,7 +49,7 @@ fn span(started_at: i64, name: &str) -> Span {
         kind: SpanKind::Server,
         started_at,
         duration_ns: 1_000,
-        status: SpanStatus::Unset,
+        status_code: SpanStatus::Unset,
         attributes: Attributes::new(),
         events: Vec::new(),
     }
@@ -85,17 +85,30 @@ const fn days(count: u16) -> NonZeroU16 {
     NonZeroU16::new(count).unwrap()
 }
 
-// The writer deletes what is past the retention before it takes a batch.
-fn run_writer(directory: &Path, batches: Vec<Batch>, configure: impl FnOnce(&mut Config)) {
-    let (sender, inbox) = open_batch_channel(batches.len().max(1));
+fn write_batches(directory: &Path, batches: Vec<Batch>) {
+    let (sender, inbox) = open_batch_channel(batches.len());
     for batch in batches {
         assert!(sender.send_batch(batch));
     }
-    let mut config = Config::new(directory.to_owned());
-    configure(&mut config);
-    let writer = Writer::spawn(config, inbox).unwrap();
+    let writer = Writer::spawn(Config::new(directory.to_owned()), inbox).unwrap();
     drop(sender);
     writer.join().unwrap();
+}
+
+fn delete_past_retention(directory: &Path, configure_retention: impl FnOnce(&mut Config)) {
+    let mut config = Config::new(directory.to_owned());
+    configure_retention(&mut config);
+    let oldest_retained_days = config.oldest_retained_days(Day::today());
+    let mut file = TelemetryFile::open(directory).unwrap();
+    let mut passes = 0;
+    while file
+        .delete_next_past_retention(oldest_retained_days)
+        .unwrap()
+        == Progress::MoreIsDue
+    {
+        passes += 1;
+        assert!(passes < 100, "the retention never finishes");
+    }
 }
 
 fn open_telemetry_file(directory: &Path) -> Connection {
@@ -117,7 +130,7 @@ fn reader_of_the_week(directory: &Path) -> Reader {
 fn deletes_the_rows_of_one_signal_and_leaves_the_others() {
     let directory = tempfile::tempdir().unwrap();
     let at = three_days_ago();
-    run_writer(
+    write_batches(
         directory.path(),
         vec![records(
             "api",
@@ -125,9 +138,8 @@ fn deletes_the_rows_of_one_signal_and_leaves_the_others() {
             vec![span(at, "GET /")],
             vec![gauge("queue.lag", &[at])],
         )],
-        |_| {},
     );
-    run_writer(directory.path(), Vec::new(), |config| {
+    delete_past_retention(directory.path(), |config| {
         config.logs_retention_days = days(2);
     });
     assert_eq!(count_rows(directory.path(), "SELECT count(*) FROM logs"), 0);
@@ -138,8 +150,8 @@ fn deletes_the_rows_of_one_signal_and_leaves_the_others() {
     assert_eq!(
         count_rows(
             directory.path(),
-            "SELECT count(*) FROM metric_points point
-             JOIN metric_series ON metric_series.id = point.metric_series_id
+            "SELECT count(*) FROM metric_points metric_point
+             JOIN metric_series ON metric_series.id = metric_point.metric_series_id
              WHERE metric_series.name = 'queue.lag'"
         ),
         1
@@ -149,7 +161,7 @@ fn deletes_the_rows_of_one_signal_and_leaves_the_others() {
 #[test]
 fn a_deleted_log_no_longer_matches_a_full_text_search() {
     let directory = tempfile::tempdir().unwrap();
-    run_writer(
+    write_batches(
         directory.path(),
         vec![records(
             "api",
@@ -160,7 +172,6 @@ fn a_deleted_log_no_longer_matches_a_full_text_search() {
             Vec::new(),
             Vec::new(),
         )],
-        |_| {},
     );
     let search_bodies = || {
         let query = parse_query(r#"body ~ "payment""#, Signal::Logs).unwrap();
@@ -173,7 +184,7 @@ fn a_deleted_log_no_longer_matches_a_full_text_search() {
             .collect::<Vec<_>>()
     };
     assert_eq!(search_bodies(), ["payment 13 failed", "payment 12 failed"]);
-    run_writer(directory.path(), Vec::new(), |config| {
+    delete_past_retention(directory.path(), |config| {
         config.logs_retention_days = days(2);
     });
     assert_eq!(search_bodies(), ["payment 13 failed"]);
@@ -189,7 +200,7 @@ fn a_deleted_log_no_longer_matches_a_full_text_search() {
 #[test]
 fn the_catalog_drops_a_key_whose_last_day_passed_the_retention() {
     let directory = tempfile::tempdir().unwrap();
-    run_writer(
+    write_batches(
         directory.path(),
         vec![records(
             "api",
@@ -204,7 +215,6 @@ fn the_catalog_drops_a_key_whose_last_day_passed_the_retention() {
             Vec::new(),
             Vec::new(),
         )],
-        |_| {},
     );
     let log_keys = || {
         let mut keys: Vec<(String, u64)> = reader_of_the_week(directory.path())
@@ -216,7 +226,7 @@ fn the_catalog_drops_a_key_whose_last_day_passed_the_retention() {
         keys
     };
     assert_eq!(log_keys(), [("kept.key".into(), 2), ("old.key".into(), 1)]);
-    run_writer(directory.path(), Vec::new(), |config| {
+    delete_past_retention(directory.path(), |config| {
         config.logs_retention_days = days(2);
     });
     assert_eq!(log_keys(), [("kept.key".into(), 1)]);
@@ -226,7 +236,7 @@ fn the_catalog_drops_a_key_whose_last_day_passed_the_retention() {
 fn retention_of_the_metrics_deletes_a_series_with_no_rows_left() {
     let directory = tempfile::tempdir().unwrap();
     let at = three_days_ago();
-    run_writer(
+    write_batches(
         directory.path(),
         vec![
             records(
@@ -242,7 +252,6 @@ fn retention_of_the_metrics_deletes_a_series_with_no_rows_left() {
                 vec![gauge("jobs.done", &[at])],
             ),
         ],
-        |_| {},
     );
     let mut file = TelemetryFile::open(directory.path()).unwrap();
     while file
@@ -273,7 +282,7 @@ fn retention_of_the_metrics_deletes_a_series_with_no_rows_left() {
         );
     }
 
-    run_writer(directory.path(), Vec::new(), |config| {
+    delete_past_retention(directory.path(), |config| {
         config.metrics_retention_days = days(2);
     });
     for (table, instant_column) in tables {
@@ -316,10 +325,9 @@ fn lowering_a_retention_shrinks_the_file_after_the_incremental_vacuum() {
             )
         })
         .collect();
-    run_writer(
+    write_batches(
         directory.path(),
         vec![records("api", logs, Vec::new(), Vec::new())],
-        |_| {},
     );
     let file_bytes = || {
         fs::metadata(directory.path().join(TELEMETRY_FILE_NAME))
@@ -329,7 +337,7 @@ fn lowering_a_retention_shrinks_the_file_after_the_incremental_vacuum() {
     let bytes_before = file_bytes();
     assert!(bytes_before > 5_000_000, "{bytes_before} bytes");
 
-    run_writer(directory.path(), Vec::new(), |config| {
+    delete_past_retention(directory.path(), |config| {
         config.logs_retention_days = days(2);
     });
     assert_eq!(count_rows(directory.path(), "SELECT count(*) FROM logs"), 0);

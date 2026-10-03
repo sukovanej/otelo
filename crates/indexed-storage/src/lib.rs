@@ -52,7 +52,7 @@ pub struct Resource {
 #[derive(Clone, Debug)]
 pub struct Log {
     pub logged_at: i64,
-    pub severity: Severity,
+    pub severity_number: Severity,
     pub body: String,
     pub trace_context: TraceContext,
     pub attributes: Attributes,
@@ -67,7 +67,7 @@ pub struct Span {
     pub kind: SpanKind,
     pub started_at: i64,
     pub duration_ns: i64,
-    pub status: SpanStatus,
+    pub status_code: SpanStatus,
     pub attributes: Attributes,
     pub events: Vec<SpanEvent>,
 }

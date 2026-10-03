@@ -128,10 +128,28 @@ pub(crate) struct OpenedRange {
 }
 
 pub(crate) struct RequestedRange {
-    signals: &'static [Signal],
+    signals: RangeSignals,
     since: Option<String>,
     until: Option<String>,
     default_since: DefaultSince,
+}
+
+#[derive(Clone, Copy)]
+pub enum RangeSignals {
+    One(Signal),
+    SpansAndLogs,
+}
+
+impl RangeSignals {
+    // A range of two signals starts where the shorter retention starts.
+    fn oldest_retained_at(self, storage: &dyn Storage) -> i64 {
+        match self {
+            Self::One(signal) => storage.oldest_retained_at(signal),
+            Self::SpansAndLogs => storage
+                .oldest_retained_at(Signal::Spans)
+                .max(storage.oldest_retained_at(Signal::Logs)),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -194,36 +212,18 @@ impl Api {
         .await
     }
 
-    async fn run_limited_metric_range_query<T: Send + 'static>(
-        &self,
-        since: Option<String>,
-        until: Option<String>,
-        requested_limit: Option<usize>,
-        default_limit: usize,
-        query: impl FnOnce(OpenedRange, usize) -> Result<T, ApiError> + Send + 'static,
-    ) -> ApiResult<T> {
-        self.run_blocking_query(move |api| {
-            let range = api.resolve_requested_range(
-                &[Signal::Metrics],
-                since.as_deref(),
-                until.as_deref(),
-                DefaultSince::HourBeforeNow,
-            )?;
-            let limit = check_limit(requested_limit, default_limit)
-                .map_err(|error| ApiError::bad_request(&error))?;
-            query(api.open_range(range)?, limit)
-        })
-        .await
-    }
-
     async fn run_retention_query<T: Send + 'static>(
         &self,
         signal: Signal,
         query: impl FnOnce(OpenedRange) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         self.run_blocking_query(move |api| {
-            let range =
-                api.resolve_requested_range(&[signal], None, None, DefaultSince::OldestRetained)?;
+            let range = api.resolve_requested_range(
+                RangeSignals::One(signal),
+                None,
+                None,
+                DefaultSince::OldestRetained,
+            )?;
             query(api.open_range(range)?)
         })
         .await
@@ -231,7 +231,7 @@ impl Api {
 
     fn resolve_requested_range(
         &self,
-        signals: &[Signal],
+        signals: RangeSignals,
         since: Option<&str>,
         until: Option<&str>,
         default_since: DefaultSince,
@@ -245,10 +245,9 @@ impl Api {
         Ok(OpenedRange { queries, range })
     }
 
-    // A range that reads more than one signal starts where the shortest retention starts.
     pub fn resolve_range_within_retention(
         &self,
-        signals: &[Signal],
+        signals: RangeSignals,
         since: Option<&str>,
         until: Option<&str>,
         default_since: DefaultSince,
@@ -264,11 +263,7 @@ impl Api {
             since.is_none_or(|since| since < until),
             "since has to be before until"
         );
-        let oldest_retained_at = signals
-            .iter()
-            .map(|&signal| self.storage.oldest_retained_at(signal))
-            .max()
-            .context("a range reads at least one signal")?;
+        let oldest_retained_at = signals.oldest_retained_at(&*self.storage);
         ensure!(
             oldest_retained_at < until,
             "the range ends before the oldest telemetry otelo keeps"

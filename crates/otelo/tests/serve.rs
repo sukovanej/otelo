@@ -146,8 +146,8 @@ fn collects_the_metrics_of_its_host_when_it_starts() {
         .join("telemetry")
         .join(otelo_indexed_storage_sqlite::TELEMETRY_FILE_NAME);
     let select_host_metrics = "SELECT metric_series.name, metric_series.kind, resource.attributes
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE resource.service = 'otelo' AND metric_series.name IN
              ('system.memory.limit', 'process.cpu.time', 'otelo.storage.size')

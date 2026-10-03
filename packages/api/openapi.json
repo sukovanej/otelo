@@ -1208,7 +1208,7 @@
       },
       "AttributeKeys": {
         "type": "object",
-        "description": "The attribute keys of a signal, over the attached days.",
+        "description": "The attribute keys of a signal, over the retention of the signal.",
         "required": [
           "record",
           "resource"

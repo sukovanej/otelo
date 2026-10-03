@@ -39,23 +39,8 @@ impl FromSql for MetricSeriesId {
 }
 
 #[derive(Clone, Copy)]
-pub enum StoredResource {
-    Found(ResourceId),
-    Inserted(ResourceId),
-}
-
-impl StoredResource {
-    pub const fn id(self) -> ResourceId {
-        match self {
-            Self::Found(resource_id) | Self::Inserted(resource_id) => resource_id,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
 pub enum StoredSeries {
-    Found(MetricSeriesId),
-    Inserted(MetricSeriesId),
+    Stored(MetricSeriesId),
     PastSeriesLimit,
 }
 
@@ -78,12 +63,12 @@ pub fn find_or_insert_resource_id(
     resource_ids_by_identity_hash: &mut HashMap<i64, ResourceId>,
     service: &str,
     attributes_json: &str,
-) -> anyhow::Result<StoredResource> {
+) -> anyhow::Result<ResourceId> {
     let identity_hash = hash_fields(&[service, attributes_json]);
     if let Some(&resource_id) = resource_ids_by_identity_hash.get(&identity_hash) {
-        return Ok(StoredResource::Found(resource_id));
+        return Ok(resource_id);
     }
-    let inserted_row_count = transaction
+    transaction
         .prepare_cached(
             "INSERT INTO resources (identity_hash, service, attributes) VALUES (?1, ?2, ?3)
              ON CONFLICT (identity_hash) DO NOTHING",
@@ -93,11 +78,7 @@ pub fn find_or_insert_resource_id(
         .prepare_cached("SELECT id FROM resources WHERE identity_hash = ?1")?
         .query_row([identity_hash], |row| row.get(0))?;
     resource_ids_by_identity_hash.insert(identity_hash, resource_id);
-    Ok(if inserted_row_count > 0 {
-        StoredResource::Inserted(resource_id)
-    } else {
-        StoredResource::Found(resource_id)
-    })
+    Ok(resource_id)
 }
 
 pub fn find_or_insert_series_id(
@@ -116,7 +97,7 @@ pub fn find_or_insert_series_id(
         series_identity.attributes_json,
     ]);
     if let Some(&series_id) = series_cache.series_ids_by_identity_hash.get(&identity_hash) {
-        return Ok(StoredSeries::Found(series_id));
+        return Ok(StoredSeries::Stored(series_id));
     }
     let stored_series_id = transaction
         .prepare_cached("SELECT id FROM metric_series WHERE identity_hash = ?1")?
@@ -126,7 +107,7 @@ pub fn find_or_insert_series_id(
         series_cache
             .series_ids_by_identity_hash
             .insert(identity_hash, series_id);
-        return Ok(StoredSeries::Found(series_id));
+        return Ok(StoredSeries::Stored(series_id));
     }
     let series_count = if let Some(&series_count) = series_cache
         .series_counts_by_metric
@@ -170,7 +151,7 @@ pub fn find_or_insert_series_id(
     series_cache
         .series_ids_by_identity_hash
         .insert(identity_hash, series_id);
-    Ok(StoredSeries::Inserted(series_id))
+    Ok(StoredSeries::Stored(series_id))
 }
 
 pub fn hash_fields(fields: &[&str]) -> i64 {

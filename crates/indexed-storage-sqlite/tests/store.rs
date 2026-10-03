@@ -27,7 +27,7 @@ fn api_resource() -> Resource {
 fn log(logged_at: i64, body: &str) -> Log {
     Log {
         logged_at,
-        severity: Severity::INFO,
+        severity_number: Severity::INFO,
         body: body.into(),
         trace_context: TraceContext::Span {
             trace_id: TraceId([1; 16]),
@@ -46,7 +46,7 @@ fn span(started_at: i64, name: &str) -> Span {
         kind: SpanKind::Server,
         started_at,
         duration_ns: 5_000_000,
-        status: SpanStatus::Unset,
+        status_code: SpanStatus::Unset,
         attributes: Attributes::new(),
         events: vec![SpanEvent {
             occurred_at: started_at,
@@ -174,11 +174,11 @@ fn reads_back_each_kind_across_a_day_boundary() {
     );
     let values: Vec<(i64, f64)> = query_pairs(
         connection,
-        "SELECT point.recorded_at, point.value
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+        "SELECT metric_point.recorded_at, metric_point.value
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name = 'process.memory.usage'
-         ORDER BY point.recorded_at",
+         ORDER BY metric_point.recorded_at",
     );
     assert_eq!(
         values,
@@ -217,9 +217,9 @@ fn a_full_channel_drops_the_batch_and_the_writer_reports_it() {
     assert_eq!(bodies, [(today_start_at, "kept".into())]);
     let dropped: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT metric_series.unit, point.value
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+        "SELECT metric_series.unit, metric_point.value
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          JOIN resources resource ON resource.id = metric_series.resource_id
          WHERE resource.service = 'otelo'
            AND metric_series.name = 'otelo.telemetry.dropped_batches'",
@@ -336,9 +336,9 @@ fn stores_the_kind_and_the_temporality_of_each_series() {
     );
     let counts_and_sums: Vec<(String, f64)> = query_pairs(
         reader.connection(),
-        "SELECT point.histogram ->> '$.counts', point.value
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+        "SELECT metric_point.histogram ->> '$.counts', metric_point.value
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name = 'request.duration'",
     );
     assert_eq!(counts_and_sums, [("[2,1]".into(), 2.5)]);
@@ -361,11 +361,11 @@ fn a_batch_written_twice_leaves_each_point_once() {
     let reader = open_reader_of_today(directory.path());
     let names_and_values: Vec<(String, f64)> = query_pairs(
         reader.connection(),
-        "SELECT metric_series.name, point.value
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+        "SELECT metric_series.name, metric_point.value
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name = 'process.memory.usage'
-         ORDER BY point.recorded_at",
+         ORDER BY metric_point.recorded_at",
     );
     let name = || String::from("process.memory.usage");
     assert_eq!(names_and_values, [(name(), 150.0), (name(), 200.0)]);
@@ -398,7 +398,8 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     );
     let reader = open_reader_of_today(directory.path());
     let connection = reader.connection();
-    let join_cart_adds_series = "JOIN metric_series ON metric_series.id = point.metric_series_id
+    let join_cart_adds_series =
+        "JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name = 'cart.adds'";
     assert_eq!(
         query_integer(
@@ -411,7 +412,7 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     assert_eq!(
         query_integer(
             connection,
-            &format!("SELECT count(*) FROM metric_points point {join_cart_adds_series}")
+            &format!("SELECT count(*) FROM metric_points metric_point {join_cart_adds_series}")
         ),
         1001
     );
@@ -424,9 +425,9 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
     );
     let rejected_points_counter: Vec<(String, f64)> = query_pairs(
         connection,
-        "SELECT metric_series.kind || ' ' || metric_series.unit, point.value
-         FROM metric_points point
-         JOIN metric_series ON metric_series.id = point.metric_series_id
+        "SELECT metric_series.kind || ' ' || metric_series.unit, metric_point.value
+         FROM metric_points metric_point
+         JOIN metric_series ON metric_series.id = metric_point.metric_series_id
          WHERE metric_series.name = 'otelo.telemetry.rejected_points'",
     );
     assert_eq!(rejected_points_counter, [("counter {point}".into(), 2.0)]);

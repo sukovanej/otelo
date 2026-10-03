@@ -7,6 +7,7 @@ use otelo_indexed_storage::{
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
+use crate::progress::Progress;
 use crate::query::{BASELINE_LOOKBACK_NS, metric_kind_from_stored_names, read_series_point};
 use crate::series::MetricSeriesId;
 use crate::telemetry_file::TelemetryFile;
@@ -19,12 +20,6 @@ const LATE_BATCH_WAIT_NS: i64 = 2 * MINUTE_NS;
 
 const SUMMARY_COLUMNS: &str = "point_count, min_value, max_value, value_sum, last_value, \
                                counter_increase, counter_increase_seconds, merged_histogram";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Progress {
-    CaughtUp,
-    MoreIsDue,
-}
 
 #[derive(Clone, Copy)]
 pub enum SummaryTable {
@@ -163,11 +158,11 @@ impl TelemetryFile {
         // CROSS JOIN keeps metric_series the outer loop, so the points come by their primary key.
         let mut statement = self.connection().prepare_cached(
             "SELECT metric_series.id, metric_series.kind, metric_series.aggregation_temporality,
-                    point.recorded_at, point.value, point.histogram
+                    metric_point.recorded_at, metric_point.value, metric_point.histogram
              FROM metric_series
-             CROSS JOIN metric_points point ON point.metric_series_id = metric_series.id
-             WHERE point.recorded_at >= ?1 AND point.recorded_at < ?2
-             ORDER BY metric_series.id, point.recorded_at",
+             CROSS JOIN metric_points metric_point ON metric_point.metric_series_id = metric_series.id
+             WHERE metric_point.recorded_at >= ?1 AND metric_point.recorded_at < ?2
+             ORDER BY metric_series.id, metric_point.recorded_at",
         )?;
         let mut rows = statement.query([since, minute_range.end_at()])?;
         let mut steps_by_series: BTreeMap<MetricSeriesId, SeriesSteps> = BTreeMap::new();
@@ -253,7 +248,7 @@ fn write_summarized_until(
     Ok(())
 }
 
-// Summarizing a step again replaces its row, so it gives the same row.
+// A step summarized again, after a stop before its progress was saved, replaces its row.
 fn write_summary(
     transaction: &Transaction,
     table: SummaryTable,
@@ -264,7 +259,11 @@ fn write_summary(
     let (counter_increase, counter_increase_seconds, merged_histogram_json) = match &summary.change
     {
         Change::Nothing => (None, None, None),
-        Change::Increase(increase) => (Some(increase.amount), Some(increase.elapsed_seconds), None),
+        Change::Increase(increase) => (
+            Some(increase.counter_increase),
+            Some(increase.counter_increase_seconds),
+            None,
+        ),
         Change::Distribution(histogram) => (None, None, Some(serde_json::to_string(histogram)?)),
     };
     transaction
@@ -276,11 +275,11 @@ fn write_summary(
         .execute(params![
             series_id,
             start_at,
-            summary.level.count.cast_signed(),
-            summary.level.min,
-            summary.level.max,
-            summary.level.sum,
-            summary.level.last,
+            summary.level.point_count.cast_signed(),
+            summary.level.min_value,
+            summary.level.max_value,
+            summary.level.value_sum,
+            summary.level.last_value,
             counter_increase,
             counter_increase_seconds,
             merged_histogram_json,
@@ -298,20 +297,20 @@ pub fn read_summary(row: &Row, first_summary_column: usize) -> anyhow::Result<St
         counter_increase_seconds,
         merged_histogram_json,
     ) {
-        (Some(amount), Some(elapsed_seconds), _) => Change::Increase(Increase {
-            amount,
-            elapsed_seconds,
+        (Some(counter_increase), Some(counter_increase_seconds), _) => Change::Increase(Increase {
+            counter_increase,
+            counter_increase_seconds,
         }),
         (_, _, Some(json)) => Change::Distribution(Box::new(serde_json::from_str(&json)?)),
         _ => Change::Nothing,
     };
     Ok(StepSummary {
         level: Level {
-            count: point_count.cast_unsigned(),
-            min: row.get(first_summary_column + 1)?,
-            max: row.get(first_summary_column + 2)?,
-            sum: row.get(first_summary_column + 3)?,
-            last: row.get(first_summary_column + 4)?,
+            point_count: point_count.cast_unsigned(),
+            min_value: row.get(first_summary_column + 1)?,
+            max_value: row.get(first_summary_column + 2)?,
+            value_sum: row.get(first_summary_column + 3)?,
+            last_value: row.get(first_summary_column + 4)?,
         },
         change,
     })

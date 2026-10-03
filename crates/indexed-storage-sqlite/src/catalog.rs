@@ -7,7 +7,9 @@ use otelo_indexed_storage::{AttributeValue, Attributes};
 
 use crate::day::Day;
 
-pub const MAX_VALUES_PER_KEY: usize = 200;
+pub const MAX_VALUES_PER_KEY_AND_DAY: usize = 200;
+
+pub const MAX_SPAN_NAMES_PER_DAY: usize = 200;
 
 const MAX_COMPLETABLE_VALUE_BYTES: usize = 100;
 
@@ -179,7 +181,7 @@ impl CatalogCache {
             known.has_more_values_than_listed |= matches!(value, AttributeValue::String(_));
             return;
         };
-        if known.values.contains(&value_json) || known.values.len() < MAX_VALUES_PER_KEY {
+        if known.values.contains(&value_json) || known.values.len() < MAX_VALUES_PER_KEY_AND_DAY {
             known.values.insert(value_json.clone());
             *delta
                 .values
@@ -192,7 +194,7 @@ impl CatalogCache {
 
     pub fn count_span_name(&mut self, delta: &mut CatalogDelta, day: Day, name: &str) {
         let known_names = self.span_names_by_day.entry(day).or_default();
-        if known_names.contains(name) || known_names.len() < MAX_VALUES_PER_KEY {
+        if known_names.contains(name) || known_names.len() < MAX_SPAN_NAMES_PER_DAY {
             known_names.insert(name.to_owned());
             *delta.span_names.entry((day, name.to_owned())).or_default() += 1;
         }
@@ -211,7 +213,7 @@ impl CatalogCache {
                record_count = record_count + excluded.record_count,
                json_type = CASE
                  WHEN json_type = excluded.json_type THEN json_type
-                 ELSE 'mixed'
+                 ELSE ?7
                END,
                has_more_values_than_listed =
                  max(has_more_values_than_listed, excluded.has_more_values_than_listed)",
@@ -235,7 +237,8 @@ impl CatalogCache {
                 key,
                 json_type.name(),
                 record_count,
-                has_more_values_than_listed
+                has_more_values_than_listed,
+                ValueType::Mixed.name()
             ])?;
         }
         let mut insert_value = transaction.prepare_cached(

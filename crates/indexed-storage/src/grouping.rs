@@ -280,11 +280,11 @@ impl CombinedStep {
         };
         Self {
             series_count: 1,
-            point_count: summary.level.count,
-            min: summary.level.min,
-            max: summary.level.max,
+            point_count: summary.level.point_count,
+            min: summary.level.min_value,
+            max: summary.level.max_value,
             sum_of_averages: summary.level.average(),
-            sum_of_lasts: summary.level.last,
+            sum_of_lasts: summary.level.last_value,
             change,
         }
     }

@@ -371,14 +371,15 @@ impl Reader {
                 service.to_owned(),
             );
         }
+        where_clause.push_param(":no_attributes", Attributes::new().to_json());
         let mut resources = HashMap::new();
         // A resource with attributes wins over one without, such as the writer's own, and a
         // newer one over an older one.
         let sql = format!(
-            "SELECT service, attributes
+            "SELECT service, attributes, attributes != :no_attributes AS has_attributes
              FROM resources
              WHERE {}
-             ORDER BY attributes != '{{}}', id",
+             ORDER BY has_attributes, id",
             where_clause.sql()
         );
         self.scan_rows(&sql, &where_clause, |row| {

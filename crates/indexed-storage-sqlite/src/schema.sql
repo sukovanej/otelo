@@ -98,7 +98,6 @@ CREATE TABLE IF NOT EXISTS metric_minute_summaries (
   metric_series_id INTEGER NOT NULL REFERENCES metric_series (id),
   -- The start of the minute, in Unix nanoseconds.
   start_at INTEGER NOT NULL,
-  -- Of the points in the minute.
   point_count INTEGER NOT NULL,
   min_value REAL NOT NULL,
   max_value REAL NOT NULL,
@@ -132,7 +131,7 @@ CREATE TABLE IF NOT EXISTS metric_hour_summaries (
 
 CREATE TABLE IF NOT EXISTS metric_summary_progress (
   -- metric_minute_summaries or metric_hour_summaries.
-  summary_table TEXT PRIMARY KEY,
+  summary_table TEXT NOT NULL PRIMARY KEY,
   -- Unix nanoseconds. Every minute, or hour, before it is summarized.
   summarized_until INTEGER NOT NULL
 ) WITHOUT ROWID;

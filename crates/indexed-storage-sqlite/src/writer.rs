@@ -14,8 +14,8 @@ use otelo_query::Signal;
 
 use crate::day::Day;
 use crate::indexes::{Indexes, VersionedAttributes};
+use crate::progress::Progress;
 use crate::retention::OldestRetainedDays;
-use crate::rollup::Progress;
 use crate::series::MAX_SERIES_PER_METRIC;
 use crate::telemetry_file::{PointRow, ResourceRecords, TelemetryFile, rows_of_points};
 
@@ -53,7 +53,7 @@ impl Config {
             |retention_days: NonZeroU16| today.add_days(1 - i64::from(retention_days.get()));
         OldestRetainedDays {
             logs: oldest_retained_day(self.logs_retention_days),
-            spans: oldest_retained_day(self.traces_retention_days),
+            traces: oldest_retained_day(self.traces_retention_days),
             metrics: oldest_retained_day(self.metrics_retention_days),
         }
     }
@@ -102,10 +102,8 @@ impl WriterState {
     }
 
     fn write_batches_until_disconnected(mut self, inbox: &BatchInbox) {
-        // The writer takes no batch before it deleted what it no longer keeps.
-        while self.delete_next_past_retention() == Progress::MoreIsDue {}
         let mut next_report_at = Instant::now() + LOSS_REPORT_INTERVAL;
-        let mut next_retention_at = Instant::now() + RETENTION_INTERVAL;
+        let mut next_retention_at = Instant::now();
         let mut next_rollup_at = Instant::now();
         loop {
             self.apply_index_changes();
@@ -132,7 +130,7 @@ impl WriterState {
                 self.report_lost_telemetry(inbox.dropped_batches());
                 next_report_at = now + LOSS_REPORT_INTERVAL;
             }
-            // A lowered retention has much to delete, and the writer takes batches in between.
+            // A day of every signal expires at once, and the writer takes batches in between.
             if now >= next_retention_at {
                 next_retention_at = match self.delete_next_past_retention() {
                     Progress::MoreIsDue => now,
@@ -154,10 +152,10 @@ impl WriterState {
         let today = Day::today();
         let oldest_retained_days = self.config.oldest_retained_days(today);
         // A record from far ahead would stay past the retention of its signal.
-        let first_day_past_retention = today.add_days(2).start_at();
+        let end_of_tomorrow_at = today.add_days(2).start_at();
         let is_retained = |signal: Signal, recorded_at: i64| {
             recorded_at >= oldest_retained_days.of_signal(signal).start_at()
-                && recorded_at < first_day_past_retention
+                && recorded_at < end_of_tomorrow_at
         };
         let mut skipped_records = 0;
         let mut resource_records = Vec::new();

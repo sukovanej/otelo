@@ -2,7 +2,7 @@ use otelo_query::ValueType;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// The attribute keys of a signal, over the attached days.
+/// The attribute keys of a signal, over the retention of the signal.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct AttributeKeys {
     /// The attributes of the records: of the logs, the spans, or the attributes

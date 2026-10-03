@@ -6,19 +6,20 @@ const NANOS_PER_SECOND: f64 = 1e9;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Increase {
-    pub amount: f64,
-    pub elapsed_seconds: f64,
+    pub counter_increase: f64,
+    pub counter_increase_seconds: f64,
 }
 
 impl Increase {
     #[must_use]
     pub fn rate_per_second(self) -> Option<f64> {
-        (self.elapsed_seconds > 0.0).then(|| self.amount / self.elapsed_seconds)
+        (self.counter_increase_seconds > 0.0)
+            .then(|| self.counter_increase / self.counter_increase_seconds)
     }
 
     pub fn add_later_increase(&mut self, later: Self) {
-        self.amount += later.amount;
-        self.elapsed_seconds += later.elapsed_seconds;
+        self.counter_increase += later.counter_increase;
+        self.counter_increase_seconds += later.counter_increase_seconds;
     }
 }
 
@@ -59,8 +60,8 @@ impl StepIncreases {
             .entry(step_start_at)
             .or_default()
             .add_later_increase(Increase {
-                amount,
-                elapsed_seconds,
+                counter_increase: amount,
+                counter_increase_seconds: elapsed_seconds,
             });
     }
 
