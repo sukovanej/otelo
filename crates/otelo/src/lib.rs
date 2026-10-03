@@ -4,3 +4,4 @@ pub mod own;
 pub mod reindex;
 pub mod serve;
 pub mod ui;
+pub mod update;

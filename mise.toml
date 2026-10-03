@@ -1,6 +1,7 @@
 [tools]
 node = "24"
 pnpm = "12"
+cargo-dist = "0.33.0"
 
 [vars]
 # The files oxfmt formats: the web packages and their configuration.
@@ -92,3 +93,28 @@ depends = [
   "check:web:types",
   "check:web:test",
 ]
+
+[tasks.release]
+description = "Set the workspace version and commit the release"
+usage = 'arg "<version>" help="The new version, for example 0.0.2"'
+run = '''
+set -eu
+version="$usage_version"
+
+echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+  || { echo "release: '$version' is not a semver version" >&2; exit 1; }
+test -z "$(git status --porcelain -- . ':(exclude)CHANGELOG.md')" \
+  || { echo "release: commit or stash your changes first" >&2; exit 1; }
+# cargo-dist takes the notes of the GitHub release from this section.
+grep -q "^## \[$version\]" CHANGELOG.md \
+  || { echo "release: write the '## [$version]' section in CHANGELOG.md first" >&2; exit 1; }
+
+perl -pi -e "s/^version = \".*\"/version = \"$version\"/" Cargo.toml
+cargo update --workspace --quiet
+
+git add Cargo.toml Cargo.lock CHANGELOG.md
+git diff --cached --quiet || git commit --quiet -m "Release v$version"
+
+echo "Next: merge this commit into main, then run:"
+echo "  git tag v$version && git push origin v$version"
+'''
