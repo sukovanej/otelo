@@ -530,8 +530,8 @@ impl DayFile {
             let resource_id = stored_resource.id();
             let mut insert_log = transaction.prepare_cached(
                 "INSERT INTO logs (logged_at, resource_id, severity, body, trace_id, span_id,
-                                   attributes, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                   attributes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
             for log in &records.logs {
                 catalog.count_attributes(&mut catalog_delta, KeyGroup::Logs, &log.attributes);
@@ -543,7 +543,6 @@ impl DayFile {
                     log.trace_context.trace_id().map(|trace_id| trace_id.0),
                     log.trace_context.span_id().map(|span_id| span_id.0),
                     log.attributes.to_json(),
-                    log.source.name(),
                 ])?;
             }
             let mut insert_span = transaction.prepare_cached(

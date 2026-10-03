@@ -23,9 +23,7 @@ CREATE TABLE IF NOT EXISTS logs (
   -- 8 bytes. NULL for a log outside a span.
   span_id BLOB,
   -- A JSON object.
-  attributes TEXT NOT NULL,
-  -- What took the log in. Only otlp so far.
-  source TEXT NOT NULL
+  attributes TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS logs_logged_at ON logs (logged_at);
 CREATE INDEX IF NOT EXISTS logs_trace_id ON logs (trace_id) WHERE trace_id IS NOT NULL;

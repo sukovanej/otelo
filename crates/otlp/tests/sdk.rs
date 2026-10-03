@@ -90,14 +90,14 @@ fn send_each_signal_and_check_the_day_file(transport: Transport) {
 
     let logs: Vec<String> = query_first_column(
         &connection,
-        "SELECT json_object('body', body, 'severity', severity, 'source', source,
+        "SELECT json_object('body', body, 'severity', severity,
                             'user', attributes ->> '$.\"user.id\"',
                             'scope', attributes ->> '$.\"otel.scope.name\"')
          FROM logs",
     );
     assert_eq!(
         logs,
-        [r#"{"body":"cart is empty","severity":13,"source":"otlp","user":7,"scope":"shop-test"}"#]
+        [r#"{"body":"cart is empty","severity":13,"user":7,"scope":"shop-test"}"#]
     );
     let spans_of_the_log: Vec<String> = query_first_column(
         &connection,

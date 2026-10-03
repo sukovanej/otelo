@@ -2,8 +2,8 @@ use std::path::Path;
 
 use otelo_indexed_storage::query::Latency;
 use otelo_indexed_storage::{
-    Attributes, Batch, Log, LogSource, RangeQueries, Records, Resource, Severity, Span, SpanId,
-    SpanKind, SpanStatus, TimeRange, TraceContext, TraceId, open_batch_channel,
+    Attributes, Batch, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
+    SpanStatus, TimeRange, TraceContext, TraceId, open_batch_channel,
 };
 use otelo_indexed_storage_sqlite::{Config, Day, Reader, Writer};
 use serde_json::{Value, json};
@@ -57,7 +57,6 @@ fn log(logged_at: i64, severity: Severity) -> Log {
         body: "a line".into(),
         trace_context: TraceContext::None,
         attributes: Attributes::new(),
-        source: LogSource::Otlp,
     }
 }
 

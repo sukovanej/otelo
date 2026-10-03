@@ -15,8 +15,8 @@ use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use opentelemetry_proto::tonic::trace::v1::Span as OtlpSpan;
 use otelo_indexed_storage::{
     AttributeValue, Attributes, Batch, Buckets, ExplicitBuckets, ExponentialBuckets, Histogram,
-    HistogramPoint, IndexedCounts, Log, LogSource, Metric, NumberPoint, Points, Records, Resource,
-    Severity, Span, SpanEvent, SpanId, SpanKind, SpanStatus, Temporality, TraceContext, TraceId,
+    HistogramPoint, IndexedCounts, Log, Metric, NumberPoint, Points, Records, Resource, Severity,
+    Span, SpanEvent, SpanId, SpanKind, SpanStatus, Temporality, TraceContext, TraceId,
     now_unix_nanos,
 };
 
@@ -230,7 +230,6 @@ fn map_log_record(record: LogRecord, scope: &Attributes) -> Log {
         body,
         trace_context: TraceContext::from_otlp_bytes(&record.trace_id, &record.span_id),
         attributes,
-        source: LogSource::Otlp,
     }
 }
 

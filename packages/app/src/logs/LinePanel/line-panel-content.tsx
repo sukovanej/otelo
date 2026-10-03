@@ -24,7 +24,6 @@ export default function LinePanelContent(props: LinePanelContentProps) {
       fields: [
         toBuiltinField("service", props.line.service),
         toBuiltinField("level", level(), level().toLowerCase()),
-        toBuiltinField("source", props.line.source),
         toBuiltinField("trace_id", props.line.trace_id),
         toBuiltinField("span_id", props.line.span_id),
       ].filter((field) => field.value !== null),

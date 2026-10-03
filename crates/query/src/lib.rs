@@ -37,11 +37,10 @@ impl Signal {
     #[must_use]
     pub const fn builtin_fields(self) -> &'static [BuiltinField] {
         use BuiltinField::{
-            Body, Duration, Error, Kind, Level, Name, Root, Service, Source, SpanId, Status,
-            TraceId, Unit,
+            Body, Duration, Error, Kind, Level, Name, Root, Service, SpanId, Status, TraceId, Unit,
         };
         match self {
-            Self::Logs => &[Service, Level, Body, TraceId, SpanId, Source],
+            Self::Logs => &[Service, Level, Body, TraceId, SpanId],
             Self::Spans => &[
                 Service, Name, Kind, Status, Error, Duration, Root, TraceId, SpanId,
             ],
@@ -74,7 +73,6 @@ pub enum BuiltinField {
     Body,
     TraceId,
     SpanId,
-    Source,
     Name,
     Kind,
     Status,
@@ -93,7 +91,6 @@ impl BuiltinField {
             Self::Body => "body",
             Self::TraceId => "trace_id",
             Self::SpanId => "span_id",
-            Self::Source => "source",
             Self::Name => "name",
             Self::Kind => "kind",
             Self::Status => "status",
@@ -152,7 +149,6 @@ impl BuiltinField {
             (Self::TraceId, _) => "The trace the span belongs to, as hex digits.",
             (Self::SpanId, Signal::Logs) => "The span the log line was written in, as hex digits.",
             (Self::SpanId, _) => "The id of the span, as hex digits.",
-            (Self::Source, _) => "How the log line arrived, such as otlp.",
             (Self::Name, Signal::Metrics) => "The name of the metric.",
             (Self::Name, _) => "The name of the span, such as GET /users.",
             (Self::Kind, Signal::Metrics) => {
@@ -178,7 +174,7 @@ impl BuiltinField {
 
     #[must_use]
     pub const fn is_text(self) -> bool {
-        matches!(self, Self::Body | Self::Name | Self::Service | Self::Source)
+        matches!(self, Self::Body | Self::Name | Self::Service)
     }
 }
 

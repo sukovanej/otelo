@@ -1,11 +1,11 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ops::ControlFlow;
 
-use anyhow::{Context, ensure};
+use anyhow::ensure;
+use otelo_indexed_storage::Severity;
 use otelo_indexed_storage::query::{
     LogGroup, LogGroups, LogLine, Logs, MAX_GROUPED_LOG_LINES, replace_values_in_message,
 };
-use otelo_indexed_storage::{LogSource, Severity};
 use otelo_query::{Query, Signal};
 use rusqlite::Row;
 
@@ -40,7 +40,7 @@ fn compile_log_query(reader: &Reader, query: &Query) -> anyhow::Result<(WhereCla
 }
 
 const LOG_LINE_COLUMNS: &str = "log.logged_at, resource.service, log.severity, log.body,
-    log.trace_id, log.span_id, log.attributes, log.source,
+    log.trace_id, log.span_id, log.attributes,
     resource.attributes AS resource_attributes";
 
 pub(super) fn explain_logs(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
@@ -86,8 +86,7 @@ fn log_line_from_row(row: &Row) -> anyhow::Result<LogLine> {
     let trace_id: Option<Vec<u8>> = row.get(4)?;
     let span_id: Option<Vec<u8>> = row.get(5)?;
     let attributes: String = row.get(6)?;
-    let source: String = row.get(7)?;
-    let resource: String = row.get(8)?;
+    let resource: String = row.get(7)?;
     Ok(LogLine {
         logged_at: timestamp_from_nanos(row.get(0)?),
         service: row.get(1)?,
@@ -97,8 +96,6 @@ fn log_line_from_row(row: &Row) -> anyhow::Result<LogLine> {
         span_id: span_id.map(span_id_from_blob).transpose()?,
         attributes: serde_json::from_str(&attributes)?,
         resource: serde_json::from_str(&resource)?,
-        source: LogSource::from_name(&source)
-            .with_context(|| format!("{source:?} is not the source of a log line"))?,
     })
 }
 

@@ -230,7 +230,6 @@ impl Compiler<'_> {
             BuiltinField::Body => format!("{record}.body"),
             BuiltinField::TraceId => format!("{record}.trace_id"),
             BuiltinField::SpanId => format!("{record}.span_id"),
-            BuiltinField::Source => format!("{record}.source"),
             BuiltinField::Name => format!("{record}.name"),
             BuiltinField::Kind => format!("{record}.kind"),
             BuiltinField::Status | BuiltinField::Error => format!("{record}.status"),
@@ -258,7 +257,6 @@ impl Compiler<'_> {
         match builtin_field {
             BuiltinField::Service
             | BuiltinField::Body
-            | BuiltinField::Source
             | BuiltinField::Name
             | BuiltinField::Unit => {
                 ensure_equality_operator(operator)?;
