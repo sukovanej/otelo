@@ -3,6 +3,8 @@ status: in_review
 created: 2026-10-03T14:56:31Z
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/34
 ---
 # Log in with a static password
 
