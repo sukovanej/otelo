@@ -1316,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "otelo"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-api"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-host"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "opentelemetry-proto",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-indexed-storage"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "jiff",
@@ -1398,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-indexed-storage-sqlite"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "jiff",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-journal"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "otelo-query",
@@ -1428,7 +1428,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-journal-files"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "crc32c",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-otlp"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-query"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "insta",
  "serde",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-state"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1495,7 +1495,7 @@ dependencies = [
 
 [[package]]
 name = "otelo-update"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "axum",

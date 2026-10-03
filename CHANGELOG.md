@@ -5,13 +5,24 @@ All notable changes to otelo are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.1...main)
+## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.2...main)
+
+## [0.0.2](https://github.com/sukovanej/otelo/compare/v0.0.1...v0.0.2) - 2026-10-04
 
 ### Added
 
 - `otelo spans --sort` and `otelo traces --sort` list the `newest`, `oldest`,
   `longest`, or `shortest` first, and `/api/spans` and `/api/traces` take the
   same `sort`. A click on Time or Duration on the traces page sorts by it.
+- The range picker has − and + beside its label. + takes Last hour to 2h, 3h,
+  and so on, and − goes back, down to 5 minutes.
+
+### Fixed
+
+- The daemon runs at most two API queries at once. On Linux, glibc kept a
+  memory arena for each of the eight queries a UI page sends, and otelo grew
+  from 16 MB to 86 MB in an hour and a half of use.
+- After a zoom on a chart, the selection no longer follows the pointer.
 
 ## [0.0.1](https://github.com/sukovanej/otelo/releases/tag/v0.0.1) - 2026-10-03
 
