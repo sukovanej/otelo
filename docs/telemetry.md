@@ -54,7 +54,6 @@ erDiagram
     blob trace_id
     blob span_id
     text attributes "JSON"
-    text source "otlp"
   }
   spans {
     blob trace_id "indexed"
@@ -205,7 +204,7 @@ root = true AND duration > 500ms AND NOT resource.host.name = "droplet"
 ```
 
 - A name is a built-in field of the signal, `resource.<key>` for a resource attribute, `attr.<key>` for an attribute named like a built-in field, or else a record attribute. A key with other characters goes in backticks.
-- Built-in fields. Logs: `service`, `level`, `body`, `trace_id`, `span_id`, `source`. Spans: `service`, `name`, `kind`, `status`, `error`, `duration`, `root`, `trace_id`, `span_id`. Metrics: `name`, `service`, `kind`, `unit`, and the labels as attributes.
+- Built-in fields. Logs: `service`, `level`, `body`, `trace_id`, `span_id`. Spans: `service`, `name`, `kind`, `status`, `error`, `duration`, `root`, `trace_id`, `span_id`. Metrics: `name`, `service`, `kind`, `unit`, and the labels as attributes.
 - Operators: `= != < <= > >=`, `in (…)`, `~` (words in a log body through FTS5, a substring elsewhere), `has(key)`, `AND`, `OR`, `NOT`, and parentheses. Terms next to each other join with `AND`.
 - A number also matches the same number sent as a string. `!=` and `NOT` keep the records that lack the attribute.
 
