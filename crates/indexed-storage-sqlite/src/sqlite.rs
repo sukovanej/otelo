@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    BatchInbox, IndexedAttribute, RangeQueries, Result, Storage, StorageSize, TimeRange,
+    BatchInbox, IndexSize, IndexedAttribute, RangeQueries, Result, Storage, TimeRange,
 };
 use otelo_query::Signal;
 
@@ -49,8 +49,8 @@ impl Storage for Sqlite {
             .start_at()
     }
 
-    fn size(&self) -> Result<StorageSize> {
-        Ok(StorageSize {
+    fn size(&self) -> Result<IndexSize> {
+        Ok(IndexSize {
             telemetry_bytes: size_of_database_in_bytes(
                 &self.config.directory.join(TELEMETRY_FILE_NAME),
             )?,

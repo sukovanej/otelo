@@ -10,15 +10,21 @@ use crate::query::{
 use crate::{IndexedAttribute, Result, SpanKind, TimeRange, TraceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StorageSize {
+pub struct IndexSize {
     pub telemetry_bytes: u64,
     pub state_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StorageSize {
+    pub journal_bytes: u64,
+    pub index: IndexSize,
 }
 
 pub trait Storage: Send + Sync {
     fn oldest_retained_at(&self, signal: Signal) -> i64;
 
-    fn size(&self) -> Result<StorageSize>;
+    fn size(&self) -> Result<IndexSize>;
 
     fn open_range(&self, range: TimeRange, time_limit: Duration) -> Result<Box<dyn RangeQueries>>;
 

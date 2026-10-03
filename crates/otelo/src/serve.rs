@@ -14,8 +14,9 @@ use crate::own::{self, Destination};
 use crate::ui;
 use otelo_api::{self as api, Api};
 use otelo_host::{Collector, HostIdentity};
-use otelo_indexed_storage::{Storage, now_unix_nanos};
+use otelo_indexed_storage::{Storage, StorageSize, now_unix_nanos};
 use otelo_indexed_storage_sqlite::Sqlite;
+use otelo_journal::Journal;
 use otelo_journal_files::JournalFiles;
 use otelo_otlp::Intake;
 
@@ -129,9 +130,10 @@ async fn serve_until_shutdown(
     let (journal, journal_threads) = JournalFiles::open(otelo_journal_files::Config::new(
         args.data_dir.join(JOURNAL_DIRECTORY_NAME),
     ))?;
+    let journal: Arc<dyn Journal> = journal;
     let (batch_sender, inbox) = otelo_indexed_storage::open_batch_channel(TELEMETRY_QUEUE_BATCHES);
     let writer = storage.spawn_writer(inbox)?;
-    let intake = Intake::new(journal, batch_sender);
+    let intake = Intake::new(Arc::clone(&journal), batch_sender);
     let storage: Arc<dyn Storage> = Arc::new(storage);
     let api = Api {
         storage: Arc::clone(&storage),
@@ -158,7 +160,7 @@ async fn serve_until_shutdown(
         serve_api,
         otelo_otlp::serve_http(otlp_http, intake.clone(), shutdown.clone()),
         otelo_otlp::serve_grpc(otlp_grpc, intake.clone(), shutdown.clone()),
-        collect_host_metrics(host, storage, intake.clone(), shutdown.clone()),
+        collect_host_metrics(host, storage, journal, intake.clone(), shutdown.clone()),
     )?;
     // The writer ends once the last sender is gone.
     drop(intake);
@@ -177,6 +179,7 @@ async fn serve_until_shutdown(
 async fn collect_host_metrics(
     host: HostIdentity,
     storage: Arc<dyn Storage>,
+    journal: Arc<dyn Journal>,
     intake: Intake,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
@@ -195,10 +198,10 @@ async fn collect_host_metrics(
     let mut recorded_at = now_unix_nanos();
     loop {
         let storage = Arc::clone(&storage);
+        let journal = Arc::clone(&journal);
         let (collector_after_reading, request) = tokio::task::spawn_blocking(move || {
-            let storage_size = storage
-                .size()
-                .inspect_err(|error| tracing::warn!("read the size of the storage: {error}"))
+            let storage_size = read_storage_size(storage.as_ref(), journal.as_ref())
+                .inspect_err(|error| tracing::warn!("read the size of the storage: {error:#}"))
                 .ok();
             let request = collector.collect_request(recorded_at, storage_size);
             (collector, request)
@@ -221,6 +224,13 @@ async fn collect_host_metrics(
             () = tokio::time::sleep(time_until_tick) => {}
         }
     }
+}
+
+fn read_storage_size(storage: &dyn Storage, journal: &dyn Journal) -> anyhow::Result<StorageSize> {
+    Ok(StorageSize {
+        journal_bytes: journal.size_in_bytes()?,
+        index: storage.size()?,
+    })
 }
 
 async fn bind_listener(addr: SocketAddr) -> anyhow::Result<TcpListener> {
