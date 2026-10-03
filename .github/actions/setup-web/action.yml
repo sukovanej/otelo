@@ -8,6 +8,10 @@ runs:
     - uses: jdx/mise-action@v5
       with:
         install_args: node pnpm
+    # mise puts the root of the pnpm install on PATH, and that root holds a `dist` directory, so a
+    # later `dist build` finds the directory instead of cargo-dist. A path added later goes first.
+    - shell: bash
+      run: echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
     - id: pnpm-store
       shell: bash
       run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
