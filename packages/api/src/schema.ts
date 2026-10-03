@@ -208,9 +208,9 @@ export interface paths {
         };
         /**
          * The services that sent spans or logs in the range, the most requests
-         *     first. A request is a span that enters the service: a root span, or a
-         *     span of the server or the consumer kind. Each service has its requests and
-         *     its logs over the range and in buckets of one step.
+         *     first. A request is a span of the server kind with
+         *     `http.request.method`. Each service has its requests and its logs over
+         *     the range and in buckets of one step, and the count of its spans.
          */
         get: operations["list_services"];
         put?: never;
@@ -230,78 +230,9 @@ export interface paths {
         };
         /**
          * One service: its requests and logs over the range and in buckets of one
-         *     step, and its requests by span name, the most first. A service without
-         *     telemetry in the range has none of either.
+         *     step. A service without telemetry in the range has none of either.
          */
         get: operations["get_service"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/services/{name}/call": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The calls of a service to one target that do one thing, of one kind:
-         *     over the range and in buckets of one step, the attributes of the newest
-         *     one, and the newest 50. A call without spans in the range has none.
-         */
-        get: operations["get_call"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/services/{name}/calls": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The calls a service makes, by what they go to: a span of the client or
-         *     the producer kind, or of a database system. A target is a database, a
-         *     host, an RPC service, or a message destination, read from the
-         *     OpenTelemetry attributes of the call. Each target has its calls over the
-         *     range and in buckets of one step, and by span name and kind, the most time
-         *     first. What a call does is its query with the values taken out, the
-         *     method and the path of an HTTP request with its ids taken out, or else
-         *     its span name.
-         */
-        get: operations["list_calls"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/services/{name}/operation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * One operation of a service: its requests over the range and in buckets of
-         *     one step, and the attributes of its newest request. An operation without
-         *     requests in the range has none.
-         */
-        get: operations["get_operation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -319,6 +250,29 @@ export interface paths {
         };
         /** Spans, newest first. */
         get: operations["list_spans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spans/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The spans that the query keeps, grouped by the values of the `by` names,
+         *     the most time first. Each group has the count, the failures, the total
+         *     time, and the latency percentiles of its spans, and the name and the
+         *     attributes of its newest span. The answer has the same numbers for all the
+         *     spans, over the range and in buckets of one step.
+         */
+        get: operations["list_span_groups"];
         put?: never;
         post?: never;
         delete?: never;
@@ -448,67 +402,6 @@ export interface components {
             /** @enum {string} */
             kind: "distribution";
         });
-        /** @description The calls of a service to one target that do one thing, over a range. */
-        CallDetail: components["schemas"]["OperationDetail"] & {
-            /**
-             * @description The terms of a span query that keep these calls, or more of them when
-             *     the summary comes from a query or a path with its values taken out.
-             *     Empty without calls in the range.
-             */
-            query: string;
-            /** @description The newest calls, newest first. */
-            spans: components["schemas"]["TraceSpan"][];
-            /** @description What the calls do, as [`CallOperation::summary`] says. */
-            summary: string;
-            target: components["schemas"]["TargetKey"];
-        };
-        /** @description The calls to a target that do the same thing. */
-        CallOperation: {
-            /** @description The attributes of its newest call. */
-            attributes: components["schemas"]["Attributes"];
-            calls: components["schemas"]["Requests"];
-            /**
-             * Format: int32
-             * @description The OpenTelemetry span kind.
-             */
-            kind: number;
-            /** @description The span name of its newest call. */
-            name: string;
-            /**
-             * @description What the calls do: `db.query.summary`, or the query with its values
-             *     as `?`, such as `SELECT * FROM users WHERE id = ?`, for a database;
-             *     the method and `url.template`, or the path with its ids as `{id}`,
-             *     such as `GET /users/{id}`, for HTTP; and the span name for the rest.
-             */
-            summary: string;
-        };
-        /** @description The calls a service made in a range, by what they went to. */
-        Calls: {
-            /** @description The calls of every step, oldest first. */
-            buckets: components["schemas"]["RequestBucket"][];
-            /** @description Every call of the service. */
-            calls: components["schemas"]["Requests"];
-            /** Format: date-time */
-            end_at: string;
-            service: string;
-            /**
-             * Format: date-time
-             * @description The range, after the retention capped it.
-             */
-            start_at: string;
-            /**
-             * Format: int64
-             * @description The length of a bucket in nanoseconds.
-             */
-            step_ns: number;
-            /** @description What the service called, the most time first. */
-            targets: components["schemas"]["Target"][];
-            /**
-             * @description The targets have more operations than the limit let through, which
-             *     kept the ones with the most time.
-             */
-            truncated: boolean;
-        };
         /**
          * @description What the text of a suggestion is.
          * @enum {string}
@@ -783,53 +676,6 @@ export interface components {
              */
             truncated: boolean;
         };
-        /** @description The requests of a service by the name of their span. */
-        Operation: {
-            /**
-             * @description The attributes of its newest request, which tell what the operation
-             *     is, such as `http.request.method` and `http.route`.
-             */
-            attributes: components["schemas"]["Attributes"];
-            /**
-             * Format: int32
-             * @description The OpenTelemetry span kind.
-             */
-            kind: number;
-            /** @description The span name, such as `GET /users/{id}`. */
-            name: string;
-            requests: components["schemas"]["Requests"];
-        };
-        /**
-         * @description One operation of a service in a range: its requests over the range and
-         *     in buckets of one step.
-         */
-        OperationDetail: {
-            /** @description The attributes of its newest request. Empty when the range has none. */
-            attributes: components["schemas"]["Attributes"];
-            /** @description Every step of the range, oldest first. */
-            buckets: components["schemas"]["RequestBucket"][];
-            /** Format: date-time */
-            end_at: string;
-            /**
-             * Format: int32
-             * @description The OpenTelemetry span kind.
-             */
-            kind: number;
-            /** @description The span name. */
-            name: string;
-            requests: components["schemas"]["Requests"];
-            service: string;
-            /**
-             * Format: date-time
-             * @description The range, after the retention capped it.
-             */
-            start_at: string;
-            /**
-             * Format: int64
-             * @description The length of a bucket in nanoseconds.
-             */
-            step_ns: number;
-        };
         /** @description Percentiles of the values a histogram recorded. */
         Percentiles: {
             /** Format: double */
@@ -838,34 +684,6 @@ export interface components {
             p90: number;
             /** Format: double */
             p99: number;
-        };
-        /** @description The requests of one step. */
-        RequestBucket: {
-            requests: components["schemas"]["Requests"];
-            /**
-             * Format: date-time
-             * @description The start of the step.
-             */
-            start_at: string;
-        };
-        /**
-         * @description Spans that enter a service: roots, and spans of the server or the
-         *     consumer kind.
-         */
-        Requests: {
-            /** Format: int64 */
-            count: number;
-            /**
-             * Format: int64
-             * @description The failed ones.
-             */
-            errors: number;
-            latency: null | components["schemas"]["Latency"];
-            /**
-             * Format: int64
-             * @description Their durations added up.
-             */
-            total_ns: number;
         };
         /**
          * @description Which points a metric query reads.
@@ -896,14 +714,12 @@ export interface components {
             service: string;
             unit: string;
         };
-        /** @description One service in a range: its stats over time and by operation. */
+        /** @description One service in a range: its stats over time. */
         Service: {
             /** @description Every step of the range, oldest first. */
             buckets: components["schemas"]["ServiceBucket"][];
             /** Format: date-time */
             end_at: string;
-            /** @description The requests by span name, the most first. */
-            operations: components["schemas"]["Operation"][];
             /**
              * @description The attributes of the newest resource of the service. Empty when the
              *     range has none of its telemetry.
@@ -921,8 +737,6 @@ export interface components {
              * @description The length of a bucket in nanoseconds.
              */
             step_ns: number;
-            /** @description The service has more operations than the limit let through. */
-            truncated: boolean;
         };
         /** @description The requests and the logs of a service in one step. */
         ServiceBucket: {
@@ -930,14 +744,17 @@ export interface components {
             error_logs: number;
             /** Format: int64 */
             logs: number;
-            requests: components["schemas"]["Requests"];
+            requests: components["schemas"]["SpanStats"];
             /**
              * Format: date-time
              * @description The start of the step.
              */
             start_at: string;
         };
-        /** @description The requests and the logs of a service in a range. */
+        /**
+         * @description The requests and the logs of a service in a range. A request is a span of
+         *     the server kind with `http.request.method`.
+         */
         ServiceStats: {
             /**
              * Format: int64
@@ -946,7 +763,12 @@ export interface components {
             error_logs: number;
             /** Format: int64 */
             logs: number;
-            requests: components["schemas"]["Requests"];
+            requests: components["schemas"]["SpanStats"];
+            /**
+             * Format: int64
+             * @description Every span of the service, of any kind.
+             */
+            spans: number;
         };
         ServiceSummary: {
             /** @description Every step of the range, oldest first. */
@@ -982,6 +804,15 @@ export interface components {
          * @enum {string}
          */
         Signal: "logs" | "spans" | "metrics";
+        /** @description The spans of one step. */
+        SpanBucket: {
+            spans: components["schemas"]["SpanStats"];
+            /**
+             * Format: date-time
+             * @description The start of the step.
+             */
+            start_at: string;
+        };
         /** @description Something that happened at one time in a span, such as an exception. */
         SpanEvent: {
             attributes: components["schemas"]["Attributes"];
@@ -991,6 +822,65 @@ export interface components {
              * @description Nanoseconds since the Unix epoch.
              */
             occurred_at: number;
+        };
+        /** @description The spans that share the values of the grouping fields. */
+        SpanGroup: {
+            /** @description The attributes of its newest span. */
+            attributes: components["schemas"]["Attributes"];
+            /** @description The span name of its newest span. */
+            name: string;
+            spans: components["schemas"]["SpanStats"];
+            /**
+             * @description The values of the grouping fields, by the fields as a query writes
+             *     them, such as `http.route`. A field the spans lack is missing.
+             */
+            values: components["schemas"]["Attributes"];
+        };
+        /**
+         * @description The spans a query keeps in a range, grouped by the values of some fields,
+         *     the most time first.
+         */
+        SpanGroups: {
+            /** @description The spans of every step, oldest first. */
+            buckets: components["schemas"]["SpanBucket"][];
+            /** Format: date-time */
+            end_at: string;
+            groups: components["schemas"]["SpanGroup"][];
+            /** @description Every span the query keeps. */
+            spans: components["schemas"]["SpanStats"];
+            /**
+             * Format: date-time
+             * @description The range, after the retention capped it.
+             */
+            start_at: string;
+            /**
+             * Format: int64
+             * @description The length of a bucket in nanoseconds.
+             */
+            step_ns: number;
+            /**
+             * @description More groups match than the limit let through, which kept the ones
+             *     with the most time.
+             */
+            truncated: boolean;
+            /** @description The attributes the query compares that have no index. */
+            unindexed: string[];
+        };
+        /** @description The count, the failures, and the durations of some spans. */
+        SpanStats: {
+            /** Format: int64 */
+            count: number;
+            /**
+             * Format: int64
+             * @description The failed ones.
+             */
+            errors: number;
+            latency: null | components["schemas"]["Latency"];
+            /**
+             * Format: int64
+             * @description Their durations added up.
+             */
+            total_ns: number;
         };
         /** @description Spans, newest first. */
         Spans: {
@@ -1012,43 +902,6 @@ export interface components {
             /** @description The text to put in place of the characters from `start` to `end`. */
             text: string;
         };
-        /** @description The calls to one target. */
-        Target: components["schemas"]["TargetKey"] & {
-            /** @description The calls of every step, oldest first. */
-            buckets: components["schemas"]["RequestBucket"][];
-            calls: components["schemas"]["Requests"];
-            /** @description The calls by summary and kind, the most time first. */
-            operations: components["schemas"]["CallOperation"][];
-            /**
-             * @description The terms of a span query that keep the calls to the target, such as
-             *     `db.system.name = "postgresql"`, from the attributes of one of them.
-             *     Empty when no attribute tells the target.
-             */
-            query: string;
-        };
-        /**
-         * @description What a call goes to: a database, a host, an RPC service, or a message
-         *     destination.
-         */
-        TargetKey: {
-            /**
-             * @description The database, the host with a port that is not 80 or 443, the RPC
-             *     service, the destination, or the `peer.service` of other calls.
-             *     Null when the call does not say.
-             */
-            name: string | null;
-            /**
-             * @description Such as `postgresql`, `grpc`, or `kafka`. Null for HTTP, and for
-             *     a target of no known type.
-             */
-            system: string | null;
-            type: components["schemas"]["TargetType"];
-        };
-        /**
-         * @description What kind of thing a call goes to.
-         * @enum {string}
-         */
-        TargetType: "database" | "http" | "rpc" | "messaging" | "other";
         /**
          * @description What a point of a series counts: `cumulative` since the series started, or
          *     `delta` since the point before.
@@ -1548,11 +1401,11 @@ export interface operations {
                 since?: string;
                 /** @description The end of the range, in the form of `since`. Now when missing. */
                 until?: string;
-                /** @description The most services, or the most operations of one service, to return. */
+                /** @description The most services to return. */
                 limit?: number;
                 /**
                  * @description The length of a bucket, such as `1m`. One that makes 60 buckets at
-                 *     most for the list and 120 for one service when missing.
+                 *     most when missing.
                  */
                 step?: string;
             };
@@ -1590,11 +1443,9 @@ export interface operations {
                 since?: string;
                 /** @description The end of the range, in the form of `since`. Now when missing. */
                 until?: string;
-                /** @description The most services, or the most operations of one service, to return. */
-                limit?: number;
                 /**
-                 * @description The length of a bucket, such as `1m`. One that makes 60 buckets at
-                 *     most for the list and 120 for one service when missing.
+                 * @description The length of a bucket, such as `1m`. One that makes 120 buckets at
+                 *     most when missing.
                  */
                 step?: string;
             };
@@ -1613,160 +1464,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Service"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-        };
-    };
-    get_call: {
-        parameters: {
-            query: {
-                /** @description What the target is. */
-                type: "database" | "http" | "rpc" | "messaging" | "other";
-                /**
-                 * @description The system of the target, such as `postgresql`. Missing for a
-                 *     target without one.
-                 */
-                system?: string;
-                /**
-                 * @description The name of the target, such as a database or a host. Missing for a
-                 *     target without one.
-                 */
-                target?: string;
-                /**
-                 * @description What the calls do, such as `SELECT * FROM users WHERE id = ?`, as
-                 *     `/api/services/{name}/calls` names it.
-                 */
-                summary: string;
-                /** @description The OpenTelemetry span kind of the call, such as 3 for client. */
-                kind: number;
-                /**
-                 * @description The start of the range: a duration before now, such as `1h`, or an
-                 *     RFC 3339 timestamp. One hour before `until` when missing.
-                 */
-                since?: string;
-                /** @description The end of the range, in the form of `since`. Now when missing. */
-                until?: string;
-                /**
-                 * @description The length of a bucket, such as `1m`. One that makes 120 buckets at
-                 *     most when missing.
-                 */
-                step?: string;
-            };
-            header?: never;
-            path: {
-                /** @description The name of the service */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CallDetail"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-        };
-    };
-    list_calls: {
-        parameters: {
-            query?: {
-                /**
-                 * @description The start of the range: a duration before now, such as `1h`, or an
-                 *     RFC 3339 timestamp. One hour before `until` when missing.
-                 */
-                since?: string;
-                /** @description The end of the range, in the form of `since`. Now when missing. */
-                until?: string;
-                /** @description The most services, or the most operations of one service, to return. */
-                limit?: number;
-                /**
-                 * @description The length of a bucket, such as `1m`. One that makes 60 buckets at
-                 *     most for the list and 120 for one service when missing.
-                 */
-                step?: string;
-            };
-            header?: never;
-            path: {
-                /** @description The name of the service */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Calls"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-        };
-    };
-    get_operation: {
-        parameters: {
-            query: {
-                /** @description The span name of the operation, such as `GET /users/{id}`. */
-                operation: string;
-                /** @description The OpenTelemetry span kind of the operation, such as 2 for server. */
-                kind: number;
-                /**
-                 * @description The start of the range: a duration before now, such as `1h`, or an
-                 *     RFC 3339 timestamp. One hour before `until` when missing.
-                 */
-                since?: string;
-                /** @description The end of the range, in the form of `since`. Now when missing. */
-                until?: string;
-                /**
-                 * @description The length of a bucket, such as `1m`. One that makes 120 buckets at
-                 *     most when missing.
-                 */
-                step?: string;
-            };
-            header?: never;
-            path: {
-                /** @description The name of the service */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationDetail"];
                 };
             };
             400: {
@@ -1809,6 +1506,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Spans"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_span_groups: {
+        parameters: {
+            query?: {
+                /**
+                 * @description The start of the range: a duration before now, such as `1h`, or an
+                 *     RFC 3339 timestamp. One hour before `until` when missing.
+                 */
+                since?: string;
+                /** @description The end of the range, in the form of `since`. Now when missing. */
+                until?: string;
+                /** @description The most groups to return. */
+                limit?: number;
+                /**
+                 * @description The spans to keep, such as `service = "api" kind = server`. Every span
+                 *     when missing.
+                 */
+                q?: string;
+                /**
+                 * @description The names to group the spans by, separated by commas: attributes,
+                 *     `service`, `name`, or `resource.<key>`, such as
+                 *     `http.request.method,http.route`. All spans are one group when
+                 *     missing.
+                 */
+                by?: string;
+                /**
+                 * @description The length of a bucket, such as `1m`. One that makes 120 buckets at
+                 *     most when missing.
+                 */
+                step?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpanGroups"];
                 };
             };
             400: {

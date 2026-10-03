@@ -18,7 +18,7 @@ enum Command {
     Reindex(reindex::ReindexArgs),
     /// Print log lines, grouped by message template unless --raw
     Logs(cli::LogsArgs),
-    /// List spans, newest first
+    /// List spans, newest first, or their groups with --by
     Spans(cli::SpansArgs),
     /// List traces by their root span, newest first
     Traces(cli::TracesArgs),
@@ -30,10 +30,9 @@ enum Command {
     Metric(cli::MetricArgs),
     /// List the services with their requests, errors, latency, and logs
     Services(cli::ServicesArgs),
-    /// Print the requests, errors, latency, and logs of one service, by operation
+    /// Print the requests, errors, latency, and logs of one service, with its HTTP routes and
+    /// database queries
     Service(cli::ServiceArgs),
-    /// Print the calls one service makes, by database, host, or other target, and by operation
-    Calls(cli::CallsArgs),
     /// List the attributes a query can read, with their types
     Attributes(cli::AttributesArgs),
     /// Suggest what can go at the cursor of a query
@@ -57,7 +56,6 @@ fn main() -> anyhow::Result<()> {
         Command::Metric(args) => cli::print_metric_series(&args),
         Command::Services(args) => cli::print_services(&args),
         Command::Service(args) => cli::print_service(&args),
-        Command::Calls(args) => cli::print_calls(&args),
         Command::Attributes(args) => cli::print_attributes(&args),
         Command::Complete(args) => cli::print_completions(&args),
         Command::Index(args) => cli::change_and_print_indexes(&args),

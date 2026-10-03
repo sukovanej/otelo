@@ -7,7 +7,6 @@ use otelo_query::{BuiltinField, Expression, Field, Operator, Query, Signal};
 use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
-use super::services::SpanRowid;
 use super::{
     WhereClause, span_id_from_blob, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
@@ -44,27 +43,6 @@ fn select_spans(where_clause: &WhereClause) -> String {
     )
 }
 
-impl Reader {
-    pub(super) fn read_spans_at(&self, rowids: &[SpanRowid]) -> anyhow::Result<Vec<TraceSpan>> {
-        if rowids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let rowid_list = rowids
-            .iter()
-            .map(|rowid| rowid.0.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let sql = format!(
-            "SELECT {SPAN_COLUMNS}
-             FROM spans span
-             JOIN resources resource ON resource.id = span.resource_id
-             WHERE span.rowid IN ({rowid_list})
-             ORDER BY span.started_at DESC"
-        );
-        self.collect_rows(&sql, &WhereClause::new(), trace_span_from_row)
-    }
-}
-
 fn trace_span_from_row(row: &Row) -> anyhow::Result<TraceSpan> {
     let parent_span_id: Option<Vec<u8>> = row.get(2)?;
     let attributes: String = row.get(9)?;
@@ -86,7 +64,7 @@ fn trace_span_from_row(row: &Row) -> anyhow::Result<TraceSpan> {
     })
 }
 
-fn compile_span_query(
+pub(super) fn compile_span_query(
     reader: &Reader,
     query: &Query,
 ) -> anyhow::Result<(WhereClause, Vec<String>)> {

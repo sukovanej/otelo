@@ -2,8 +2,6 @@ import type { components, paths } from "./schema";
 
 export type AttributeValue = Schemas["AttributeValue"];
 export type Attributes = Schemas["Attributes"];
-export type CallOperation = Schemas["CallOperation"];
-export type Calls = Schemas["Calls"];
 export type FieldBody = Schemas["FieldBody"];
 export type FieldSource = FieldBody["source"];
 export type IndexedSignal = Schemas["IndexedSignal"];
@@ -13,18 +11,16 @@ export type LogLine = Schemas["LogLine"];
 export type Logs = Schemas["Logs"];
 export type MetricList = Schemas["MetricList"];
 export type MetricSeries = Schemas["MetricSeries"];
-export type Operation = Schemas["Operation"];
-export type OperationDetail = Schemas["OperationDetail"];
-export type RequestBucket = Schemas["RequestBucket"];
 export type SeriesGroup = Schemas["SeriesGroup"];
 export type SeriesInfo = Schemas["SeriesInfo"];
 export type Service = Schemas["Service"];
 export type ServiceSummary = Schemas["ServiceSummary"];
 export type Signal = Schemas["Signal"];
+export type SpanBucket = Schemas["SpanBucket"];
+export type SpanGroup = Schemas["SpanGroup"];
+export type SpanGroups = Schemas["SpanGroups"];
+export type SpanStats = Schemas["SpanStats"];
 export type Spans = Schemas["Spans"];
-export type Target = Schemas["Target"];
-export type TargetKey = Schemas["TargetKey"];
-export type TargetType = Schemas["TargetType"];
 export type TraceSpan = Schemas["TraceSpan"];
 export type TraceSummary = Schemas["TraceSummary"];
 export type Traces = Schemas["Traces"];
@@ -73,6 +69,13 @@ export const getLogGroups = (query: GetQuery<"/api/logs/groups">, signal?: Abort
 export const getSpans = (query: GetQuery<"/api/spans">, signal?: AbortSignal) =>
   requestJson<OkBody<"/api/spans", "get">>("GET", `/api/spans${toQueryString(query)}`, signal);
 
+export const getSpanGroups = (query: GetQuery<"/api/spans/groups">, signal?: AbortSignal) =>
+  requestJson<OkBody<"/api/spans/groups", "get">>(
+    "GET",
+    `/api/spans/groups${toQueryString(query)}`,
+    signal,
+  );
+
 export const getTraces = (query: GetQuery<"/api/traces">, signal?: AbortSignal) =>
   requestJson<OkBody<"/api/traces", "get">>("GET", `/api/traces${toQueryString(query)}`, signal);
 
@@ -116,39 +119,6 @@ export const getService = (
   requestJson<OkBody<"/api/services/{name}", "get">>(
     "GET",
     `/api/services/${encodeURIComponent(name)}${toQueryString(query)}`,
-    signal,
-  );
-
-export const getOperation = (
-  service: string,
-  query: GetQuery<"/api/services/{name}/operation">,
-  signal?: AbortSignal,
-) =>
-  requestJson<OkBody<"/api/services/{name}/operation", "get">>(
-    "GET",
-    `/api/services/${encodeURIComponent(service)}/operation${toQueryString(query)}`,
-    signal,
-  );
-
-export const getCalls = (
-  service: string,
-  query: GetQuery<"/api/services/{name}/calls">,
-  signal?: AbortSignal,
-) =>
-  requestJson<OkBody<"/api/services/{name}/calls", "get">>(
-    "GET",
-    `/api/services/${encodeURIComponent(service)}/calls${toQueryString(query)}`,
-    signal,
-  );
-
-export const getCall = (
-  service: string,
-  query: GetQuery<"/api/services/{name}/call">,
-  signal?: AbortSignal,
-) =>
-  requestJson<OkBody<"/api/services/{name}/call", "get">>(
-    "GET",
-    `/api/services/${encodeURIComponent(service)}/call${toQueryString(query)}`,
     signal,
   );
 

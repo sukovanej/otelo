@@ -584,7 +584,7 @@
     },
     "/api/services": {
       "get": {
-        "summary": "The services that sent spans or logs in the range, the most requests\nfirst. A request is a span that enters the service: a root span, or a\nspan of the server or the consumer kind. Each service has its requests and\nits logs over the range and in buckets of one step.",
+        "summary": "The services that sent spans or logs in the range, the most requests\nfirst. A request is a span of the server kind with\n`http.request.method`. Each service has its requests and its logs over\nthe range and in buckets of one step, and the count of its spans.",
         "operationId": "list_services",
         "parameters": [
           {
@@ -608,7 +608,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "The most services, or the most operations of one service, to return.",
+            "description": "The most services to return.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -618,7 +618,7 @@
           {
             "name": "step",
             "in": "query",
-            "description": "The length of a bucket, such as `1m`. One that makes 60 buckets at\nmost for the list and 120 for one service when missing.",
+            "description": "The length of a bucket, such as `1m`. One that makes 60 buckets at\nmost when missing.",
             "required": false,
             "schema": {
               "type": "string"
@@ -651,7 +651,7 @@
     },
     "/api/services/{name}": {
       "get": {
-        "summary": "One service: its requests and logs over the range and in buckets of one\nstep, and its requests by span name, the most first. A service without\ntelemetry in the range has none of either.",
+        "summary": "One service: its requests and logs over the range and in buckets of one\nstep. A service without telemetry in the range has none of either.",
         "operationId": "get_service",
         "parameters": [
           {
@@ -682,19 +682,9 @@
             }
           },
           {
-            "name": "limit",
-            "in": "query",
-            "description": "The most services, or the most operations of one service, to return.",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          {
             "name": "step",
             "in": "query",
-            "description": "The length of a bucket, such as `1m`. One that makes 60 buckets at\nmost for the list and 120 for one service when missing.",
+            "description": "The length of a bucket, such as `1m`. One that makes 120 buckets at\nmost when missing.",
             "required": false,
             "schema": {
               "type": "string"
@@ -708,287 +698,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Service"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/services/{name}/call": {
-      "get": {
-        "summary": "The calls of a service to one target that do one thing, of one kind:\nover the range and in buckets of one step, the attributes of the newest\none, and the newest 50. A call without spans in the range has none.",
-        "operationId": "get_call",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "The name of the service",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "type",
-            "in": "query",
-            "description": "What the target is.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "What kind of thing a call goes to.",
-              "enum": [
-                "database",
-                "http",
-                "rpc",
-                "messaging",
-                "other"
-              ]
-            }
-          },
-          {
-            "name": "system",
-            "in": "query",
-            "description": "The system of the target, such as `postgresql`. Missing for a\ntarget without one.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "target",
-            "in": "query",
-            "description": "The name of the target, such as a database or a host. Missing for a\ntarget without one.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "summary",
-            "in": "query",
-            "description": "What the calls do, such as `SELECT * FROM users WHERE id = ?`, as\n`/api/services/{name}/calls` names it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "description": "The OpenTelemetry span kind of the call, such as 3 for client.",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int32"
-            }
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "description": "The start of the range: a duration before now, such as `1h`, or an\nRFC 3339 timestamp. One hour before `until` when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "until",
-            "in": "query",
-            "description": "The end of the range, in the form of `since`. Now when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "step",
-            "in": "query",
-            "description": "The length of a bucket, such as `1m`. One that makes 120 buckets at\nmost when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CallDetail"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/services/{name}/calls": {
-      "get": {
-        "summary": "The calls a service makes, by what they go to: a span of the client or\nthe producer kind, or of a database system. A target is a database, a\nhost, an RPC service, or a message destination, read from the\nOpenTelemetry attributes of the call. Each target has its calls over the\nrange and in buckets of one step, and by span name and kind, the most time\nfirst. What a call does is its query with the values taken out, the\nmethod and the path of an HTTP request with its ids taken out, or else\nits span name.",
-        "operationId": "list_calls",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "The name of the service",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "description": "The start of the range: a duration before now, such as `1h`, or an\nRFC 3339 timestamp. One hour before `until` when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "until",
-            "in": "query",
-            "description": "The end of the range, in the form of `since`. Now when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "The most services, or the most operations of one service, to return.",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "step",
-            "in": "query",
-            "description": "The length of a bucket, such as `1m`. One that makes 60 buckets at\nmost for the list and 120 for one service when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Calls"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/services/{name}/operation": {
-      "get": {
-        "summary": "One operation of a service: its requests over the range and in buckets of\none step, and the attributes of its newest request. An operation without\nrequests in the range has none.",
-        "operationId": "get_operation",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "description": "The name of the service",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "operation",
-            "in": "query",
-            "description": "The span name of the operation, such as `GET /users/{id}`.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "description": "The OpenTelemetry span kind of the operation, such as 2 for server.",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int32"
-            }
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "description": "The start of the range: a duration before now, such as `1h`, or an\nRFC 3339 timestamp. One hour before `until` when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "until",
-            "in": "query",
-            "description": "The end of the range, in the form of `since`. Now when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "step",
-            "in": "query",
-            "description": "The length of a bucket, such as `1m`. One that makes 120 buckets at\nmost when missing.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OperationDetail"
                 }
               }
             }
@@ -1056,6 +765,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Spans"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spans/groups": {
+      "get": {
+        "summary": "The spans that the query keeps, grouped by the values of the `by` names,\nthe most time first. Each group has the count, the failures, the total\ntime, and the latency percentiles of its spans, and the name and the\nattributes of its newest span. The answer has the same numbers for all the\nspans, over the range and in buckets of one step.",
+        "operationId": "list_span_groups",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "The start of the range: a duration before now, such as `1h`, or an\nRFC 3339 timestamp. One hour before `until` when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "The end of the range, in the form of `since`. Now when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most groups to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "The spans to keep, such as `service = \"api\" kind = server`. Every span\nwhen missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "by",
+            "in": "query",
+            "description": "The names to group the spans by, separated by commas: attributes,\n`service`, `name`, or `resource.<key>`, such as\n`http.request.method,http.route`. All spans are one group when\nmissing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "step",
+            "in": "query",
+            "description": "The length of a bucket, such as `1m`. One that makes 120 buckets at\nmost when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpanGroups"
                 }
               }
             }
@@ -1417,132 +1211,6 @@
           }
         ],
         "description": "What the points of a step say beyond their values.\n\n`none` for a gauge and an updown, and for a step with only the first\npoint of a cumulative series, which has nothing to count from. `rate` is\nhow much a counter grew per second: its increase between neighbouring\npoints, over the time between them. A value that goes down is a restart,\nand the increase counts from zero. `distribution` is the merged buckets\nof a histogram with percentile estimates."
-      },
-      "CallDetail": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/OperationDetail",
-            "description": "The calls, as the requests of an operation named after the span name\nof the newest one."
-          },
-          {
-            "type": "object",
-            "required": [
-              "target",
-              "summary",
-              "query",
-              "spans"
-            ],
-            "properties": {
-              "query": {
-                "type": "string",
-                "description": "The terms of a span query that keep these calls, or more of them when\nthe summary comes from a query or a path with its values taken out.\nEmpty without calls in the range."
-              },
-              "spans": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/TraceSpan"
-                },
-                "description": "The newest calls, newest first."
-              },
-              "summary": {
-                "type": "string",
-                "description": "What the calls do, as [`CallOperation::summary`] says."
-              },
-              "target": {
-                "$ref": "#/components/schemas/TargetKey"
-              }
-            }
-          }
-        ],
-        "description": "The calls of a service to one target that do one thing, over a range."
-      },
-      "CallOperation": {
-        "type": "object",
-        "description": "The calls to a target that do the same thing.",
-        "required": [
-          "summary",
-          "name",
-          "kind",
-          "attributes",
-          "calls"
-        ],
-        "properties": {
-          "attributes": {
-            "$ref": "#/components/schemas/Attributes",
-            "description": "The attributes of its newest call."
-          },
-          "calls": {
-            "$ref": "#/components/schemas/Requests"
-          },
-          "kind": {
-            "type": "integer",
-            "format": "int32",
-            "description": "The OpenTelemetry span kind."
-          },
-          "name": {
-            "type": "string",
-            "description": "The span name of its newest call."
-          },
-          "summary": {
-            "type": "string",
-            "description": "What the calls do: `db.query.summary`, or the query with its values\nas `?`, such as `SELECT * FROM users WHERE id = ?`, for a database;\nthe method and `url.template`, or the path with its ids as `{id}`,\nsuch as `GET /users/{id}`, for HTTP; and the span name for the rest."
-          }
-        }
-      },
-      "Calls": {
-        "type": "object",
-        "description": "The calls a service made in a range, by what they went to.",
-        "required": [
-          "service",
-          "start_at",
-          "end_at",
-          "step_ns",
-          "calls",
-          "buckets",
-          "targets",
-          "truncated"
-        ],
-        "properties": {
-          "buckets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RequestBucket"
-            },
-            "description": "The calls of every step, oldest first."
-          },
-          "calls": {
-            "$ref": "#/components/schemas/Requests",
-            "description": "Every call of the service."
-          },
-          "end_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "service": {
-            "type": "string"
-          },
-          "start_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "The range, after the retention capped it."
-          },
-          "step_ns": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The length of a bucket in nanoseconds."
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Target"
-            },
-            "description": "What the service called, the most time first."
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "The targets have more operations than the limit let through, which\nkept the ones with the most time."
-          }
-        }
       },
       "CompletionKind": {
         "type": "string",
@@ -2234,91 +1902,6 @@
           }
         }
       },
-      "Operation": {
-        "type": "object",
-        "description": "The requests of a service by the name of their span.",
-        "required": [
-          "name",
-          "kind",
-          "attributes",
-          "requests"
-        ],
-        "properties": {
-          "attributes": {
-            "$ref": "#/components/schemas/Attributes",
-            "description": "The attributes of its newest request, which tell what the operation\nis, such as `http.request.method` and `http.route`."
-          },
-          "kind": {
-            "type": "integer",
-            "format": "int32",
-            "description": "The OpenTelemetry span kind."
-          },
-          "name": {
-            "type": "string",
-            "description": "The span name, such as `GET /users/{id}`."
-          },
-          "requests": {
-            "$ref": "#/components/schemas/Requests"
-          }
-        }
-      },
-      "OperationDetail": {
-        "type": "object",
-        "description": "One operation of a service in a range: its requests over the range and\nin buckets of one step.",
-        "required": [
-          "service",
-          "name",
-          "kind",
-          "attributes",
-          "start_at",
-          "end_at",
-          "step_ns",
-          "requests",
-          "buckets"
-        ],
-        "properties": {
-          "attributes": {
-            "$ref": "#/components/schemas/Attributes",
-            "description": "The attributes of its newest request. Empty when the range has none."
-          },
-          "buckets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RequestBucket"
-            },
-            "description": "Every step of the range, oldest first."
-          },
-          "end_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "kind": {
-            "type": "integer",
-            "format": "int32",
-            "description": "The OpenTelemetry span kind."
-          },
-          "name": {
-            "type": "string",
-            "description": "The span name."
-          },
-          "requests": {
-            "$ref": "#/components/schemas/Requests"
-          },
-          "service": {
-            "type": "string"
-          },
-          "start_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "The range, after the retention capped it."
-          },
-          "step_ns": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The length of a bucket in nanoseconds."
-          }
-        }
-      },
       "Percentiles": {
         "type": "object",
         "description": "Percentiles of the values a histogram recorded.",
@@ -2339,63 +1922,6 @@
           "p99": {
             "type": "number",
             "format": "double"
-          }
-        }
-      },
-      "RequestBucket": {
-        "type": "object",
-        "description": "The requests of one step.",
-        "required": [
-          "start_at",
-          "requests"
-        ],
-        "properties": {
-          "requests": {
-            "$ref": "#/components/schemas/Requests"
-          },
-          "start_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "The start of the step."
-          }
-        }
-      },
-      "Requests": {
-        "type": "object",
-        "description": "Spans that enter a service: roots, and spans of the server or the\nconsumer kind.",
-        "required": [
-          "count",
-          "errors",
-          "total_ns",
-          "latency"
-        ],
-        "properties": {
-          "count": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "errors": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The failed ones.",
-            "minimum": 0
-          },
-          "latency": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Latency",
-                "description": "Estimates of the percentiles of their durations, off by 1% at most.\n`None` without requests."
-              }
-            ]
-          },
-          "total_ns": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Their durations added up."
           }
         }
       },
@@ -2476,7 +2002,7 @@
       },
       "Service": {
         "type": "object",
-        "description": "One service in a range: its stats over time and by operation.",
+        "description": "One service in a range: its stats over time.",
         "required": [
           "service",
           "resource",
@@ -2484,9 +2010,7 @@
           "end_at",
           "step_ns",
           "stats",
-          "buckets",
-          "operations",
-          "truncated"
+          "buckets"
         ],
         "properties": {
           "buckets": {
@@ -2499,13 +2023,6 @@
           "end_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "operations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Operation"
-            },
-            "description": "The requests by span name, the most first."
           },
           "resource": {
             "$ref": "#/components/schemas/Attributes",
@@ -2526,10 +2043,6 @@
             "type": "integer",
             "format": "int64",
             "description": "The length of a bucket in nanoseconds."
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "The service has more operations than the limit let through."
           }
         }
       },
@@ -2554,7 +2067,7 @@
             "minimum": 0
           },
           "requests": {
-            "$ref": "#/components/schemas/Requests"
+            "$ref": "#/components/schemas/SpanStats"
           },
           "start_at": {
             "type": "string",
@@ -2565,9 +2078,10 @@
       },
       "ServiceStats": {
         "type": "object",
-        "description": "The requests and the logs of a service in a range.",
+        "description": "The requests and the logs of a service in a range. A request is a span of\nthe server kind with `http.request.method`.",
         "required": [
           "requests",
+          "spans",
           "logs",
           "error_logs"
         ],
@@ -2584,7 +2098,13 @@
             "minimum": 0
           },
           "requests": {
-            "$ref": "#/components/schemas/Requests"
+            "$ref": "#/components/schemas/SpanStats"
+          },
+          "spans": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Every span of the service, of any kind.",
+            "minimum": 0
           }
         }
       },
@@ -2662,6 +2182,24 @@
           "metrics"
         ]
       },
+      "SpanBucket": {
+        "type": "object",
+        "description": "The spans of one step.",
+        "required": [
+          "start_at",
+          "spans"
+        ],
+        "properties": {
+          "spans": {
+            "$ref": "#/components/schemas/SpanStats"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The start of the step."
+          }
+        }
+      },
       "SpanEvent": {
         "type": "object",
         "description": "Something that happened at one time in a span, such as an exception.",
@@ -2681,6 +2219,130 @@
             "type": "integer",
             "format": "int64",
             "description": "Nanoseconds since the Unix epoch."
+          }
+        }
+      },
+      "SpanGroup": {
+        "type": "object",
+        "description": "The spans that share the values of the grouping fields.",
+        "required": [
+          "values",
+          "name",
+          "attributes",
+          "spans"
+        ],
+        "properties": {
+          "attributes": {
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The attributes of its newest span."
+          },
+          "name": {
+            "type": "string",
+            "description": "The span name of its newest span."
+          },
+          "spans": {
+            "$ref": "#/components/schemas/SpanStats"
+          },
+          "values": {
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The values of the grouping fields, by the fields as a query writes\nthem, such as `http.route`. A field the spans lack is missing."
+          }
+        }
+      },
+      "SpanGroups": {
+        "type": "object",
+        "description": "The spans a query keeps in a range, grouped by the values of some fields,\nthe most time first.",
+        "required": [
+          "start_at",
+          "end_at",
+          "step_ns",
+          "spans",
+          "buckets",
+          "groups",
+          "truncated",
+          "unindexed"
+        ],
+        "properties": {
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpanBucket"
+            },
+            "description": "The spans of every step, oldest first."
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpanGroup"
+            }
+          },
+          "spans": {
+            "$ref": "#/components/schemas/SpanStats",
+            "description": "Every span the query keeps."
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The range, after the retention capped it."
+          },
+          "step_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The length of a bucket in nanoseconds."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More groups match than the limit let through, which kept the ones\nwith the most time."
+          },
+          "unindexed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The attributes the query compares that have no index."
+          }
+        }
+      },
+      "SpanStats": {
+        "type": "object",
+        "description": "The count, the failures, and the durations of some spans.",
+        "required": [
+          "count",
+          "errors",
+          "total_ns",
+          "latency"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "errors": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The failed ones.",
+            "minimum": 0
+          },
+          "latency": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Latency",
+                "description": "Estimates of the percentiles of their durations, off by 1% at most.\n`None` without spans."
+              }
+            ]
+          },
+          "total_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Their durations added up."
           }
         }
       },
@@ -2745,85 +2407,6 @@
             "description": "The text to put in place of the characters from `start` to `end`."
           }
         }
-      },
-      "Target": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/TargetKey"
-          },
-          {
-            "type": "object",
-            "required": [
-              "query",
-              "calls",
-              "buckets",
-              "operations"
-            ],
-            "properties": {
-              "buckets": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/RequestBucket"
-                },
-                "description": "The calls of every step, oldest first."
-              },
-              "calls": {
-                "$ref": "#/components/schemas/Requests"
-              },
-              "operations": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CallOperation"
-                },
-                "description": "The calls by summary and kind, the most time first."
-              },
-              "query": {
-                "type": "string",
-                "description": "The terms of a span query that keep the calls to the target, such as\n`db.system.name = \"postgresql\"`, from the attributes of one of them.\nEmpty when no attribute tells the target."
-              }
-            }
-          }
-        ],
-        "description": "The calls to one target."
-      },
-      "TargetKey": {
-        "type": "object",
-        "description": "What a call goes to: a database, a host, an RPC service, or a message\ndestination.",
-        "required": [
-          "type",
-          "system",
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The database, the host with a port that is not 80 or 443, the RPC\nservice, the destination, or the `peer.service` of other calls.\nNull when the call does not say."
-          },
-          "system": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Such as `postgresql`, `grpc`, or `kafka`. Null for HTTP, and for\na target of no known type."
-          },
-          "type": {
-            "$ref": "#/components/schemas/TargetType"
-          }
-        }
-      },
-      "TargetType": {
-        "type": "string",
-        "description": "What kind of thing a call goes to.",
-        "enum": [
-          "database",
-          "http",
-          "rpc",
-          "messaging",
-          "other"
-        ]
       },
       "Temporality": {
         "type": "string",

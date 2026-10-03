@@ -4,10 +4,10 @@ use std::time::Duration;
 use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
-    AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
-    OperationDetail, Resolution, Service, Services, Spans, TargetKey, Trace, Traces,
+    AttributeKeys, LogGroups, Logs, MetricFilter, MetricList, MetricSeries, Resolution, Service,
+    Services, SpanGroupingField, SpanGroups, Spans, Trace, Traces,
 };
-use crate::{IndexedAttribute, Result, SpanKind, TimeRange, TraceId};
+use crate::{IndexedAttribute, Result, TimeRange, TraceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorageSize {
@@ -35,6 +35,14 @@ pub trait RangeQueries: Catalog {
 
     fn list_spans(&self, query: &Query, limit: usize) -> Result<Spans>;
 
+    fn list_span_groups(
+        &self,
+        query: &Query,
+        by: &[SpanGroupingField],
+        step_ns: i64,
+        limit: usize,
+    ) -> Result<SpanGroups>;
+
     fn list_traces(&self, query: &Query, limit: usize) -> Result<Traces>;
 
     fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>>;
@@ -50,26 +58,7 @@ pub trait RangeQueries: Catalog {
 
     fn list_services(&self, step_ns: i64, limit: usize) -> Result<Services>;
 
-    fn get_service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service>;
-
-    fn get_operation(
-        &self,
-        service: &str,
-        name: &str,
-        kind: SpanKind,
-        step_ns: i64,
-    ) -> Result<OperationDetail>;
-
-    fn list_calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls>;
-
-    fn get_call(
-        &self,
-        service: &str,
-        target: &TargetKey,
-        summary: &str,
-        kind: SpanKind,
-        step_ns: i64,
-    ) -> Result<CallDetail>;
+    fn get_service(&self, service: &str, step_ns: i64) -> Result<Service>;
 
     fn list_attribute_keys(&self, signal: Signal) -> Result<AttributeKeys>;
 

@@ -26,16 +26,16 @@ const TRACE_ID_HEX: &str = "abababababababababababababababab";
 
 fn write_telemetry(data: &Path) {
     let written_at = now_unix_nanos() - 60 * SECOND_NS;
-    let build_span = |id: u8, parent: Option<u8>, name: &str, status: SpanStatus| Span {
+    let build_span = |id: u8, kind: SpanKind, name: &str, status: SpanStatus, attributes| Span {
         trace_id: TraceId([0xab; 16]),
         span_id: SpanId([id; 8]),
-        parent_span_id: parent.map(|parent| SpanId([parent; 8])),
+        parent_span_id: (id > 1).then_some(SpanId([1; 8])),
         name: name.into(),
-        kind: SpanKind::Server,
+        kind,
         started_at: written_at + i64::from(id) * SECOND_NS,
         duration_ns: 20_000_000,
         status_code: status,
-        attributes: Attributes::new(),
+        attributes: parse_attributes(attributes),
         events: Vec::new(),
     };
     let build_log = |offset: i64, severity: Severity, body: &str, user_id: Option<i64>| Log {
@@ -73,8 +73,20 @@ fn write_telemetry(data: &Path) {
             build_log(3, Severity::ERROR, "query failed", None),
         ],
         spans: vec![
-            build_span(1, None, "GET /languages", SpanStatus::Unset),
-            build_span(2, Some(1), "SELECT languages", SpanStatus::Error),
+            build_span(
+                1,
+                SpanKind::Server,
+                "GET /languages",
+                SpanStatus::Unset,
+                json!({"http.request.method": "GET", "http.route": "/languages"}),
+            ),
+            build_span(
+                2,
+                SpanKind::Client,
+                "SELECT languages",
+                SpanStatus::Error,
+                json!({"db.system.name": "sqlite", "db.query.text": "SELECT * FROM languages"}),
+            ),
         ],
         metrics: vec![
             build_queue_depth("email", 3.0),
@@ -121,14 +133,42 @@ fn run_otelo_and_parse_json(daemon: &Daemon, args: &[&str]) -> (Value, String) {
     (serde_json::from_slice(&output.stdout).unwrap(), stderr)
 }
 
-fn check_calls_of_a_service_without_calls(daemon: &Daemon) {
-    let (calls, _) = run_otelo_and_parse_json(daemon, &["calls", "api"]);
-    assert_eq!(calls["calls"]["count"], 0);
-    assert_eq!(calls["targets"], json!([]));
-    assert!(calls.get("buckets").is_none(), "{calls}");
-    let table = run_otelo(daemon, &["calls", "api", "--table"]);
+fn check_the_routes_and_the_queries_of_a_service(daemon: &Daemon) {
+    let (service, _) = run_otelo_and_parse_json(daemon, &["service", "api"]);
+    assert_eq!(service["stats"]["requests"]["count"], 1);
+    assert_eq!(
+        service["routes"][0]["values"],
+        json!({"http.request.method": "GET", "http.route": "/languages"})
+    );
+    assert_eq!(service["routes"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        service["queries"][0]["values"],
+        json!({"db.system.name": "sqlite", "db.query.text": "SELECT * FROM languages"})
+    );
+    assert_eq!(service["queries"][0]["spans"]["errors"], 1);
+    assert!(service.get("buckets").is_none(), "{service}");
+    let table = run_otelo(daemon, &["service", "api", "--table"]);
     let table = String::from_utf8(table.stdout).unwrap();
-    assert!(table.starts_with("api: 0 calls"), "{table}");
+    assert!(table.contains("GET /languages"), "{table}");
+    assert!(table.contains("SELECT * FROM languages"), "{table}");
+}
+
+fn check_the_groups_of_spans(daemon: &Daemon) {
+    let (groups, _) = run_otelo_and_parse_json(daemon, &["spans", "--by", "name", "error = true"]);
+    assert_eq!(groups["spans"]["count"], 1);
+    assert_eq!(
+        groups["groups"][0]["values"],
+        json!({"name": "SELECT languages"})
+    );
+    let table = run_otelo(daemon, &["spans", "--by", "service,name", "--table"]);
+    let table = String::from_utf8(table.stdout).unwrap();
+    assert!(table.starts_with("SERVICE"), "{table}");
+    assert!(table.contains("GET /languages"), "{table}");
+
+    let by_kind = run_otelo(daemon, &["spans", "--by", "kind"]);
+    assert!(!by_kind.status.success());
+    let stderr = String::from_utf8(by_kind.stderr).unwrap();
+    assert!(stderr.contains("not kind"), "{stderr}");
 }
 
 fn check_the_groups_of_a_metric(daemon: &Daemon) {
@@ -166,15 +206,13 @@ fn check_the_spec_lists_every_path(daemon: &Daemon) {
         "/api/logs",
         "/api/logs/groups",
         "/api/spans",
+        "/api/spans/groups",
         "/api/traces",
         "/api/traces/{trace_id}",
         "/api/metrics",
         "/api/metrics/{name}",
         "/api/services",
         "/api/services/{name}",
-        "/api/services/{name}/operation",
-        "/api/services/{name}/calls",
-        "/api/services/{name}/call",
         "/api/attributes",
         "/api/complete",
         "/api/indexes",
@@ -222,7 +260,7 @@ fn the_cli_reads_what_the_api_serves() {
             "duration_ns": 20_000_000,
             "spans": 2,
             "error": true,
-            "attributes": {},
+            "attributes": {"http.request.method": "GET", "http.route": "/languages"},
             "resource": {},
         })
     );
@@ -245,12 +283,11 @@ fn the_cli_reads_what_the_api_serves() {
 
     let (metrics, _) = run_otelo_and_parse_json(&daemon, &["metrics", "--since", "2d"]);
     assert!(metrics["series"].is_array());
-    // Both spans have the server kind, so both are requests.
     let (services, _) = run_otelo_and_parse_json(&daemon, &["services"]);
     let api = &services["services"][0];
     assert_eq!(api["service"], "api");
-    assert_eq!(api["stats"]["requests"]["count"], 2);
-    assert_eq!(api["stats"]["requests"]["errors"], 1);
+    assert_eq!(api["stats"]["requests"]["count"], 1);
+    assert_eq!(api["stats"]["requests"]["errors"], 0);
     assert_eq!(api["stats"]["error_logs"], 1);
     assert!(api.get("buckets").is_none(), "{api}");
     let (services, _) =
@@ -263,13 +300,8 @@ fn the_cli_reads_what_the_api_serves() {
             .is_empty()
     );
 
-    let (service, _) = run_otelo_and_parse_json(&daemon, &["service", "api"]);
-    assert_eq!(service["operations"][0]["name"], "GET /languages");
-    assert_eq!(service["operations"][1]["requests"]["errors"], 1);
-    let table = run_otelo(&daemon, &["service", "api", "--table"]);
-    let table = String::from_utf8(table.stdout).unwrap();
-    assert!(table.contains("GET /languages"), "{table}");
-    check_calls_of_a_service_without_calls(&daemon);
+    check_the_routes_and_the_queries_of_a_service(&daemon);
+    check_the_groups_of_spans(&daemon);
     check_the_groups_of_a_metric(&daemon);
     check_the_spec_lists_every_path(&daemon);
     stop_daemon(daemon, StopSignal::Term);

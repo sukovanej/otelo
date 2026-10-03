@@ -3,6 +3,7 @@ pub mod client;
 mod logs;
 mod metrics;
 mod services;
+mod span_groups;
 pub mod table;
 mod traces;
 
@@ -14,9 +15,7 @@ pub use catalog::{
 };
 pub use logs::{LogsArgs, print_logs};
 pub use metrics::{MetricArgs, MetricsArgs, print_metric_series, print_metrics};
-pub use services::{
-    CallsArgs, ServiceArgs, ServicesArgs, print_calls, print_service, print_services,
-};
+pub use services::{ServiceArgs, ServicesArgs, print_service, print_services};
 pub use traces::{SpansArgs, TraceArgs, TracesArgs, print_spans, print_trace, print_traces};
 
 const QUERY_HELP: &str = "The records to keep, such as 'http.route = \"/matches\" OR user.id = 7'. \
@@ -42,11 +41,13 @@ pub struct RangeArgs {
 
 impl RangeArgs {
     fn to_query_params(&self) -> Vec<(&'static str, Option<String>)> {
-        vec![
-            ("since", self.since.clone()),
-            ("until", self.until.clone()),
-            ("limit", self.limit.map(|limit| limit.to_string())),
-        ]
+        let mut params = self.to_range_params();
+        params.push(("limit", self.limit.map(|limit| limit.to_string())));
+        params
+    }
+
+    fn to_range_params(&self) -> Vec<(&'static str, Option<String>)> {
+        vec![("since", self.since.clone()), ("until", self.until.clone())]
     }
 }
 

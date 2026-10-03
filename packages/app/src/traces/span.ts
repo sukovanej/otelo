@@ -13,17 +13,10 @@ import {
 const SPAN_KIND_NAMES = ["unspecified", "internal", "server", "client", "producer", "consumer"];
 const SPAN_STATUS_NAMES = ["unset", "ok", "error"];
 
-const SERVER_KIND = 2;
-const CONSUMER_KIND = 5;
-
 const ERROR_STATUS = 2;
 
 export function toKindName(kind: number): string {
   return SPAN_KIND_NAMES[kind] ?? String(kind);
-}
-
-export function entersService(kind: number): boolean {
-  return kind === SERVER_KIND || kind === CONSUMER_KIND;
 }
 
 export function isFailedSpan(span: TraceSpan): boolean {

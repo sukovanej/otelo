@@ -1,10 +1,14 @@
 use axum::extract::{Path, Query, State};
 use otelo_indexed_storage::TraceId;
-use otelo_indexed_storage::query::{Spans, Trace, Traces};
+use otelo_indexed_storage::query::{SpanGroupingField, SpanGroups, Spans, Trace, Traces};
 use otelo_query::Signal;
+use serde::Deserialize;
+use utoipa::IntoParams;
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::params::{LookupParams, QueryParams, parse_query};
+use crate::params::{
+    LookupParams, QueryParams, parse_field_list, parse_query, parse_step_ns, resolve_step,
+};
 use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 
 /// Spans, newest first.
@@ -32,6 +36,72 @@ pub async fn list_spans(
         params.limit,
         100,
         move |opened, limit| Ok(opened.queries.list_spans(&query, limit)?),
+    )
+    .await
+}
+
+/// The range, the limit, the query, the grouping, and the step of span groups.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SpanGroupParams {
+    /// The start of the range: a duration before now, such as `1h`, or an
+    /// RFC 3339 timestamp. One hour before `until` when missing.
+    since: Option<String>,
+    /// The end of the range, in the form of `since`. Now when missing.
+    until: Option<String>,
+    /// The most groups to return.
+    limit: Option<usize>,
+    /// The spans to keep, such as `service = "api" kind = server`. Every span
+    /// when missing.
+    #[serde(rename = "q")]
+    #[param(rename = "q")]
+    query: Option<String>,
+    /// The names to group the spans by, separated by commas: attributes,
+    /// `service`, `name`, or `resource.<key>`, such as
+    /// `http.request.method,http.route`. All spans are one group when
+    /// missing.
+    by: Option<String>,
+    /// The length of a bucket, such as `1m`. One that makes 120 buckets at
+    /// most when missing.
+    step: Option<String>,
+}
+
+/// The spans that the query keeps, grouped by the values of the `by` names,
+/// the most time first. Each group has the count, the failures, the total
+/// time, and the latency percentiles of its spans, and the name and the
+/// attributes of its newest span. The answer has the same numbers for all the
+/// spans, over the range and in buckets of one step.
+#[utoipa::path(
+    get,
+    path = "/api/spans/groups",
+    params(SpanGroupParams),
+    responses(
+        (status = 200, body = SpanGroups),
+        (status = 400, body = ErrorBody),
+    ),
+)]
+pub async fn list_span_groups(
+    State(api): State<Api>,
+    Query(params): Query<SpanGroupParams>,
+) -> ApiResult<SpanGroups> {
+    let query = parse_query(params.query.as_deref(), Signal::Spans)?;
+    let by: Vec<SpanGroupingField> = parse_field_list(params.by.as_deref())?;
+    let requested_step_ns = parse_step_ns(params.step.as_deref())?;
+    api.run_limited_range_query(
+        RequestedRange {
+            signals: RangeSignals::One(Signal::Spans),
+            since: params.since,
+            until: params.until,
+            default_since: DefaultSince::HourBeforeNow,
+        },
+        params.limit,
+        50,
+        move |opened, limit| {
+            let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
+            Ok(opened
+                .queries
+                .list_span_groups(&query, &by, step_ns, limit)?)
+        },
     )
     .await
 }
