@@ -14,8 +14,10 @@ use crate::own::{self, Destination};
 use crate::ui;
 use otelo_api::{self as api, Api};
 use otelo_host::{Collector, HostIdentity};
-use otelo_indexed_storage::{BatchSender, Storage, now_unix_nanos};
+use otelo_indexed_storage::{Storage, now_unix_nanos};
 use otelo_indexed_storage_sqlite::Sqlite;
+use otelo_journal_files::JournalFiles;
+use otelo_otlp::Intake;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_DATA_DIR: &str = "/usr/local/var/otelo";
@@ -24,6 +26,8 @@ const DEFAULT_DATA_DIR: &str = "/var/lib/otelo";
 
 // An OTLP batch can hold a few hundred kilobytes, so the queue stays at tens of megabytes.
 const TELEMETRY_QUEUE_BATCHES: usize = 64;
+
+const JOURNAL_DIRECTORY_NAME: &str = "journal";
 
 const HOST_METRICS_INTERVAL_NS: i64 = 15 * 1_000_000_000;
 
@@ -122,8 +126,12 @@ async fn serve_until_shutdown(
     std::fs::create_dir_all(&args.data_dir)
         .with_context(|| format!("make the data directory {}", args.data_dir.display()))?;
     let storage = Sqlite::open(&args.data_dir)?;
+    let (journal, journal_threads) = JournalFiles::open(otelo_journal_files::Config::new(
+        args.data_dir.join(JOURNAL_DIRECTORY_NAME),
+    ))?;
     let (batch_sender, inbox) = otelo_indexed_storage::open_batch_channel(TELEMETRY_QUEUE_BATCHES);
     let writer = storage.spawn_writer(inbox)?;
+    let intake = Intake::new(journal, batch_sender);
     let storage: Arc<dyn Storage> = Arc::new(storage);
     let api = Api {
         storage: Arc::clone(&storage),
@@ -148,15 +156,18 @@ async fn serve_until_shutdown(
     };
     tokio::try_join!(
         serve_api,
-        otelo_otlp::serve_http(otlp_http, batch_sender.clone(), shutdown.clone()),
-        otelo_otlp::serve_grpc(otlp_grpc, batch_sender.clone(), shutdown.clone()),
-        collect_host_metrics(host, storage, batch_sender.clone(), shutdown.clone()),
+        otelo_otlp::serve_http(otlp_http, intake.clone(), shutdown.clone()),
+        otelo_otlp::serve_grpc(otlp_grpc, intake.clone(), shutdown.clone()),
+        collect_host_metrics(host, storage, intake.clone(), shutdown.clone()),
     )?;
     // The writer ends once the last sender is gone.
-    drop(batch_sender);
+    drop(intake);
     tokio::task::spawn_blocking(|| writer.join())
         .await
         .context("wait for the telemetry writer")??;
+    tokio::task::spawn_blocking(|| journal_threads.stop_and_join())
+        .await
+        .context("wait for the journal")??;
     tracing::info!("stopped");
     Ok(())
 }
@@ -166,7 +177,7 @@ async fn serve_until_shutdown(
 async fn collect_host_metrics(
     host: HostIdentity,
     storage: Arc<dyn Storage>,
-    batch_sender: BatchSender,
+    intake: Intake,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     let new_collector = tokio::task::spawn_blocking(move || Collector::new(host))
@@ -184,20 +195,21 @@ async fn collect_host_metrics(
     let mut recorded_at = now_unix_nanos();
     loop {
         let storage = Arc::clone(&storage);
-        let (collector_after_reading, batch) = tokio::task::spawn_blocking(move || {
+        let (collector_after_reading, request) = tokio::task::spawn_blocking(move || {
             let storage_size = storage
                 .size()
                 .inspect_err(|error| tracing::warn!("read the size of the storage: {error}"))
                 .ok();
-            let batch = collector.collect_batch(recorded_at, storage_size);
-            (collector, batch)
+            let request = collector.collect_request(recorded_at, storage_size);
+            (collector, request)
         })
         .await
         .context("collect the host metrics")?;
         collector = collector_after_reading;
-        match batch {
-            // The writer reports the batches a full channel dropped.
-            Ok(batch) => drop(batch_sender.send_batch(batch)),
+        match request {
+            // The intake logs a request the journal could not keep, and the writer reports the
+            // batches a full channel dropped.
+            Ok(request) => drop(intake.accept_export(request).await),
             Err(error) => tracing::warn!("collect the host metrics: {error:#}"),
         }
         // A reading that ran past a tick skips it.

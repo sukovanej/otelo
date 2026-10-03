@@ -5,7 +5,8 @@ mod mapping;
 mod reader;
 mod snapshot;
 
-use otelo_indexed_storage::{Batch, StorageSize};
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use otelo_indexed_storage::StorageSize;
 
 pub use identity::{HostIdentity, find_platform_uuid_in_ioreg_output};
 pub use launchd::find_running_jobs_in_launchctl_list;
@@ -31,14 +32,14 @@ impl Collector {
     }
 
     // Reads files and runs commands, so an async caller has to give it a thread that may block.
-    pub fn collect_batch(
+    pub fn collect_request(
         &mut self,
         recorded_at: i64,
         storage_size: Option<StorageSize>,
-    ) -> anyhow::Result<Batch> {
+    ) -> anyhow::Result<ExportMetricsServiceRequest> {
         let snapshot = self.machine_reader.read_snapshot()?;
         Ok(self
             .snapshot_mapper
-            .map_snapshot_to_batch(recorded_at, &snapshot, storage_size))
+            .map_snapshot_to_request(recorded_at, &snapshot, storage_size))
     }
 }

@@ -1,7 +1,8 @@
 use std::fs;
 use std::process::Command;
 
-use otelo_indexed_storage::{Attributes, Resource};
+use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+use opentelemetry_proto::tonic::resource::v1::Resource;
 
 // OpenTelemetry names these files and this command as the sources of `host.id`.
 const MACHINE_ID_PATHS: [&str; 2] = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
@@ -53,15 +54,24 @@ impl HostIdentity {
 
     #[must_use]
     pub fn resource_of_service(&self, service: &str) -> Resource {
-        let mut attributes = Attributes::new();
-        attributes.insert("service.name", service);
-        for (key, value) in self.attributes() {
-            attributes.insert(key, value);
-        }
+        let attributes = std::iter::once(("service.name", service.to_owned()))
+            .chain(self.attributes())
+            .map(|(key, value)| string_key_value(key, value))
+            .collect();
         Resource {
-            service: service.into(),
             attributes,
+            ..Resource::default()
         }
+    }
+}
+
+pub fn string_key_value(key: &str, value: String) -> KeyValue {
+    KeyValue {
+        key: key.into(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(value)),
+        }),
+        ..KeyValue::default()
     }
 }
 

@@ -15,12 +15,15 @@ prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 otelo-indexed-storage = { workspace = true }
+otelo-journal = { workspace = true }
+otelo-query = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+otelo-journal-files = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = ["metrics", "grpc-tonic", "http-json", "gzip-tonic", "gzip-http"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics"] }

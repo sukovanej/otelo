@@ -11,7 +11,11 @@ use opentelemetry_proto::tonic::collector::metrics::v1::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use otelo_indexed_storage::BatchSender;
+use std::sync::Arc;
+
+use otelo_indexed_storage::{BatchSender, now_unix_nanos};
+use otelo_journal::Journal;
+use otelo_query::Signal;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -23,16 +27,42 @@ use crate::map::{MappedExport, map_logs_request, map_metrics_request, map_trace_
 // The gRPC default, after gzip. An SDK batch is a few hundred kilobytes.
 const MAX_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 
-trait ExportRequest: prost::Message + DeserializeOwned + Default + 'static {
+pub trait ExportRequest: prost::Message + DeserializeOwned + Default + 'static {
+    const SIGNAL: Signal;
+
     type Response: prost::Message + Serialize;
 
-    fn store_and_respond(self, sender: &BatchSender) -> Self::Response;
+    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response;
+}
+
+#[derive(Clone)]
+pub struct Intake {
+    journal: Arc<dyn Journal>,
+    sender: BatchSender,
+}
+
+impl Intake {
+    #[must_use]
+    pub fn new(journal: Arc<dyn Journal>, sender: BatchSender) -> Self {
+        Self { journal, sender }
+    }
+
+    pub async fn accept_export<R: ExportRequest>(&self, request: R) -> anyhow::Result<R::Response> {
+        self.journal
+            .append_frame(R::SIGNAL, now_unix_nanos(), &request.encode_to_vec())?
+            .wait_until_synced()
+            .await
+            .inspect_err(|error| tracing::warn!("journal an export request: {error:#}"))?;
+        Ok(request.send_to_writer_and_respond(&self.sender))
+    }
 }
 
 impl ExportRequest for ExportLogsServiceRequest {
+    const SIGNAL: Signal = Signal::Logs;
+
     type Response = ExportLogsServiceResponse;
 
-    fn store_and_respond(self, sender: &BatchSender) -> Self::Response {
+    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response {
         ExportLogsServiceResponse {
             partial_success: send_batch_to_writer(sender, map_logs_request(self)).map(
                 |rejection| ExportLogsPartialSuccess {
@@ -45,9 +75,11 @@ impl ExportRequest for ExportLogsServiceRequest {
 }
 
 impl ExportRequest for ExportTraceServiceRequest {
+    const SIGNAL: Signal = Signal::Spans;
+
     type Response = ExportTraceServiceResponse;
 
-    fn store_and_respond(self, sender: &BatchSender) -> Self::Response {
+    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response {
         ExportTraceServiceResponse {
             partial_success: send_batch_to_writer(sender, map_trace_request(self)).map(
                 |rejection| ExportTracePartialSuccess {
@@ -60,9 +92,11 @@ impl ExportRequest for ExportTraceServiceRequest {
 }
 
 impl ExportRequest for ExportMetricsServiceRequest {
+    const SIGNAL: Signal = Signal::Metrics;
+
     type Response = ExportMetricsServiceResponse;
 
-    fn store_and_respond(self, sender: &BatchSender) -> Self::Response {
+    fn send_to_writer_and_respond(self, sender: &BatchSender) -> Self::Response {
         ExportMetricsServiceResponse {
             partial_success: send_batch_to_writer(sender, map_metrics_request(self)).map(
                 |rejection| ExportMetricsPartialSuccess {

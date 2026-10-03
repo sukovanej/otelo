@@ -17,7 +17,6 @@ use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
-use otelo_indexed_storage::BatchSender;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tonic::codec::CompressionEncoding;
@@ -25,14 +24,14 @@ use tonic::transport::Server;
 use tonic::transport::server::TcpIncoming;
 use tonic::{Request, Response, Status};
 
-use crate::{ExportRequest, MAX_REQUEST_BYTES};
+use crate::{ExportRequest, Intake, MAX_REQUEST_BYTES};
 
 pub async fn serve_grpc(
     listener: TcpListener,
-    sender: BatchSender,
+    intake: Intake,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
-    let export_service = ExportService { sender };
+    let export_service = ExportService { intake };
     Server::builder()
         .add_service(
             LogsServiceServer::new(export_service.clone())
@@ -56,7 +55,20 @@ pub async fn serve_grpc(
 
 #[derive(Clone)]
 struct ExportService {
-    sender: BatchSender,
+    intake: Intake,
+}
+
+impl ExportService {
+    async fn accept_export<R: ExportRequest>(
+        &self,
+        request: Request<R>,
+    ) -> Result<Response<R::Response>, Status> {
+        self.intake
+            .accept_export(request.into_inner())
+            .await
+            .map(Response::new)
+            .map_err(|error| Status::unavailable(format!("{error:#}")))
+    }
 }
 
 #[tonic::async_trait]
@@ -65,9 +77,7 @@ impl LogsService for ExportService {
         &self,
         request: Request<ExportLogsServiceRequest>,
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
-        Ok(Response::new(
-            request.into_inner().store_and_respond(&self.sender),
-        ))
+        self.accept_export(request).await
     }
 }
 
@@ -77,9 +87,7 @@ impl TraceService for ExportService {
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
-        Ok(Response::new(
-            request.into_inner().store_and_respond(&self.sender),
-        ))
+        self.accept_export(request).await
     }
 }
 
@@ -89,8 +97,6 @@ impl MetricsService for ExportService {
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
-        Ok(Response::new(
-            request.into_inner().store_and_respond(&self.sender),
-        ))
+        self.accept_export(request).await
     }
 }

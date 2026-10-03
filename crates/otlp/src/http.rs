@@ -12,26 +12,25 @@ use flate2::read::GzDecoder;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use otelo_indexed_storage::BatchSender;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-use crate::{ExportRequest, MAX_REQUEST_BYTES};
+use crate::{ExportRequest, Intake, MAX_REQUEST_BYTES};
 
 pub async fn serve_http(
     listener: TcpListener,
-    sender: BatchSender,
+    intake: Intake,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
-    axum::serve(listener, build_router(sender))
+    axum::serve(listener, build_router(intake))
         .with_graceful_shutdown(shutdown.cancelled_owned())
         .await
         .context("serve OTLP over HTTP")
 }
 
-fn build_router(sender: BatchSender) -> Router {
+fn build_router(intake: Intake) -> Router {
     Router::new()
         .route("/v1/logs", post(receive_export::<ExportLogsServiceRequest>))
         .route(
@@ -43,11 +42,11 @@ fn build_router(sender: BatchSender) -> Router {
             post(receive_export::<ExportMetricsServiceRequest>),
         )
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
-        .with_state(sender)
+        .with_state(intake)
 }
 
 async fn receive_export<R: ExportRequest>(
-    State(sender): State<BatchSender>,
+    State(intake): State<Intake>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -55,9 +54,14 @@ async fn receive_export<R: ExportRequest>(
         Ok(format) => format,
         Err(refusal) => return refusal.into_response(BodyFormat::Protobuf),
     };
-    match decompress_body(&headers, body).and_then(|body| format.decode_request::<R>(&body)) {
-        Ok(request) => format.encode_response(StatusCode::OK, &request.store_and_respond(&sender)),
-        Err(refusal) => refusal.into_response(format),
+    let request =
+        match decompress_body(&headers, body).and_then(|body| format.decode_request::<R>(&body)) {
+            Ok(request) => request,
+            Err(refusal) => return refusal.into_response(format),
+        };
+    match intake.accept_export(request).await {
+        Ok(response) => format.encode_response(StatusCode::OK, &response),
+        Err(error) => Refusal::Unavailable(format!("{error:#}")).into_response(format),
     }
 }
 
@@ -211,6 +215,7 @@ enum Refusal {
     BadRequest(String),
     UnsupportedMediaType(String),
     RequestTooLarge(String),
+    Unavailable(String),
 }
 
 impl Refusal {
@@ -219,6 +224,7 @@ impl Refusal {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::RequestTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -226,6 +232,7 @@ impl Refusal {
         match self {
             Self::BadRequest(_) | Self::UnsupportedMediaType(_) => tonic::Code::InvalidArgument,
             Self::RequestTooLarge(_) => tonic::Code::ResourceExhausted,
+            Self::Unavailable(_) => tonic::Code::Unavailable,
         }
     }
 
@@ -235,7 +242,8 @@ impl Refusal {
         let code = self.grpc_code() as i32;
         let (Self::BadRequest(message)
         | Self::UnsupportedMediaType(message)
-        | Self::RequestTooLarge(message)) = self;
+        | Self::RequestTooLarge(message)
+        | Self::Unavailable(message)) = self;
         format.encode_response(http_status, &RpcStatus { code, message })
     }
 }
