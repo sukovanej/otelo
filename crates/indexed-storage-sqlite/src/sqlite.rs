@@ -12,6 +12,7 @@ use otelo_query::Signal;
 
 use crate::day::Day;
 use crate::indexes::Indexes;
+use crate::lock::TelemetryLock;
 use crate::telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
 use crate::{Config, FrameMapper, Indexer, Reader};
 
@@ -20,6 +21,7 @@ const SQLITE_HEAP_LIMIT_BYTES: i64 = 16 * 1024 * 1024;
 
 pub struct Sqlite {
     config: Config,
+    _telemetry_lock: TelemetryLock,
 }
 
 impl Sqlite {
@@ -33,9 +35,13 @@ impl Sqlite {
         }
         let mut config = Config::new(data_directory.join("telemetry"));
         config.indexes = Indexes::new(indexed_attributes);
+        let telemetry_lock = TelemetryLock::acquire(&config.directory)?;
         // A reader needs the file, and opens it before the indexer has written to it.
         TelemetryFile::open(&config.directory)?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            _telemetry_lock: telemetry_lock,
+        })
     }
 
     pub fn spawn_indexer(
