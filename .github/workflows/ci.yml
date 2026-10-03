@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a pull request stops the run of the push before it. Runs on `main` all finish, so
+# each commit there has a result and saves its caches.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Full debug info makes most of the cached `target`. A failed test still names its file and line.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-web
+      - run: mise run check:web:fmt
+      - run: mise run check:web:lint
+        if: ${{ !cancelled() }}
+      - run: mise run check:web:types
+        if: ${{ !cancelled() }}
+      - run: mise run check:web:test
+        if: ${{ !cancelled() }}
+
+  # The readers of the host collector differ between Linux and macOS, so the tests run on both.
+  rust:
+    name: rust (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      # The tests serve the built UI, so they need Node and pnpm too.
+      - uses: ./.github/actions/setup-web
+      # The first `rustc` installs the toolchain of rust-toolchain.toml, whose version keys the cache.
+      - run: rustc --version
+      # A pull request reads the cache of `main`, but no other ref can read a cache that a pull
+      # request saves. Such a cache only fills the 10 GB limit and pushes out the cache of `main`.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run check:fmt
+      - run: mise run check:clippy
+        if: ${{ !cancelled() }}
+      - run: mise run check:test
+        if: ${{ !cancelled() }}
