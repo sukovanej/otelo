@@ -26,7 +26,7 @@ flowchart LR
 
 - One writer task owns every write. Sources send batches to it over a bounded channel. When the channel is full, the source drops the batch and counts the drop, so a burst of telemetry never takes memory from the apps.
 - SQLite in WAL mode. One file per UTC day for raw data. Retention deletes whole files. The defaults are 7 days of raw data, 14 days of 1-minute rollups, and 90 days of 1-hour rollups. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
-- No command runs SQL from a user, so the names of the tables and columns stay private to `otelo-storage-sqlite`.
+- No command runs SQL from a user, so the names of the tables and columns stay private to `otelo-indexed-storage-sqlite`.
 - otelo is in development, so the files carry no schema version, and nothing reads or fixes a file written by an older schema. After a schema change, delete the telemetry files written before it.
 - A query that spans days attaches each day file. The query API caps a range at the retention, so the attach limit is never reached. A range of metrics can go back the 90 days of the 1-hour rollups.
 - `service` is the OTel `service.name` resource attribute. The host collector sends no OTLP, so it names its services itself.
@@ -159,7 +159,7 @@ The day files keep the raw points for 7 days. The writer also sums them up by th
 - Once a minute the writer rolls up the minutes that ended 2 minutes ago or earlier, so a late batch is in them. An hour is rolled up from its 60 minutes once all of them are.
 - The table `cursors` says up to where the minutes and the hours are rolled up. A daemon that was down starts there, or at the oldest day file when the table is empty, and rolls up an hour at a time with batches taken in between.
 - A row is written with its key, the series and the start, so rolling a step up again gives the same row.
-- The logic that sums points up by step is one type in `otelo-storage`. The query of the raw points and the rollups both use it, so a minute of summaries equals a minute of raw points.
+- The logic that sums points up by step is one type in `otelo-indexed-storage`. The query of the raw points and the rollups both use it, so a minute of summaries equals a minute of raw points.
 - The rollup job reads the day files without a span. No request is its parent, so each read would show as a request of `otelo`.
 
 ## The daemon's own telemetry
