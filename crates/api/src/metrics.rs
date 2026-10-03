@@ -1,15 +1,13 @@
 use std::num::NonZeroUsize;
 
 use axum::extract::{Path, Query, State};
-use otelo_indexed_storage::query::{
-    Grouping, GroupingField, MetricFilter, MetricList, MetricSeries, Resolution,
-};
+use otelo_indexed_storage::query::{Grouping, MetricFilter, MetricList, MetricSeries, Resolution};
 use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
-use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::params::{QueryParams, parse_query, parse_step_ns, resolve_step};
+use crate::error::{ApiResult, ErrorBody};
+use crate::params::{QueryParams, parse_field_list, parse_query, parse_step_ns, resolve_step};
 use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 
 /// The series that have points in the range and that the query keeps, by
@@ -81,18 +79,6 @@ pub struct MetricParams {
     top: Option<NonZeroUsize>,
 }
 
-fn parse_grouping_fields(text: Option<&str>) -> Result<Vec<GroupingField>, ApiError> {
-    text.unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(|name| {
-            name.parse()
-                .map_err(|error: String| ApiError::bad_request(&error))
-        })
-        .collect()
-}
-
 /// The series of one metric, or the groups of them, each in buckets of one
 /// step with the count, the minimum, the average, the maximum, and the last
 /// value, the rate of a counter, and the distribution of a histogram.
@@ -116,7 +102,7 @@ pub async fn get_metric_series(
     let query = parse_query(params.query.as_deref(), Signal::Metrics)?;
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
     let grouping = Grouping {
-        by: parse_grouping_fields(params.by.as_deref())?,
+        by: parse_field_list(params.by.as_deref())?,
         top: params.top,
     };
     api.run_limited_range_query(

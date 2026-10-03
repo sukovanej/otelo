@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use otelo_indexed_storage::SpanId;
-use otelo_indexed_storage::query::{Spans, Trace, TraceSpan, Traces};
+use otelo_indexed_storage::query::{
+    SpanGroupingField, SpanGroups, Spans, Trace, TraceSpan, Traces,
+};
 use otelo_query::Signal;
 
 use super::client::{Client, OutputFormat, escape_path_segment, note_truncation, print_json};
+use super::span_groups::{format_group_value, print_span_group_table};
 use super::table::{self, Table};
 use super::{QUERY_HELP, RangeArgs, join_query_words, note_unindexed_keys};
 
@@ -12,6 +15,12 @@ use super::{QUERY_HELP, RangeArgs, join_query_words, note_unindexed_keys};
 pub struct SpansArgs {
     #[arg(help = QUERY_HELP)]
     query: Vec<String>,
+
+    /// Print the spans grouped by these names, separated by commas, with the
+    /// count, errors, latency, and total time of each group: attributes,
+    /// service, name, or resource.<key>, such as http.request.method,http.route
+    #[arg(long)]
+    by: Option<String>,
 
     #[command(flatten)]
     range: RangeArgs,
@@ -21,6 +30,9 @@ pub struct SpansArgs {
 }
 
 pub fn print_spans(args: &SpansArgs) -> anyhow::Result<()> {
+    if let Some(by) = &args.by {
+        return print_span_groups(args, by);
+    }
     let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
     let answer: Spans = args.client.get("/api/spans", &params)?;
@@ -51,6 +63,39 @@ pub fn print_spans(args: &SpansArgs) -> anyhow::Result<()> {
     note_truncation(
         answer.truncated,
         "More spans match; narrow them with the query or --since, or raise --limit.",
+    );
+    note_unindexed_keys(Signal::Spans, &answer.unindexed);
+    Ok(())
+}
+
+fn print_span_groups(args: &SpansArgs, by: &str) -> anyhow::Result<()> {
+    let fields = by
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .map(|field| field.parse().map_err(anyhow::Error::msg))
+        .collect::<anyhow::Result<Vec<SpanGroupingField>>>()?;
+    let mut params = args.range.to_query_params();
+    params.push(("q", join_query_words(&args.query)));
+    params.push(("by", Some(by.to_owned())));
+    let answer: SpanGroups = args.client.get("/api/spans/groups", &params)?;
+    match args.client.choose_output_format() {
+        OutputFormat::Table => {
+            let fields: Vec<String> = fields.iter().map(ToString::to_string).collect();
+            let labels: Vec<String> = fields.iter().map(|field| field.to_uppercase()).collect();
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            print_span_group_table(&labels, &answer.groups, |group| {
+                fields
+                    .iter()
+                    .map(|field| format_group_value(group, field).unwrap_or_else(|| "-".into()))
+                    .collect()
+            })?;
+        }
+        OutputFormat::Json => print_json(&answer)?,
+    }
+    note_truncation(
+        answer.truncated,
+        "More groups match; narrow them with the query or --since, or raise --limit.",
     );
     note_unindexed_keys(Signal::Spans, &answer.unindexed);
     Ok(())

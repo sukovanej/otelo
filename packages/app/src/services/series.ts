@@ -1,35 +1,35 @@
-import type { RequestBucket } from "@otelo/api";
+import type { SpanStats } from "@otelo/api";
 import type { TimeSeries } from "@otelo/viz";
 
 import { toShare } from "./stats";
 
 export const PERCENTILES = ["p50", "p95", "p99"] as const;
 
-export function toRequestSeries(buckets: ReadonlyArray<RequestBucket>): TimeSeries[] {
+export function toCountSeries(steps: ReadonlyArray<SpanStats>): TimeSeries[] {
   return [
     {
       label: "OK",
       color: "series-1",
-      values: buckets.map((bucket) => bucket.requests.count - bucket.requests.errors),
+      values: steps.map((step) => step.count - step.errors),
     },
-    { label: "Failed", color: "error", values: buckets.map((bucket) => bucket.requests.errors) },
+    { label: "Failed", color: "error", values: steps.map((step) => step.errors) },
   ];
 }
 
-export function toLatencySeries(buckets: ReadonlyArray<RequestBucket>): TimeSeries[] {
+export function toLatencySeries(steps: ReadonlyArray<SpanStats>): TimeSeries[] {
   return PERCENTILES.map((percentile) => ({
     label: percentile.toUpperCase(),
     color: percentile,
-    values: buckets.map((bucket) => bucket.requests.latency?.[percentile] ?? null),
+    values: steps.map((step) => step.latency?.[percentile] ?? null),
   }));
 }
 
-export function toErrorRateSeries(buckets: ReadonlyArray<RequestBucket>): TimeSeries[] {
+export function toErrorRateSeries(steps: ReadonlyArray<SpanStats>): TimeSeries[] {
   return [
     {
       label: "Error rate",
       color: "error",
-      values: buckets.map((bucket) => toShare(bucket.requests.errors, bucket.requests.count)),
+      values: steps.map((step) => toShare(step.errors, step.count)),
     },
   ];
 }

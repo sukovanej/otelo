@@ -13,7 +13,7 @@ import {
 import SpanTitleDatabase from "./span-title-database";
 import SpanTitleHttp from "./span-title-http";
 
-type SpanTitleProps = SpanTitleOfSpanProps | SpanTitleOfOperationProps;
+type SpanTitleProps = SpanTitleOfSpanProps | SpanTitleOfGroupProps;
 
 interface SpanTitleBaseProps {
   readonly name: string;
@@ -25,14 +25,14 @@ interface SpanTitleOfSpanProps extends SpanTitleBaseProps {
   readonly error: boolean;
 }
 
-interface SpanTitleOfOperationProps extends SpanTitleBaseProps {
-  readonly variant: "operation";
+interface SpanTitleOfGroupProps extends SpanTitleBaseProps {
+  readonly variant: "group";
 }
 
 export default function SpanTitle(props: SpanTitleProps) {
   const meaning = createMemo((): SpanMeaning => {
     const spanMeaning = readSpanMeaning(props.attributes);
-    return spanMeaning.kind === "http" && props.variant === "operation"
+    return spanMeaning.kind === "http" && props.variant === "group"
       ? { ...spanMeaning, status: undefined }
       : spanMeaning;
   });

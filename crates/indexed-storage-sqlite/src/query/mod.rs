@@ -1,9 +1,10 @@
-mod calls;
 mod catalog;
 mod compile;
 mod logs;
 mod metrics;
 mod services;
+mod span_groups;
+mod span_stats;
 mod traces;
 
 use std::ops::ControlFlow;
@@ -11,10 +12,10 @@ use std::ops::ControlFlow;
 use anyhow::bail;
 use jiff::Timestamp;
 use otelo_indexed_storage::query::{
-    AttributeKeys, CallDetail, Calls, LogGroups, Logs, MetricFilter, MetricList, MetricSeries,
-    OperationDetail, Resolution, Service, Services, Spans, TargetKey, Trace, Traces,
+    AttributeKeys, LogGroups, Logs, MetricFilter, MetricList, MetricSeries, Resolution, Service,
+    Services, SpanGroupingField, SpanGroups, Spans, Trace, Traces,
 };
-use otelo_indexed_storage::{Error, RangeQueries, Result, SpanId, SpanKind, TraceId};
+use otelo_indexed_storage::{Error, RangeQueries, Result, SpanId, TraceId};
 use otelo_query::{Query, Signal};
 use rusqlite::types::Value;
 use rusqlite::{Row, ToSql};
@@ -216,6 +217,16 @@ impl RangeQueries for Reader {
         traces::read_spans(self, query, limit).map_err(classify_query_error)
     }
 
+    fn list_span_groups(
+        &self,
+        query: &Query,
+        by: &[SpanGroupingField],
+        step_ns: i64,
+        limit: usize,
+    ) -> Result<SpanGroups> {
+        span_groups::group_spans(self, query, by, step_ns, limit).map_err(classify_query_error)
+    }
+
     fn list_traces(&self, query: &Query, limit: usize) -> Result<Traces> {
         traces::read_traces(self, query, limit).map_err(classify_query_error)
     }
@@ -241,35 +252,8 @@ impl RangeQueries for Reader {
         services::summarize_services(self, step_ns, limit).map_err(classify_query_error)
     }
 
-    fn get_service(&self, service: &str, step_ns: i64, limit: usize) -> Result<Service> {
-        services::summarize_service(self, service, step_ns, limit).map_err(classify_query_error)
-    }
-
-    fn get_operation(
-        &self,
-        service: &str,
-        name: &str,
-        kind: SpanKind,
-        step_ns: i64,
-    ) -> Result<OperationDetail> {
-        services::summarize_operation(self, service, name, kind, step_ns)
-            .map_err(classify_query_error)
-    }
-
-    fn list_calls(&self, service: &str, step_ns: i64, limit: usize) -> Result<Calls> {
-        calls::summarize_calls(self, service, step_ns, limit).map_err(classify_query_error)
-    }
-
-    fn get_call(
-        &self,
-        service: &str,
-        target: &TargetKey,
-        summary: &str,
-        kind: SpanKind,
-        step_ns: i64,
-    ) -> Result<CallDetail> {
-        calls::summarize_call_operation(self, service, target, summary, kind, step_ns)
-            .map_err(classify_query_error)
+    fn get_service(&self, service: &str, step_ns: i64) -> Result<Service> {
+        services::summarize_service(self, service, step_ns).map_err(classify_query_error)
     }
 
     fn list_attribute_keys(&self, signal: Signal) -> Result<AttributeKeys> {

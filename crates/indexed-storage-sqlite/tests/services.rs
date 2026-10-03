@@ -2,7 +2,6 @@ mod common;
 
 use std::path::Path;
 
-use otelo_indexed_storage::query::Latency;
 use otelo_indexed_storage::{
     Attributes, Batch, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
     SpanStatus, TimeRange, TraceContext, TraceId,
@@ -50,6 +49,13 @@ fn span(
         attributes: Attributes::new(),
         events: Vec::new(),
     }
+}
+
+fn spans_of_no_request(started_at: i64) -> [Span; 2] {
+    [
+        span(4, 1, None, SpanKind::Server, "health check", started_at),
+        span(5, 1, None, SpanKind::Client, "SELECT", started_at),
+    ]
 }
 
 fn log(logged_at: i64, severity: Severity) -> Log {
@@ -121,6 +127,7 @@ impl Fixture {
             ),
             Span {
                 duration_ns: 20 * MILLISECOND,
+                attributes: attributes_from_json(json!({"http.request.method": "POST"})),
                 ..span(
                     3,
                     2,
@@ -131,6 +138,8 @@ impl Fixture {
                 )
             },
         ];
+        api.spans
+            .extend(spans_of_no_request(today_start_at + MINUTE + SECOND));
         api.logs = vec![
             log(today_start_at + SECOND, Severity::INFO),
             log(today_start_at + MINUTE, Severity::WARN),
@@ -186,7 +195,7 @@ impl Fixture {
 }
 
 #[test]
-fn services_count_the_spans_that_enter_them_and_their_logs() {
+fn services_count_their_http_requests_and_their_logs() {
     let fixture = Fixture::new();
     let service_list = fixture.reader().list_services(MINUTE, 10).unwrap();
     assert_eq!(service_list.step_ns, MINUTE);
@@ -196,7 +205,7 @@ fn services_count_the_spans_that_enter_them_and_their_logs() {
         .iter()
         .map(|summary| summary.service.as_str())
         .collect();
-    assert_eq!(names, ["api", "worker", "cron"]);
+    assert_eq!(names, ["api", "cron", "worker"]);
 
     let api = &service_list.services[0];
     assert_eq!(
@@ -215,6 +224,7 @@ fn services_count_the_spans_that_enter_them_and_their_logs() {
         (latency.p99 - 30 * MILLISECOND).abs() <= 3 * MILLISECOND / 10,
         "{latency:?}"
     );
+    assert_eq!(api.stats.spans, 7);
     assert_eq!((api.stats.logs, api.stats.error_logs), (4, 1));
 
     assert_eq!(api.buckets.len(), 4);
@@ -228,11 +238,12 @@ fn services_count_the_spans_that_enter_them_and_their_logs() {
     assert_eq!(logs, [1, 1, 1, 1]);
     assert_eq!(api.buckets[3].requests.latency, None);
 
-    let worker = &service_list.services[1];
-    assert_eq!(worker.stats.requests.count, 1);
+    let worker = &service_list.services[2];
+    assert_eq!(worker.stats.requests.count, 0);
+    assert_eq!(worker.stats.spans, 2);
     assert!(worker.resource.is_empty());
 
-    let cron = &service_list.services[2];
+    let cron = &service_list.services[1];
     assert_eq!(cron.stats.requests.count, 0);
     assert_eq!(cron.stats.requests.latency, None);
     assert_eq!((cron.stats.logs, cron.stats.error_logs), (2, 1));
@@ -243,49 +254,23 @@ fn services_count_the_spans_that_enter_them_and_their_logs() {
 }
 
 #[test]
-fn a_service_has_its_requests_by_operation() {
+fn a_service_has_its_requests_over_time() {
     let fixture = Fixture::new();
-    let api = fixture.reader().get_service("api", MINUTE, 10).unwrap();
+    let api = fixture.reader().get_service("api", MINUTE).unwrap();
     assert_eq!(api.stats.requests.count, 3);
-    assert_eq!(api.buckets.len(), 4);
-    let operations: Vec<_> = api
-        .operations
+    assert_eq!(api.stats.logs, 4);
+    let counts: Vec<_> = api
+        .buckets
         .iter()
-        .map(|operation| {
-            (
-                operation.name.as_str(),
-                operation.kind,
-                operation.requests.count,
-                operation.requests.errors,
-            )
-        })
+        .map(|bucket| bucket.requests.count)
         .collect();
-    assert_eq!(
-        operations,
-        [
-            ("GET /users", SpanKind::Server, 2, 1),
-            ("POST /orders", SpanKind::Server, 1, 0)
-        ]
-    );
-    assert_eq!(
-        api.operations[0].attributes,
-        attributes_from_json(json!({"http.route": "/users", "http.request.method": "GET"}))
-    );
-    assert!(api.operations[1].attributes.is_empty());
+    assert_eq!(counts, [1, 1, 1, 0]);
+    assert_eq!(api.resource["telemetry.sdk.language"], "rust");
 
-    let Latency { p50, p95, p99 } = api.operations[1].requests.latency.unwrap();
-    assert!((p50 - 20 * MILLISECOND).abs() <= MILLISECOND / 5, "{p50}");
-    assert_eq!((p95, p99), (p50, p50));
-
-    let truncated_service = fixture.reader().get_service("api", MINUTE, 1).unwrap();
-    assert_eq!(truncated_service.operations.len(), 1);
-    assert!(truncated_service.truncated);
-
-    let unknown_service = fixture.reader().get_service("nobody", MINUTE, 10).unwrap();
+    let unknown_service = fixture.reader().get_service("nobody", MINUTE).unwrap();
     assert_eq!(unknown_service.stats.requests.count, 0);
     assert_eq!(unknown_service.stats.logs, 0);
     assert!(unknown_service.resource.is_empty());
-    assert!(unknown_service.operations.is_empty());
     assert!(
         unknown_service
             .buckets
@@ -298,7 +283,7 @@ fn a_service_has_its_requests_by_operation() {
 fn the_step_has_to_fit_the_range() {
     let fixture = Fixture::new();
     assert!(fixture.reader().list_services(0, 10).is_err());
-    assert!(fixture.reader().get_service("api", 1, 10).is_err());
+    assert!(fixture.reader().get_service("api", 1).is_err());
 }
 
 #[test]
@@ -311,6 +296,7 @@ fn percentiles_stay_within_a_percent_of_the_values() {
             trace_id: TraceId([0; 16]),
             span_id: SpanId(i64::to_be_bytes(request_number)),
             duration_ns: request_number * MILLISECOND,
+            attributes: attributes_from_json(json!({"http.request.method": "GET"})),
             ..span(
                 0,
                 0,
@@ -342,30 +328,4 @@ fn percentiles_stay_within_a_percent_of_the_values() {
             "{estimate} for {exact}"
         );
     }
-}
-
-#[test]
-fn an_operation_has_its_requests_over_time() {
-    let fixture = Fixture::new();
-    let users = fixture
-        .reader()
-        .get_operation("api", "GET /users", SpanKind::Server, MINUTE)
-        .unwrap();
-    assert_eq!((users.requests.count, users.requests.errors), (2, 1));
-    let counts: Vec<_> = users
-        .buckets
-        .iter()
-        .map(|bucket| bucket.requests.count)
-        .collect();
-    assert_eq!(counts, [1, 1, 0, 0]);
-    assert_eq!(users.attributes["http.route"], "/users");
-    assert!(users.attributes.get("old").is_none());
-
-    let other_kind = fixture
-        .reader()
-        .get_operation("api", "GET /users", SpanKind::Consumer, MINUTE)
-        .unwrap();
-    assert_eq!(other_kind.requests.count, 0);
-    assert!(other_kind.attributes.is_empty());
-    assert_eq!(other_kind.buckets.len(), 4);
 }

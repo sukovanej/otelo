@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use otelo_indexed_storage::{TimeRange, query};
 use otelo_query::Signal;
 use serde::Deserialize;
@@ -67,4 +69,18 @@ pub fn parse_signal(text: &str) -> Result<Signal, ApiError> {
 pub fn parse_query(text: Option<&str>, signal: Signal) -> Result<otelo_query::Query, ApiError> {
     otelo_query::parse_query(text.unwrap_or_default(), signal)
         .map_err(|error| ApiError::bad_request(&error))
+}
+
+pub fn parse_field_list<Field: FromStr<Err = String>>(
+    text: Option<&str>,
+) -> Result<Vec<Field>, ApiError> {
+    text.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            name.parse()
+                .map_err(|error: String| ApiError::bad_request(&error))
+        })
+        .collect()
 }

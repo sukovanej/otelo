@@ -7,7 +7,7 @@ import {
 } from "@solidjs/router";
 import { createMemo, Errored, Show } from "solid-js";
 
-import { getCalls, getLogGroups, getService, getTraces, type TargetKey } from "@otelo/api";
+import { getLogGroups, getService, getSpanGroups, getTraces, type SpanGroup } from "@otelo/api";
 import { Callout, EmptyMessage } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
@@ -20,45 +20,33 @@ import ServiceName from "../../ServiceName";
 import TraceList from "../../traces/TraceList";
 import { createRangeFetch, useRange } from "../range";
 import RangeBar from "../range-bar";
-import { isSameTarget, parseTarget } from "../target";
-import ServicePageCalls, { type CallRow } from "./service-page-calls";
-import ServicePageOperationModal from "./service-page-operation-modal";
+import {
+  isSpanGroupingKind,
+  SPAN_GROUPINGS,
+  type SpanGrouping,
+  type SpanGroupingKind,
+  writeGroupFilter,
+} from "../span-grouping";
 import ServicePageOverview from "./service-page-overview";
+import ServicePageQueries from "./service-page-queries";
 import ServicePageResources from "./service-page-resources";
+import ServicePageSpanGroupModal from "./service-page-span-group-modal";
+import ServicePageSpanGroups from "./service-page-span-groups";
 
-const CLOSED_MODAL_PARAMS = {
-  op: undefined,
-  kind: undefined,
-  call: undefined,
-  system: undefined,
-  target: undefined,
-};
+const CLOSED_MODAL_PARAMS = { group: undefined, spans: undefined };
 
 interface ServicePageParams extends Params {
   readonly name: string;
 }
 
 interface OpenModalSearchParams extends SearchParams {
-  readonly op?: string;
-  readonly kind?: string;
-  readonly call?: string;
-  readonly system?: string;
-  readonly target?: string;
+  readonly group?: string;
+  readonly spans?: string;
 }
 
-type OpenModal = OpenOperation | OpenCall;
-
-interface OpenOperation {
-  readonly variant: "operation";
-  readonly name: string;
-  readonly kind: number;
-}
-
-interface OpenCall {
-  readonly variant: "call";
-  readonly summary: string;
-  readonly kind: number;
-  readonly target: TargetKey;
+interface OpenModal {
+  readonly kind: SpanGroupingKind;
+  readonly filter: string;
 }
 
 export default function ServicePage() {
@@ -69,12 +57,9 @@ export default function ServicePage() {
   const [modalParams, setModalParams] = useSearchParams<OpenModalSearchParams>();
   const openModal = createMemo(
     (): OpenModal | undefined => {
-      const kind = Number(modalParams.kind);
-      if (modalParams.op === undefined || !Number.isInteger(kind)) return undefined;
-      const target = parseTarget(modalParams.call, modalParams.system, modalParams.target);
-      return target
-        ? { variant: "call", summary: modalParams.op, kind, target }
-        : { variant: "operation", name: modalParams.op, kind };
+      const { group, spans } = modalParams;
+      if (!isSpanGroupingKind(group) || spans === undefined) return undefined;
+      return { kind: group, filter: spans };
     },
     { equals: isSameOpenModal },
   );
@@ -87,12 +72,15 @@ export default function ServicePage() {
     () => ({ name: name() }),
     ({ name: serviceName, ...bounds }, signal) => getService(serviceName, bounds, signal),
   );
-  const fetchedCalls = createRangeFetch(
-    range,
-    "calls",
-    () => ({ name: name() }),
-    ({ name: serviceName, ...bounds }, signal) => getCalls(serviceName, bounds, signal),
-  );
+  const createSpanGroupFetch = (grouping: SpanGrouping) =>
+    createRangeFetch(
+      range,
+      `span-groups-${grouping.kind}`,
+      () => ({ q: grouping.writeFilter(name()), by: grouping.by.join(",") }),
+      getSpanGroups,
+    );
+  const fetchedRoutes = createSpanGroupFetch(SPAN_GROUPINGS.route);
+  const fetchedQueries = createSpanGroupFetch(SPAN_GROUPINGS.query);
   const fetchedErrorTraces = createRangeFetch(
     range,
     "traces",
@@ -112,6 +100,14 @@ export default function ServicePage() {
   };
   const linkToTraces = (query: string) => `/traces${range.toSearch({ q: query })}`;
   const linkToLogs = (query: string, view?: string) => `/logs${range.toSearch({ q: query, view })}`;
+  const toGroupModalParams = (grouping: SpanGrouping, group: SpanGroup) => ({
+    group: grouping.kind,
+    spans: writeGroupFilter(grouping.writeFilter(name()), grouping.by, group),
+  });
+  const groupHref = (grouping: SpanGrouping) => (group: SpanGroup) =>
+    `/services/${encodeURIComponent(name())}${range.toSearch(toGroupModalParams(grouping, group))}`;
+  const openGroup = (grouping: SpanGrouping) => (group: SpanGroup) =>
+    setModalParams(toGroupModalParams(grouping, group));
   const zoomRangeTo = (start: number, end: number) =>
     range.setRange(new Date(start).toISOString(), new Date(end).toISOString());
 
@@ -156,7 +152,7 @@ export default function ServicePage() {
           <Show when={service()}>
             {(shownService) => (
               <Show
-                when={shownService().stats.requests.count > 0 || shownService().stats.logs > 0}
+                when={shownService().stats.spans > 0 || shownService().stats.logs > 0}
                 fallback={
                   <EmptyMessage>{name()} sent no spans or logs in this range.</EmptyMessage>
                 }
@@ -166,38 +162,45 @@ export default function ServicePage() {
                     service={shownService()}
                     loading={fetchedService.loading()}
                     onZoom={zoomRangeTo}
-                    operationHref={(operation) =>
-                      `/services/${encodeURIComponent(name())}${range.toSearch({
-                        op: operation.name,
-                        kind: String(operation.kind),
-                      })}`
-                    }
-                    onOpenOperation={(operation) =>
-                      setModalParams({
-                        ...CLOSED_MODAL_PARAMS,
-                        op: operation.name,
-                        kind: String(operation.kind),
-                      })
-                    }
                   />
 
-                  <ServicePageResources service={name()} range={range} onZoom={zoomRangeTo} />
-
-                  <Show when={fetchedCalls.errorMessage()}>
+                  <Show when={fetchedRoutes.errorMessage()}>
                     {(errorMessage) => <Callout tone="error">{errorMessage()}</Callout>}
                   </Show>
                   <FetchErrorBoundary>
-                    <Show when={fetchedCalls.data()}>
-                      {(calls) => (
-                        <Show when={calls().service === name() && calls().calls.count > 0}>
-                          <ServicePageCalls
-                            calls={calls()}
-                            loading={fetchedCalls.loading()}
+                    <Show when={fetchedRoutes.data()}>
+                      {(routes) => (
+                        <Show when={routes().groups.length > 0}>
+                          <ServicePageSpanGroups
+                            title="Routes"
+                            description="The HTTP requests by method and route"
+                            nameLabel="Route"
+                            countLabel="Requests"
+                            groups={routes()}
+                            loading={fetchedRoutes.loading()}
+                            groupHref={groupHref(SPAN_GROUPINGS.route)}
+                            onOpenGroup={openGroup(SPAN_GROUPINGS.route)}
+                          />
+                        </Show>
+                      )}
+                    </Show>
+                  </FetchErrorBoundary>
+
+                  <ServicePageResources service={name()} range={range} onZoom={zoomRangeTo} />
+
+                  <Show when={fetchedQueries.errorMessage()}>
+                    {(errorMessage) => <Callout tone="error">{errorMessage()}</Callout>}
+                  </Show>
+                  <FetchErrorBoundary>
+                    <Show when={fetchedQueries.data()}>
+                      {(queries) => (
+                        <Show when={queries().spans.count > 0}>
+                          <ServicePageQueries
+                            queries={queries()}
+                            loading={fetchedQueries.loading()}
                             onZoom={zoomRangeTo}
-                            callHref={(row) =>
-                              `/services/${encodeURIComponent(name())}${range.toSearch(toCallModalParams(row))}`
-                            }
-                            onOpenCall={(row) => setModalParams(toCallModalParams(row))}
+                            queryHref={groupHref(SPAN_GROUPINGS.query)}
+                            onOpenQuery={openGroup(SPAN_GROUPINGS.query)}
                           />
                         </Show>
                       )}
@@ -293,9 +296,9 @@ export default function ServicePage() {
 
       <Show when={openModal()} keyed>
         {(modal) => (
-          <ServicePageOperationModal
-            {...modal}
-            service={name()}
+          <ServicePageSpanGroupModal
+            kind={modal.kind}
+            filter={modal.filter}
             range={range}
             onClose={() => setModalParams(CLOSED_MODAL_PARAMS)}
           />
@@ -305,25 +308,7 @@ export default function ServicePage() {
   );
 }
 
-function toCallModalParams(row: CallRow) {
-  return {
-    op: row.operation.summary,
-    kind: String(row.operation.kind),
-    call: row.target.type,
-    system: row.target.system ?? undefined,
-    target: row.target.name ?? undefined,
-  };
-}
-
 function isSameOpenModal(previous: OpenModal | undefined, next: OpenModal | undefined): boolean {
   if (previous === undefined || next === undefined) return previous === next;
-  if (previous.kind !== next.kind) return false;
-  if (previous.variant === "operation") {
-    return next.variant === "operation" && previous.name === next.name;
-  }
-  return (
-    next.variant === "call" &&
-    previous.summary === next.summary &&
-    isSameTarget(previous.target, next.target)
-  );
+  return previous.kind === next.kind && previous.filter === next.filter;
 }

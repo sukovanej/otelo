@@ -1,30 +1,16 @@
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, For } from "solid-js";
 
-import type { Operation, Service } from "@otelo/api";
-import { SpanKindBadge } from "@otelo/ui";
-import {
-  ChartPanel,
-  type Column,
-  formatValue,
-  Panel,
-  Stat,
-  Table,
-  type TimeFrame,
-  type TimeSeries,
-} from "@otelo/viz";
+import type { Service } from "@otelo/api";
+import { ChartPanel, formatValue, Stat, type TimeFrame, type TimeSeries } from "@otelo/viz";
 
-import { toKindName } from "../../traces/span";
-import SpanTitle from "../../traces/SpanTitle";
 import { toTimeFrame } from "../frame";
-import { PERCENTILES, toErrorRateSeries, toLatencySeries, toRequestSeries } from "../series";
+import { PERCENTILES, toCountSeries, toErrorRateSeries, toLatencySeries } from "../series";
 import { measureSeconds, toRate, toShare } from "../stats";
 
 interface ServicePageOverviewProps {
   readonly service: Service;
   readonly loading: boolean;
   readonly onZoom: (start: number, end: number) => void;
-  readonly operationHref: (operation: Operation) => string;
-  readonly onOpenOperation: (operation: Operation) => void;
 }
 
 export default function ServicePageOverview(props: ServicePageOverviewProps) {
@@ -35,9 +21,10 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
   const rangeSeconds = () => measureSeconds(props.service.start_at, props.service.end_at);
 
   // A prop written as an array literal would build the series again on every read.
-  const requestSeries = createMemo(() => toRequestSeries(buckets()));
-  const latencySeries = createMemo(() => toLatencySeries(buckets()));
-  const errorRateSeries = createMemo(() => toErrorRateSeries(buckets()));
+  const requestSteps = createMemo(() => buckets().map((bucket) => bucket.requests));
+  const requestSeries = createMemo(() => toCountSeries(requestSteps()));
+  const latencySeries = createMemo(() => toLatencySeries(requestSteps()));
+  const errorRateSeries = createMemo(() => toErrorRateSeries(requestSteps()));
   const requestCountTrend = createMemo(() => buckets().map((bucket) => bucket.requests.count));
   const logCountTrend = createMemo(() => buckets().map((bucket) => bucket.logs));
   const logSeries = createMemo<TimeSeries[]>(() => [
@@ -50,63 +37,6 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
       label: "Error and above",
       color: "error",
       values: buckets().map((bucket) => bucket.error_logs),
-    },
-  ]);
-
-  const operationColumns = createMemo<Column<Operation>[]>(() => [
-    {
-      kind: "cell",
-      id: "name",
-      label: "Operation",
-      sortBy: (operation) => operation.name,
-      cell: (operation) => (
-        <SpanTitle variant="operation" name={operation.name} attributes={operation.attributes} />
-      ),
-    },
-    {
-      kind: "cell",
-      id: "kind",
-      label: "Kind",
-      width: "max-content",
-      sortBy: (operation) => operation.kind,
-      cell: (operation) => <SpanKindBadge kind={toKindName(operation.kind)} />,
-    },
-    {
-      kind: "meter",
-      id: "requests",
-      label: "Requests",
-      unit: "count",
-      value: (operation) => operation.requests.count,
-    },
-    {
-      kind: "number",
-      id: "rate",
-      label: "Rate",
-      unit: "rate",
-      value: (operation) => toRate(operation.requests.count, rangeSeconds()),
-    },
-    {
-      kind: "number",
-      id: "errors",
-      label: "Error rate",
-      unit: "ratio",
-      value: (operation) => toShare(operation.requests.errors, operation.requests.count),
-      tone: (operation) => (operation.requests.errors > 0 ? "error" : undefined),
-    },
-    ...PERCENTILES.map((percentile): Column<Operation> => ({
-      kind: "number",
-      id: percentile,
-      label: percentile.toUpperCase(),
-      unit: "duration",
-      value: (operation) => operation.requests.latency?.[percentile] ?? null,
-    })),
-    {
-      kind: "meter",
-      id: "total",
-      label: "Total time",
-      description: "The durations of its requests added up",
-      unit: "duration",
-      value: (operation) => operation.requests.total_ns,
     },
   ]);
 
@@ -153,7 +83,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartPanel
           title="Requests"
-          description="Spans that enter the service, by step"
+          description="HTTP requests the service served, by step"
           kind="bar"
           unit="count"
           frame={frame()}
@@ -194,29 +124,6 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
           onZoom={props.onZoom}
         />
       </div>
-
-      <Show when={props.service.operations.length > 0}>
-        <Panel
-          title="Operations"
-          description={
-            props.service.truncated
-              ? "The requests by span name, the most requested only"
-              : "The requests by span name"
-          }
-          flush
-        >
-          <Table
-            label="Operations"
-            rows={props.service.operations}
-            rowKey={(operation) => `${operation.kind} ${operation.name}`}
-            columns={operationColumns()}
-            initialSort={{ columnId: "requests", descending: true }}
-            href={props.operationHref}
-            onRowClick={props.onOpenOperation}
-            loading={props.loading}
-          />
-        </Panel>
-      </Show>
     </>
   );
 }
