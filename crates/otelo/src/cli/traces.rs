@@ -50,10 +50,13 @@ pub fn print_spans(args: &SpansArgs) -> anyhow::Result<()> {
     if let Some(by) = &args.by {
         return print_span_groups(args, by);
     }
-    let mut params = args.range.to_query_params();
-    params.push(("q", join_query_words(&args.query)));
-    params.push(("sort", args.sort.map(|sort| sort.name().to_owned())));
-    let answer: Spans = args.client.get("/api/spans", &params)?;
+    let params = [
+        ("q", join_query_words(&args.query)),
+        ("sort", args.sort.map(|sort| sort.name().to_owned())),
+    ];
+    let answer: Spans = args
+        .range
+        .fetch_pages(&args.client, "/api/spans", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {
             let mut table = Table::new(&[
@@ -79,7 +82,7 @@ pub fn print_spans(args: &SpansArgs) -> anyhow::Result<()> {
         OutputFormat::Json => print_json(&answer)?,
     }
     note_truncation(
-        answer.truncated,
+        answer.next.is_some(),
         "More spans match; narrow them with the query or --since, or raise --limit.",
     );
     note_unindexed_keys(Signal::Spans, &answer.unindexed);
@@ -141,10 +144,13 @@ pub struct TracesArgs {
 }
 
 pub fn print_traces(args: &TracesArgs) -> anyhow::Result<()> {
-    let mut params = args.range.to_query_params();
-    params.push(("q", join_query_words(&args.query)));
-    params.push(("sort", args.sort.map(|sort| sort.name().to_owned())));
-    let answer: Traces = args.client.get("/api/traces", &params)?;
+    let params = [
+        ("q", join_query_words(&args.query)),
+        ("sort", args.sort.map(|sort| sort.name().to_owned())),
+    ];
+    let answer: Traces = args
+        .range
+        .fetch_pages(&args.client, "/api/traces", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {
             let mut table = Table::new(&[
@@ -172,7 +178,7 @@ pub fn print_traces(args: &TracesArgs) -> anyhow::Result<()> {
         OutputFormat::Json => print_json(&answer)?,
     }
     note_truncation(
-        answer.truncated,
+        answer.next.is_some(),
         "More traces match; narrow them with the query or --since, or raise --limit.",
     );
     note_unindexed_keys(Signal::Spans, &answer.unindexed);

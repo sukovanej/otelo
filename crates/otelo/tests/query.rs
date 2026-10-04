@@ -200,6 +200,34 @@ fn check_the_groups_of_a_metric(daemon: &Daemon) {
     );
 }
 
+fn read_json_response(response: &str) -> Value {
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(head.starts_with("HTTP/1.1 200"), "{response}");
+    serde_json::from_str(body).unwrap()
+}
+
+fn check_the_pages_of_a_list(daemon: &Daemon) {
+    let all_lines = read_json_response(&send_get_request(daemon, "/api/logs?since=2d"));
+    let first_page = read_json_response(&send_get_request(daemon, "/api/logs?since=2d&limit=1"));
+    let next = first_page["next"].as_str().unwrap();
+    let second_page = read_json_response(&send_get_request(
+        daemon,
+        &format!("/api/logs?since=2d&limit=1&after={next}"),
+    ));
+    assert_eq!(first_page["logs"][0], all_lines["logs"][0]);
+    assert_eq!(second_page["logs"][0], all_lines["logs"][1]);
+
+    let past_the_page_limit = send_get_request(daemon, "/api/spans?limit=1001");
+    assert!(
+        past_the_page_limit.starts_with("HTTP/1.1 400"),
+        "{past_the_page_limit}"
+    );
+    let not_a_cursor = send_get_request(daemon, "/api/spans?after=newest");
+    assert!(not_a_cursor.starts_with("HTTP/1.1 400"), "{not_a_cursor}");
+    let many_metrics = send_get_request(daemon, "/api/metrics?limit=10000");
+    assert!(many_metrics.starts_with("HTTP/1.1 200"), "{many_metrics}");
+}
+
 fn check_the_spec_lists_every_path(daemon: &Daemon) {
     let spec = send_get_request(daemon, "/api/openapi.json");
     for path in [
@@ -234,7 +262,7 @@ fn the_cli_reads_what_the_api_serves() {
 
     let (raw, stderr) = run_otelo_and_parse_json(&daemon, &["logs", "--raw", "--limit", "1"]);
     assert_eq!(raw["logs"][0]["body"], "query failed");
-    assert_eq!(raw["truncated"], true);
+    assert!(raw["next"].is_string(), "{raw}");
     assert!(stderr.contains("--limit"), "{stderr}");
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
 
@@ -303,6 +331,7 @@ fn the_cli_reads_what_the_api_serves() {
     check_the_routes_and_the_queries_of_a_service(&daemon);
     check_the_groups_of_spans(&daemon);
     check_the_groups_of_a_metric(&daemon);
+    check_the_pages_of_a_list(&daemon);
     check_the_spec_lists_every_path(&daemon);
     stop_daemon(daemon, StopSignal::Term);
 }

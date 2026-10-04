@@ -11,16 +11,19 @@ import type { ListResult, ListState } from "../list";
 import ListContentEnd from "./list-content-end";
 import ListContentIndexHint from "./list-content-index-hint";
 
-interface IndexedListResult<V extends string> extends ListResult<V> {
+interface IndexedListResult {
   readonly body: IndexedListBody;
 }
 
 interface IndexedListBody {
-  readonly truncated: boolean;
   readonly unindexed: ReadonlyArray<string>;
 }
 
-interface ListContentProps<V extends string, R extends IndexedListResult<V>, S extends string> {
+interface ListContentProps<
+  V extends string,
+  R extends ListResult<V> & IndexedListResult,
+  S extends string,
+> {
   readonly list: ListState<V, R, S>;
   readonly signal: IndexedSignal;
   readonly singularNoun: string;
@@ -30,7 +33,7 @@ interface ListContentProps<V extends string, R extends IndexedListResult<V>, S e
 
 export default function ListContent<
   V extends string,
-  R extends IndexedListResult<V>,
+  R extends ListResult<V> & IndexedListResult,
   S extends string,
 >(props: ListContentProps<V, R, S>) {
   const list = () => props.list;

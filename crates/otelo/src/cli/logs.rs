@@ -22,11 +22,12 @@ pub struct LogsArgs {
 }
 
 pub fn print_logs(args: &LogsArgs) -> anyhow::Result<()> {
-    let mut params = args.range.to_query_params();
-    params.push(("q", join_query_words(&args.query)));
+    let query_param = ("q", join_query_words(&args.query));
     let narrowing_advice = "narrow them with the query or --since, or raise --limit";
     if args.raw {
-        let answer: Logs = args.client.get("/api/logs", &params)?;
+        let answer: Logs = args
+            .range
+            .fetch_pages(&args.client, "/api/logs", &[query_param])?;
         match args.client.choose_output_format() {
             OutputFormat::Table => {
                 let mut table = Table::new(&["TIME (UTC)", "SERVICE", "LEVEL", "TRACE", "BODY"]);
@@ -45,12 +46,14 @@ pub fn print_logs(args: &LogsArgs) -> anyhow::Result<()> {
             OutputFormat::Json => print_json(&answer)?,
         }
         note_truncation(
-            answer.truncated,
+            answer.next.is_some(),
             &format!("More lines match; {narrowing_advice}."),
         );
         note_unindexed_keys(Signal::Logs, &answer.unindexed);
         return Ok(());
     }
+    let mut params = args.range.to_query_params();
+    params.push(query_param);
     let answer: LogGroups = args.client.get("/api/logs/groups", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {

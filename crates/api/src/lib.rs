@@ -20,7 +20,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use jiff::Timestamp;
-use otelo_indexed_storage::query::{SpanGroupRank, SpanSort};
+use otelo_indexed_storage::query::{MAX_PAGE_ROWS, SpanGroupRank, SpanSort};
 use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
 use otelo_query::Signal;
 use otelo_state::StateFile;
@@ -42,7 +42,29 @@ pub use error::ErrorBody;
 pub use indexes::{IndexBody, IndexList, IndexedSignalName};
 pub use time::{convert_to_unix_nanos, parse_duration, parse_time};
 
-pub(crate) const MAX_ROW_LIMIT: usize = 10_000;
+const MAX_ROW_LIMIT: usize = 10_000;
+
+#[derive(Clone, Copy)]
+pub(crate) struct RowLimits {
+    default_rows: usize,
+    max_rows: usize,
+}
+
+impl RowLimits {
+    pub(crate) const fn up_to_max_rows(default_rows: usize) -> Self {
+        Self {
+            default_rows,
+            max_rows: MAX_ROW_LIMIT,
+        }
+    }
+
+    pub(crate) const fn up_to_max_page_rows(default_rows: usize) -> Self {
+        Self {
+            default_rows,
+            max_rows: MAX_PAGE_ROWS,
+        }
+    }
+}
 
 pub(crate) const QUERY_TIME_LIMIT: Duration = Duration::from_secs(10);
 
@@ -218,7 +240,7 @@ impl Api {
         &self,
         requested_range: RequestedRange,
         requested_limit: Option<usize>,
-        default_limit: usize,
+        row_limits: RowLimits,
         query: impl FnOnce(OpenedRange, usize) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         self.run_blocking_query(move |api| {
@@ -228,7 +250,7 @@ impl Api {
                 requested_range.until.as_deref(),
                 requested_range.default_since,
             )?;
-            let limit = check_limit(requested_limit, default_limit)
+            let limit = check_limit(requested_limit, row_limits)
                 .map_err(|error| ApiError::bad_request(&error))?;
             query(api.open_range(range)?, limit)
         })

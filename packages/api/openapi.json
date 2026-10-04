@@ -505,7 +505,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "The most rows to return.",
+            "description": "The most rows to return, from 1 to 1000.",
             "required": false,
             "schema": {
               "type": "integer",
@@ -513,9 +513,18 @@
             }
           },
           {
+            "name": "after",
+            "in": "query",
+            "description": "The `next` of the page before, to return the page after it. The first\npage when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "q",
             "in": "query",
-            "description": "The records to keep, such as `http.route = \"/matches\" OR user.id = 7`.\nEvery record when missing.",
+            "description": "The lines to keep, such as `level >= warn service = \"api\"`. Every line\nwhen missing.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1055,11 +1064,20 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "The most rows to return.",
+            "description": "The most rows to return, from 1 to 1000.",
             "required": false,
             "schema": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "The `next` of the page before, to return the page after it. The first\npage when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -1243,11 +1261,20 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "The most rows to return.",
+            "description": "The most rows to return, from 1 to 1000.",
             "required": false,
             "schema": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "The `next` of the page before, to return the page after it. The first\npage when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -2347,7 +2374,7 @@
         "description": "Log lines, newest first.",
         "required": [
           "logs",
-          "truncated",
+          "next",
           "unindexed"
         ],
         "properties": {
@@ -2357,9 +2384,12 @@
               "$ref": "#/components/schemas/LogLine"
             }
           },
-          "truncated": {
-            "type": "boolean",
-            "description": "More lines match than the limit let through."
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `after` of the request for the next page. Null when no more lines\nmatch."
           },
           "unindexed": {
             "type": "array",
@@ -3023,19 +3053,22 @@
         "description": "Spans, in the order the request asked for.",
         "required": [
           "spans",
-          "truncated",
+          "next",
           "unindexed"
         ],
         "properties": {
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `after` of the request for the next page. Null when no more spans\nmatch."
+          },
           "spans": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TraceSpan"
             }
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "More spans match than the limit let through."
           },
           "unindexed": {
             "type": "array",
@@ -3251,19 +3284,22 @@
         "description": "Traces by their root span, in the order the request asked for.",
         "required": [
           "traces",
-          "truncated",
+          "next",
           "unindexed"
         ],
         "properties": {
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `after` of the request for the next page. Null when no more traces\nmatch."
+          },
           "traces": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TraceSummary"
             }
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "More traces match than the limit let through."
           },
           "unindexed": {
             "type": "array",

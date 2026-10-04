@@ -1,4 +1,10 @@
-import { replaceEqualDeep, useQuery, useQueryClient } from "@tanstack/solid-query";
+import {
+  type InfiniteData,
+  replaceEqualDeep,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/solid-query";
 import { type Accessor, createMemo, isPending } from "solid-js";
 
 export const LIVE_RELOAD_MS = 5_000;
@@ -11,8 +17,19 @@ export interface FetchState<T> {
   readonly reload: () => void;
 }
 
+export interface PagedFetchState<T> extends FetchState<T> {
+  readonly hasNextPage: Accessor<boolean>;
+  readonly pageCount: Accessor<number>;
+  readonly fetchNextPage: () => void;
+}
+
 interface ReplaceableFetchState<T> extends FetchState<T> {
   readonly replaceData: (data: T) => void;
+}
+
+interface PageJoining<T> {
+  readonly readNextCursor: (page: T) => string | undefined;
+  readonly joinPages: (shown: T, page: T) => T;
 }
 
 export function createFetch<K, T>(
@@ -45,6 +62,49 @@ export function createFetch<K, T>(
     updatedAt,
     reload: () => void query.refetch(),
     replaceData: (data) => queryClient.setQueryData([queryName, key()], data),
+  };
+}
+
+// Each request reads one page, and a reload or a live refresh reads each loaded page again.
+export function createPagedFetch<K, T>(
+  queryName: string,
+  key: Accessor<K>,
+  fetcher: (key: K, after: string | undefined, signal: AbortSignal) => Promise<T>,
+  pageJoining: PageJoining<T>,
+  live: Accessor<boolean> = () => false,
+): PagedFetchState<T> {
+  const query = useInfiniteQuery(() => {
+    const requestKey = key();
+    return {
+      queryKey: [queryName, requestKey],
+      queryFn: ({ pageParam, signal }) => fetcher(requestKey, pageParam, signal),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: pageJoining.readNextCursor,
+      refetchInterval: live() ? LIVE_RELOAD_MS : false,
+    };
+  });
+  const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
+  const updatedAt = createMemo<Date | undefined>((previous) =>
+    query.dataUpdatedAt === 0 ? previous : new Date(query.dataUpdatedAt),
+  );
+  // A new key leaves the pages undefined until its first page lands.
+  const readPages = (): ReadonlyArray<T> => {
+    const data: InfiniteData<T> | undefined = answered() ? query.data : undefined;
+    return data?.pages ?? [];
+  };
+  const joinedPages = createMemo(() => {
+    const [firstPage, ...nextPages] = readPages();
+    return firstPage && nextPages.reduce(pageJoining.joinPages, firstPage);
+  });
+  return {
+    data: joinedPages,
+    errorMessage: () => (!answered() || query.isRefetchError ? query.error?.message : undefined),
+    loading: () => query.isFetching || isPending(() => query.data),
+    updatedAt,
+    reload: () => void query.refetch(),
+    hasNextPage: () => query.hasNextPage,
+    pageCount: () => readPages().length,
+    fetchNextPage: () => void query.fetchNextPage(),
   };
 }
 

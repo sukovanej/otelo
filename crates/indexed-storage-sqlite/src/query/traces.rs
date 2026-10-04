@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
 use anyhow::ensure;
-use otelo_indexed_storage::query::{SpanSort, Spans, Trace, TraceSpan, TraceSummary, Traces};
+use otelo_indexed_storage::query::{
+    PageRequest, SpanSort, Spans, Trace, TraceSpan, TraceSummary, Traces,
+};
 use otelo_indexed_storage::{Attributes, SpanKind, SpanStatus, TraceId};
 use otelo_query::{BuiltinField, Expression, Field, Operator, Query, Signal};
 use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    WhereClause, row_limit_with_one_more, span_id_from_blob, timestamp_from_nanos,
-    trace_id_from_blob, truncate_to_limit,
+    PageOrder, RowDirection, WhereClause, order_column, row_limit_with_one_more, span_id_from_blob,
+    split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
 
@@ -34,9 +36,13 @@ const SPAN_COLUMNS: &str = "span.trace_id, span.span_id, span.parent_span_id, re
     span.name, span.kind, span.started_at, span.duration_ns, span.status_code, span.attributes,
     span.events, resource.attributes AS resource_attributes";
 
-fn select_spans(where_clause: &WhereClause) -> String {
+const SPAN_CURSOR_INDEX: usize = 12;
+
+const ROOT_SPAN_CURSOR_INDEX: usize = 8;
+
+fn select_spans(columns: &str, where_clause: &WhereClause) -> String {
     format!(
-        "SELECT {SPAN_COLUMNS}
+        "SELECT {columns}
          FROM spans span
          JOIN resources resource ON resource.id = span.resource_id
          WHERE {}",
@@ -44,12 +50,43 @@ fn select_spans(where_clause: &WhereClause) -> String {
     )
 }
 
-const fn pick_order_columns(sort: SpanSort) -> &'static str {
+const NEWEST_SPANS_FIRST: PageOrder = PageOrder {
+    columns: &[
+        order_column("span.started_at", RowDirection::Descending),
+        order_column("span.rowid", RowDirection::Descending),
+    ],
+};
+
+const OLDEST_SPANS_FIRST: PageOrder = PageOrder {
+    columns: &[
+        order_column("span.started_at", RowDirection::Ascending),
+        order_column("span.rowid", RowDirection::Ascending),
+    ],
+};
+
+// Spans of the same duration go newest first in both duration orders.
+const LONGEST_SPANS_FIRST: PageOrder = PageOrder {
+    columns: &[
+        order_column("span.duration_ns", RowDirection::Descending),
+        order_column("span.started_at", RowDirection::Descending),
+        order_column("span.rowid", RowDirection::Descending),
+    ],
+};
+
+const SHORTEST_SPANS_FIRST: PageOrder = PageOrder {
+    columns: &[
+        order_column("span.duration_ns", RowDirection::Ascending),
+        order_column("span.started_at", RowDirection::Descending),
+        order_column("span.rowid", RowDirection::Descending),
+    ],
+};
+
+const fn pick_page_order(sort: SpanSort) -> &'static PageOrder {
     match sort {
-        SpanSort::Newest => "span.started_at DESC",
-        SpanSort::Oldest => "span.started_at",
-        SpanSort::Longest => "span.duration_ns DESC, span.started_at DESC",
-        SpanSort::Shortest => "span.duration_ns, span.started_at DESC",
+        SpanSort::Newest => &NEWEST_SPANS_FIRST,
+        SpanSort::Oldest => &OLDEST_SPANS_FIRST,
+        SpanSort::Longest => &LONGEST_SPANS_FIRST,
+        SpanSort::Shortest => &SHORTEST_SPANS_FIRST,
     }
 }
 
@@ -99,7 +136,7 @@ pub(super) fn explain_spans(reader: &Reader, query: &Query) -> anyhow::Result<Ve
     reader.explain_scan(
         &format!(
             "{} ORDER BY span.started_at DESC",
-            select_spans(&where_clause)
+            select_spans(SPAN_COLUMNS, &where_clause)
         ),
         &where_clause,
     )
@@ -149,20 +186,30 @@ pub(super) fn read_spans(
     reader: &Reader,
     query: &Query,
     sort: SpanSort,
-    limit: usize,
+    page: &PageRequest,
 ) -> anyhow::Result<Spans> {
     let (mut where_clause, unindexed) = compile_span_query(reader, query)?;
-    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
+    let order = pick_page_order(sort);
+    order.push_condition_after(&mut where_clause, page.after.as_ref())?;
+    where_clause.push_param(":limit", row_limit_with_one_more(page.limit)?);
     let sql = format!(
         "{} ORDER BY {} LIMIT :limit",
-        select_spans(&where_clause),
-        pick_order_columns(sort)
+        select_spans(
+            &format!("{SPAN_COLUMNS}, {}", order.cursor_columns()),
+            &where_clause
+        ),
+        order.order_by_sql()
     );
-    let mut spans = reader.collect_rows(&sql, &where_clause, trace_span_from_row)?;
-    let truncated = truncate_to_limit(&mut spans, limit);
+    let rows = reader.collect_rows(&sql, &where_clause, |row| {
+        Ok((
+            order.read_cursor(row, SPAN_CURSOR_INDEX)?,
+            trace_span_from_row(row)?,
+        ))
+    })?;
+    let (spans, next) = split_page(rows, page.limit);
     Ok(Spans {
         spans,
-        truncated,
+        next,
         unindexed,
     })
 }
@@ -171,7 +218,7 @@ pub(super) fn read_traces(
     reader: &Reader,
     query: &Query,
     sort: SpanSort,
-    limit: usize,
+    page: &PageRequest,
 ) -> anyhow::Result<Traces> {
     ensure_query_over_spans(query)?;
     let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
@@ -200,33 +247,41 @@ pub(super) fn read_traces(
         ));
         where_clause.absorb_params(matching);
     }
+    let order = pick_page_order(sort);
+    order.push_condition_after(&mut where_clause, page.after.as_ref())?;
     let sql = format!(
         "SELECT span.trace_id, span.started_at, resource.service, span.name, span.kind,
-                span.duration_ns, span.attributes, resource.attributes AS resource_attributes
+                span.duration_ns, span.attributes, resource.attributes AS resource_attributes,
+                {}
          FROM spans span
          JOIN resources resource ON resource.id = span.resource_id
          WHERE {}
          ORDER BY {}
          LIMIT :limit",
+        order.cursor_columns(),
         where_clause.sql(),
-        pick_order_columns(sort)
+        order.order_by_sql()
     );
-    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
-    let mut roots = reader.collect_rows(&sql, &where_clause, |row| {
+    where_clause.push_param(":limit", row_limit_with_one_more(page.limit)?);
+    let rows = reader.collect_rows(&sql, &where_clause, |row| {
         let attributes: String = row.get(6)?;
         let resource: String = row.get(7)?;
-        Ok(RootSpan {
-            trace_id: trace_id_from_blob(row.get(0)?)?,
-            started_at: row.get(1)?,
-            service: row.get(2)?,
-            name: row.get(3)?,
-            kind: SpanKind::from_number(row.get(4)?),
-            duration_ns: row.get(5)?,
-            attributes: serde_json::from_str(&attributes)?,
-            resource: serde_json::from_str(&resource)?,
-        })
+        let cursor = order.read_cursor(row, ROOT_SPAN_CURSOR_INDEX)?;
+        Ok((
+            cursor,
+            RootSpan {
+                trace_id: trace_id_from_blob(row.get(0)?)?,
+                started_at: row.get(1)?,
+                service: row.get(2)?,
+                name: row.get(3)?,
+                kind: SpanKind::from_number(row.get(4)?),
+                duration_ns: row.get(5)?,
+                attributes: serde_json::from_str(&attributes)?,
+                resource: serde_json::from_str(&resource)?,
+            },
+        ))
     })?;
-    let truncated = truncate_to_limit(&mut roots, limit);
+    let (roots, next) = split_page(rows, page.limit);
     let stats = reader.read_trace_stats(roots.iter().map(|root| root.trace_id))?;
     let traces = roots
         .into_iter()
@@ -251,7 +306,7 @@ pub(super) fn read_traces(
         .collect();
     Ok(Traces {
         traces,
-        truncated,
+        next,
         unindexed,
     })
 }
@@ -266,7 +321,7 @@ pub(super) fn read_trace(
     where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let sql = format!(
         "{} ORDER BY span.started_at LIMIT :limit",
-        select_spans(&where_clause)
+        select_spans(SPAN_COLUMNS, &where_clause)
     );
     let mut spans = reader.collect_rows(&sql, &where_clause, trace_span_from_row)?;
     let spans_truncated = truncate_to_limit(&mut spans, limit);
@@ -278,7 +333,7 @@ pub(super) fn read_trace(
             value: otelo_query::Value::String(id.to_string()),
         }),
     };
-    let logs = super::logs::read_logs(reader, &trace_logs_query, limit)?;
+    let logs = super::logs::read_logs(reader, &trace_logs_query, &PageRequest::first(limit))?;
     if spans.is_empty() && logs.logs.is_empty() {
         return Ok(None);
     }
@@ -286,6 +341,6 @@ pub(super) fn read_trace(
         trace_id: id,
         spans,
         logs: logs.logs,
-        truncated: spans_truncated || logs.truncated,
+        truncated: spans_truncated || logs.next.is_some(),
     }))
 }

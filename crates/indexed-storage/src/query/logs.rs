@@ -6,6 +6,7 @@ use otelo_query::{BuiltinField, Field, Signal, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use super::PageCursor;
 use crate::{Attributes, Severity, SpanId, TraceId};
 
 pub const MAX_GROUPED_LOG_LINES: u64 = 50_000;
@@ -14,8 +15,10 @@ pub const MAX_GROUPED_LOG_LINES: u64 = 50_000;
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Logs {
     pub logs: Vec<LogLine>,
-    /// More lines match than the limit let through.
-    pub truncated: bool,
+    /// The `after` of the request for the next page. Null when no more lines
+    /// match.
+    #[schema(value_type = Option<String>, required = true)]
+    pub next: Option<PageCursor>,
     /// The attributes the query compares that have no index, so it read every
     /// line in the range.
     pub unindexed: Vec<String>,

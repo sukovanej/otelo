@@ -5,8 +5,8 @@ use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
     AttributeKeys, GroupBuckets, LogCounts, LogGroupingField, LogGroups, Logs, MetricFilter,
-    MetricList, MetricSeries, RankOrder, Resolution, Service, Services, SpanGroupRanking,
-    SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
+    MetricList, MetricSeries, PageRequest, RankOrder, Resolution, Service, Services,
+    SpanGroupRanking, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
 };
 use crate::{IndexedAttribute, Result, TimeRange, TraceId};
 
@@ -30,7 +30,7 @@ pub trait Storage: Send + Sync {
 }
 
 pub trait RangeQueries: Catalog {
-    fn list_logs(&self, query: &Query, limit: usize) -> Result<Logs>;
+    fn list_logs(&self, query: &Query, page: PageRequest) -> Result<Logs>;
 
     fn list_log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups>;
 
@@ -43,7 +43,7 @@ pub trait RangeQueries: Catalog {
         limit: usize,
     ) -> Result<LogCounts>;
 
-    fn list_spans(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Spans>;
+    fn list_spans(&self, query: &Query, sort: SpanSort, page: PageRequest) -> Result<Spans>;
 
     fn list_span_groups(
         &self,
@@ -55,7 +55,7 @@ pub trait RangeQueries: Catalog {
         limit: usize,
     ) -> Result<SpanGroups>;
 
-    fn list_traces(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Traces>;
+    fn list_traces(&self, query: &Query, sort: SpanSort, page: PageRequest) -> Result<Traces>;
 
     fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>>;
 

@@ -779,8 +779,11 @@ export interface components {
         /** @description Log lines, newest first. */
         Logs: {
             logs: components["schemas"]["LogLine"][];
-            /** @description More lines match than the limit let through. */
-            truncated: boolean;
+            /**
+             * @description The `after` of the request for the next page. Null when no more lines
+             *     match.
+             */
+            next: string | null;
             /**
              * @description The attributes the query compares that have no index, so it read every
              *     line in the range.
@@ -1095,9 +1098,12 @@ export interface components {
         };
         /** @description Spans, in the order the request asked for. */
         Spans: {
+            /**
+             * @description The `after` of the request for the next page. Null when no more spans
+             *     match.
+             */
+            next: string | null;
             spans: components["schemas"]["TraceSpan"][];
-            /** @description More spans match than the limit let through. */
-            truncated: boolean;
             /** @description The attributes the query compares that have no index. */
             unindexed: string[];
         };
@@ -1181,9 +1187,12 @@ export interface components {
         };
         /** @description Traces by their root span, in the order the request asked for. */
         Traces: {
+            /**
+             * @description The `after` of the request for the next page. Null when no more traces
+             *     match.
+             */
+            next: string | null;
             traces: components["schemas"]["TraceSummary"][];
-            /** @description More traces match than the limit let through. */
-            truncated: boolean;
             /** @description The attributes the query compares that have no index. */
             unindexed: string[];
         };
@@ -1677,11 +1686,16 @@ export interface operations {
                 since?: string;
                 /** @description The end of the range, in the form of `since`. Now when missing. */
                 until?: string;
-                /** @description The most rows to return. */
+                /** @description The most rows to return, from 1 to 1000. */
                 limit?: number;
                 /**
-                 * @description The records to keep, such as `http.route = "/matches" OR user.id = 7`.
-                 *     Every record when missing.
+                 * @description The `next` of the page before, to return the page after it. The first
+                 *     page when missing.
+                 */
+                after?: string;
+                /**
+                 * @description The lines to keep, such as `level >= warn service = "api"`. Every line
+                 *     when missing.
                  */
                 q?: string;
             };
@@ -2017,8 +2031,13 @@ export interface operations {
                 since?: string;
                 /** @description The end of the range, in the form of `since`. Now when missing. */
                 until?: string;
-                /** @description The most rows to return. */
+                /** @description The most rows to return, from 1 to 1000. */
                 limit?: number;
+                /**
+                 * @description The `next` of the page before, to return the page after it. The first
+                 *     page when missing.
+                 */
+                after?: string;
                 /**
                  * @description The spans to keep, such as `service = "api" duration > 500ms`. Every
                  *     span when missing.
@@ -2130,8 +2149,13 @@ export interface operations {
                 since?: string;
                 /** @description The end of the range, in the form of `since`. Now when missing. */
                 until?: string;
-                /** @description The most rows to return. */
+                /** @description The most rows to return, from 1 to 1000. */
                 limit?: number;
+                /**
+                 * @description The `next` of the page before, to return the page after it. The first
+                 *     page when missing.
+                 */
+                after?: string;
                 /**
                  * @description The spans to keep, such as `service = "api" duration > 500ms`. Every
                  *     span when missing.

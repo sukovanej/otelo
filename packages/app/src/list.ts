@@ -3,7 +3,7 @@ import { createSignal, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
-import { createFetch, type FetchState } from "./fetch";
+import { createPagedFetch, type PagedFetchState } from "./fetch";
 import { addTerm } from "./query";
 
 export const DEFAULT_SINCE = "1h";
@@ -30,13 +30,19 @@ export interface ListState<V extends string, R extends ListResult<V>, S extends 
   readonly setSortOrder: (sort: S) => void;
   readonly setRange: (since: string, until: string) => void;
   readonly setLive: (live: boolean) => void;
-  readonly fetched: FetchState<R>;
+  readonly fetched: PagedFetchState<R>;
   readonly shownResult: () => R | undefined;
   readonly canShowMore: () => boolean;
   readonly showMore: () => void;
 }
 
-interface ListBody {
+type ListBody = PagedListBody | TruncatedListBody;
+
+interface PagedListBody {
+  readonly next: string | null;
+}
+
+interface TruncatedListBody {
   readonly truncated: boolean;
 }
 
@@ -55,6 +61,7 @@ interface ListOptions<V extends string, R extends ListResult<V>, S extends strin
   readonly sorts?: ListSorts<S>;
   readonly firstLimits: Record<V, number>;
   readonly fetch: (key: ListKey<V, S>, signal: AbortSignal) => Promise<R>;
+  readonly joinPages?: (shown: R, page: R) => R;
 }
 
 interface ListSearchParams extends SearchParams {
@@ -90,9 +97,10 @@ export function createListState<
   const limit = () =>
     raisedLimit().forQuery === queryIdentity() ? raisedLimit().limit : options.firstLimits[view()];
 
-  const fetched = createFetch(
+  const joinPages = options.joinPages;
+  const fetched = createPagedFetch(
     options.name,
-    () => {
+    (): ListKey<V, S> => {
       const sort = sortOrder();
       return {
         view: view(),
@@ -103,7 +111,12 @@ export function createListState<
         limit: limit(),
       };
     },
-    options.fetch,
+    (key, after, signal) => options.fetch(after === undefined ? key : { ...key, after }, signal),
+    {
+      readNextCursor: (result) =>
+        joinPages && "next" in result.body ? (result.body.next ?? undefined) : undefined,
+      joinPages: joinPages ?? ((_shown, page) => page),
+    },
     live,
   );
 
@@ -137,9 +150,21 @@ export function createListState<
     setLive: (enabled) => setParams({ live: enabled ? "1" : undefined }),
     fetched,
     shownResult,
-    canShowMore: () => (shownResult()?.body.truncated ?? false) && limit() < API_MAX_ROWS,
-    showMore: () =>
-      setRaisedLimit({ forQuery: queryIdentity(), limit: Math.min(API_MAX_ROWS, limit() * 2) }),
+    canShowMore: () => {
+      const body = shownResult()?.body;
+      if (body === undefined) return false;
+      if ("next" in body) {
+        return fetched.hasNextPage() && fetched.pageCount() * limit() < API_MAX_ROWS;
+      }
+      return body.truncated && limit() < API_MAX_ROWS;
+    },
+    showMore: () => {
+      const body = shownResult()?.body;
+      if (body !== undefined && "next" in body) fetched.fetchNextPage();
+      else {
+        setRaisedLimit({ forQuery: queryIdentity(), limit: Math.min(API_MAX_ROWS, limit() * 2) });
+      }
+    },
   };
 }
 

@@ -3,8 +3,8 @@ mod common;
 use std::sync::{Arc, Mutex};
 
 use otelo_indexed_storage::query::{
-    GroupBuckets, LogGroupingField, RankOrder, Resolution, SpanGroupRanking, SpanGroupingField,
-    SpanSort,
+    GroupBuckets, LogGroupingField, PageRequest, RankOrder, Resolution, SpanGroupRanking,
+    SpanGroupingField, SpanSort,
 };
 use otelo_indexed_storage::{
     Attributes, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind, SpanStatus,
@@ -114,10 +114,14 @@ fn open_reader_over_records() -> (tempfile::TempDir, Reader) {
 
 fn run_queries(reader: &Reader, level: &str, kind: &str, limit: usize) {
     let logs = parse_query(&format!("level >= {level}"), Signal::Logs).unwrap();
-    reader.list_logs(&logs, limit).unwrap();
+    reader.list_logs(&logs, PageRequest::first(limit)).unwrap();
     let spans = parse_query(&format!("kind = {kind}"), Signal::Spans).unwrap();
-    reader.list_spans(&spans, SpanSort::Newest, limit).unwrap();
-    reader.list_traces(&spans, SpanSort::Newest, limit).unwrap();
+    reader
+        .list_spans(&spans, SpanSort::Newest, PageRequest::first(limit))
+        .unwrap();
+    reader
+        .list_traces(&spans, SpanSort::Newest, PageRequest::first(limit))
+        .unwrap();
     let all_spans = parse_query("", Signal::Spans).unwrap();
     reader
         .list_span_groups(

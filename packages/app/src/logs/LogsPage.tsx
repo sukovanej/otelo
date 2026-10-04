@@ -41,6 +41,7 @@ export default function LogsPage() {
       key.view === "groups"
         ? { view: "groups", body: await getLogGroups(key, signal) }
         : { view: "lines", body: await getLogs(key, signal) },
+    joinPages: joinLogsPages,
   });
 
   // The line stays open when a reload or another query no longer brings it.
@@ -78,7 +79,7 @@ export default function LogsPage() {
             {(body) => (
               <>
                 {formatCount(body().logs.length, "line")}
-                {body().truncated ? ", newest first; more match" : ""}
+                {body().next === null ? "" : ", newest first; more match"}
               </>
             )}
           </Match>
@@ -139,4 +140,11 @@ export default function LogsPage() {
       </ListContent>
     </div>
   );
+}
+
+function joinLogsPages(shown: LogsResult, page: LogsResult): LogsResult {
+  if (shown.view === "lines" && page.view === "lines") {
+    return { view: "lines", body: { ...page.body, logs: [...shown.body.logs, ...page.body.logs] } };
+  }
+  return page;
 }
