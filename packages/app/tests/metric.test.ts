@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import type { MetricSeries, SeriesGroup, SeriesInfo } from "@otelo/api";
 
 import {
-  listGroupingSections,
+  listGroupingOptions,
   summarizeMetricNames,
   toMetricCharts,
   toMetricFrame,
@@ -81,31 +81,21 @@ test("summarizeMetricNames counts the series of each name", () => {
   ]);
 });
 
-test("listGroupingSections offers the attributes, the service, and the resource keys that differ", () => {
-  const sections = listGroupingSections(
+test("listGroupingOptions offers the attributes, the service, and the resource keys that differ", () => {
+  const options = listGroupingOptions(
     [
       { ...toSeriesInfo("m", { state: "used", name: "a" }), resource: { "host.name": "a", x: 1 } },
       { ...toSeriesInfo("m", { state: "free" }), resource: { "host.name": "b", x: 1 } },
     ],
     ["resource.x", "gone"],
   );
-  expect(sections).toEqual([
-    {
-      title: "Attributes",
-      options: [
-        { value: "attr.name", label: "name" },
-        { value: "state", label: "state" },
-        { value: "gone", label: "gone" },
-      ],
-    },
-    { title: "Service", options: [{ value: "service", label: "service" }] },
-    {
-      title: "Resource",
-      options: [
-        { value: "resource.host.name", label: "resource.host.name" },
-        { value: "resource.x", label: "resource.x" },
-      ],
-    },
+  expect(options).toEqual([
+    { value: "attr.name", label: "name", section: "Attributes" },
+    { value: "state", label: "state", section: "Attributes" },
+    { value: "gone", label: "gone", section: "Attributes" },
+    { value: "service", label: "service", section: "Service" },
+    { value: "resource.host.name", label: "resource.host.name", section: "Resource" },
+    { value: "resource.x", label: "resource.x", section: "Resource" },
   ]);
 });
 

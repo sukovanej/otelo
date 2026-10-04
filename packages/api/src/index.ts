@@ -1,16 +1,25 @@
 import type { components, paths } from "./schema";
 
+export type AttributeKeys = Schemas["AttributeKeys"];
 export type AttributeValue = Schemas["AttributeValue"];
 export type Attributes = Schemas["Attributes"];
+export type ChartKind = Schemas["ChartKind"];
+export type Dashboard = Schemas["Dashboard"];
+export type DashboardDefinition = Schemas["DashboardDefinition"];
+export type DashboardSummary = Schemas["DashboardSummary"];
 export type FieldBody = Schemas["FieldBody"];
 export type FieldSource = FieldBody["source"];
 export type IndexedSignal = Schemas["IndexedSignal"];
+export type GroupedQuery = Schemas["GroupedQuery"];
+export type LogCounts = Schemas["LogCounts"];
 export type LogGroup = Schemas["LogGroup"];
 export type LogGroups = Schemas["LogGroups"];
 export type LogLine = Schemas["LogLine"];
 export type Logs = Schemas["Logs"];
+export type MetricAggregation = Schemas["MetricAggregation"];
 export type MetricList = Schemas["MetricList"];
 export type MetricSeries = Schemas["MetricSeries"];
+export type RankOrder = Schemas["RankOrder"];
 export type SeriesGroup = Schemas["SeriesGroup"];
 export type SeriesInfo = Schemas["SeriesInfo"];
 export type Service = Schemas["Service"];
@@ -18,13 +27,19 @@ export type ServiceSummary = Schemas["ServiceSummary"];
 export type Signal = Schemas["Signal"];
 export type SpanBucket = Schemas["SpanBucket"];
 export type SpanGroup = Schemas["SpanGroup"];
+export type SpanGroupRank = Schemas["SpanGroupRank"];
 export type SpanGroups = Schemas["SpanGroups"];
+export type SpanMeasure = Schemas["SpanMeasure"];
 export type SpanSort = Schemas["SpanSort"];
 export type SpanStats = Schemas["SpanStats"];
 export type Spans = Schemas["Spans"];
 export type TraceSpan = Schemas["TraceSpan"];
 export type TraceSummary = Schemas["TraceSummary"];
 export type Traces = Schemas["Traces"];
+export type Widget = Schemas["Widget"];
+export type WidgetDisplay = Schemas["WidgetDisplay"];
+export type WidgetLayout = Schemas["WidgetLayout"];
+export type WidgetQuery = Schemas["WidgetQuery"];
 
 export interface ListQuery extends GetQuery<"/api/logs"> {}
 
@@ -48,7 +63,9 @@ type GetQuery<P extends keyof paths> = paths[P]["get"] extends {
   ? NonNullable<Q>
   : never;
 
-export function toQueryString(params: Record<string, string | number | null | undefined>): string {
+export function toQueryString(
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
@@ -64,6 +81,13 @@ export const getLogGroups = (query: GetQuery<"/api/logs/groups">, signal?: Abort
   requestJson<OkBody<"/api/logs/groups", "get">>(
     "GET",
     `/api/logs/groups${toQueryString(query)}`,
+    signal,
+  );
+
+export const getLogCounts = (query: GetQuery<"/api/logs/counts">, signal?: AbortSignal) =>
+  requestJson<OkBody<"/api/logs/counts", "get">>(
+    "GET",
+    `/api/logs/counts${toQueryString(query)}`,
     signal,
   );
 
@@ -123,6 +147,13 @@ export const getService = (
     signal,
   );
 
+export const getAttributeKeys = (signal: Signal, abortSignal?: AbortSignal) =>
+  requestJson<OkBody<"/api/attributes", "get">>(
+    "GET",
+    `/api/attributes${toQueryString({ signal })}`,
+    abortSignal,
+  );
+
 export const completeQuery = (
   signal: Signal,
   query: string,
@@ -134,6 +165,26 @@ export const completeQuery = (
     `/api/complete${toQueryString({ signal, q: query, cursor: cursorInChars })}`,
     abortSignal,
   );
+
+export const listDashboards = (signal?: AbortSignal) =>
+  requestJson<OkBody<"/api/dashboards", "get">>("GET", "/api/dashboards", signal);
+
+export const getDashboard = (id: number, signal?: AbortSignal) =>
+  requestJson<OkBody<"/api/dashboards/{id}", "get">>("GET", `/api/dashboards/${id}`, signal);
+
+export const createDashboard = (definition: DashboardDefinition) =>
+  requestJson<OkBody<"/api/dashboards", "post">>("POST", "/api/dashboards", undefined, definition);
+
+export const replaceDashboard = (id: number, definition: DashboardDefinition) =>
+  requestJson<OkBody<"/api/dashboards/{id}", "put">>(
+    "PUT",
+    `/api/dashboards/${id}`,
+    undefined,
+    definition,
+  );
+
+export const deleteDashboard = (id: number) =>
+  requestJson<OkBody<"/api/dashboards/{id}", "delete">>("DELETE", `/api/dashboards/${id}`);
 
 export const addIndex = (signal: IndexedSignal, key: string) =>
   requestJson<OkBody<"/api/indexes/{signal}/{key}", "put">>(
@@ -163,8 +214,13 @@ class ApiError extends Error {
   }
 }
 
-async function requestJson<T>(method: string, path: string, signal?: AbortSignal): Promise<T> {
-  const response = await sendRequest(method, path, signal);
+async function requestJson<T>(
+  method: string,
+  path: string,
+  signal?: AbortSignal,
+  requestBody?: object,
+): Promise<T> {
+  const response = await sendRequest(method, path, signal, requestBody);
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the spec names the type of each path
   return (await response.json()) as T;
 }

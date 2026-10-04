@@ -13,3 +13,15 @@ CREATE TABLE IF NOT EXISTS passwords (
   -- The SHA-256 of the password.
   hash BLOB NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS dashboards (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  -- A JSON array of the widgets, in their order.
+  widgets TEXT NOT NULL,
+  -- Unix nanoseconds.
+  created_at INTEGER NOT NULL,
+  -- Unix nanoseconds.
+  updated_at INTEGER NOT NULL
+);

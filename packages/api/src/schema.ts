@@ -43,6 +43,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The saved dashboards, the most recently changed first. */
+        get: operations["list_dashboards"];
+        put?: never;
+        /** Saves a new dashboard. */
+        post: operations["create_dashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dashboards/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One saved dashboard. */
+        get: operations["get_dashboard"];
+        /** Replaces what a saved dashboard shows. */
+        put: operations["replace_dashboard"];
+        post?: never;
+        /** Deletes a saved dashboard, and lists the ones left. */
+        delete: operations["delete_dashboard"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/indexes": {
         parameters: {
             query?: never;
@@ -128,6 +165,27 @@ export interface paths {
         };
         /** Log lines, newest first. */
         get: operations["list_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The count of the log lines that the query keeps, over the range and in
+         *     buckets of one step, and grouped by the values of the `by` names, ranked
+         *     by their count of lines in `order`. Each group has its own buckets.
+         */
+        get: operations["count_logs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -267,7 +325,7 @@ export interface paths {
         };
         /**
          * The spans that the query keeps, grouped by the values of the `by` names,
-         *     the most time first. Each group has the count, the failures, the total
+         *     ranked by `rank` in `order`, the most time first when both are missing. Each group has the count, the failures, the total
          *     time, and the latency percentiles of its spans, and the name and the
          *     attributes of its newest span. The answer has the same numbers for all the
          *     spans, over the range and in buckets of one step.
@@ -406,6 +464,12 @@ export interface components {
             kind: "distribution";
         });
         /**
+         * @description How a time series draws its values: lines, lines over a filled area, or
+         *     stacked bars.
+         * @enum {string}
+         */
+        ChartKind: "line" | "area" | "bar";
+        /**
          * @description What the text of a suggestion is.
          * @enum {string}
          */
@@ -414,6 +478,48 @@ export interface components {
         Completions: {
             field: null | components["schemas"]["FieldBody"];
             suggestions: components["schemas"]["SuggestionBody"][];
+        };
+        /** @description A saved dashboard. */
+        Dashboard: {
+            /** Format: date-time */
+            created_at: string;
+            definition: components["schemas"]["DashboardDefinition"];
+            id: components["schemas"]["DashboardId"];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description What a dashboard shows: its name, its description, and its widgets, no two
+         *     of which overlap on the grid.
+         */
+        DashboardDefinition: {
+            /** @description Up to 1000 characters. */
+            description: string;
+            /** @description The name, without the spaces around it; 1 to 200 characters. */
+            name: string;
+            /** @description Up to 100 widgets. */
+            widgets: components["schemas"]["Widget"][];
+        };
+        /**
+         * Format: int64
+         * @description The ID of a saved dashboard.
+         */
+        DashboardId: number;
+        /** @description The saved dashboards, the most recently changed first. */
+        DashboardList: {
+            dashboards: components["schemas"]["DashboardSummary"][];
+        };
+        /** @description A saved dashboard without its widgets. */
+        DashboardSummary: {
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            id: components["schemas"]["DashboardId"];
+            name: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int32 */
+            widget_count: number;
         };
         /**
          * @description The values a histogram series recorded in one time step: its points
@@ -521,6 +627,15 @@ export interface components {
             /** @enum {string} */
             type: "other";
         };
+        /** @description A query and the names to group what it reads by. */
+        GroupedQuery: {
+            /**
+             * @description The names to group by, as a query writes them, such as `service` or
+             *     `http.route`. Everything is one group when empty.
+             */
+            by: string[];
+            query: components["schemas"]["WidgetQuery"];
+        };
         IndexBody: {
             key: string;
             /** @description `logs` or `spans`. */
@@ -544,6 +659,62 @@ export interface components {
             p95: number;
             /** Format: int64 */
             p99: number;
+        };
+        /** @description The lines of one step. */
+        LogCountBucket: {
+            /** Format: int64 */
+            count: number;
+            /**
+             * Format: date-time
+             * @description The start of the step.
+             */
+            start_at: string;
+        };
+        /** @description The lines that share the values of the grouping fields. */
+        LogCountGroup: {
+            /** @description The lines of the group in every step, oldest first. */
+            buckets: components["schemas"]["LogCountBucket"][];
+            /** Format: int64 */
+            count: number;
+            /**
+             * @description The values of the grouping fields, by the fields as a query writes
+             *     them, such as `service`. A `level` is its name in lower case, such as
+             *     `warn`. A field the lines lack is missing.
+             */
+            values: components["schemas"]["Attributes"];
+        };
+        /**
+         * @description The log lines a query keeps in a range, counted over the range and by
+         *     step, and grouped by the values of some fields, the most lines first.
+         */
+        LogCounts: {
+            /** @description The lines of every step, oldest first. */
+            buckets: components["schemas"]["LogCountBucket"][];
+            /**
+             * Format: int64
+             * @description Every line the query keeps.
+             */
+            count: number;
+            /** Format: date-time */
+            end_at: string;
+            groups: components["schemas"]["LogCountGroup"][];
+            /**
+             * Format: date-time
+             * @description The range, after the retention capped it.
+             */
+            start_at: string;
+            /**
+             * Format: int64
+             * @description The length of a bucket in nanoseconds.
+             */
+            step_ns: number;
+            /**
+             * @description More groups match than the limit let through, which kept the ones
+             *     with the most lines.
+             */
+            truncated: boolean;
+            /** @description The attributes the query compares that have no index. */
+            unindexed: string[];
         };
         LogGroup: {
             /** Format: int64 */
@@ -617,6 +788,13 @@ export interface components {
             unindexed: string[];
         };
         /**
+         * @description The number a widget takes of the points of a metric in a step. `avg`,
+         *     `min`, `max`, and `last` fit a gauge and an updown, `rate` a counter, and
+         *     the percentiles a histogram.
+         * @enum {string}
+         */
+        MetricAggregation: "avg" | "min" | "max" | "last" | "rate" | "p50" | "p90" | "p99";
+        /**
          * @description How the points of a series combine over time.
          *
          *     A `gauge` is a value at an instant, such as a CPU share. An `updown` is a
@@ -688,6 +866,12 @@ export interface components {
             /** Format: double */
             p99: number;
         };
+        /**
+         * @description Which end of a ranking comes first: the groups with the `highest` number, or
+         *     the ones with the `lowest`.
+         * @enum {string}
+         */
+        RankOrder: "highest" | "lowest";
         /**
          * @description Which points a metric query reads.
          *
@@ -830,6 +1014,11 @@ export interface components {
         SpanGroup: {
             /** @description The attributes of its newest span. */
             attributes: components["schemas"]["Attributes"];
+            /**
+             * @description The spans of the group in every step, oldest first, when
+             *     `group_buckets` asked for them.
+             */
+            buckets: components["schemas"]["SpanBucket"][] | null;
             /** @description The span name of its newest span. */
             name: string;
             spans: components["schemas"]["SpanStats"];
@@ -839,6 +1028,13 @@ export interface components {
              */
             values: components["schemas"]["Attributes"];
         };
+        /**
+         * @description The number span groups rank by: the total `time` of their spans, their
+         *     `count`, their `errors`, their `error_rate`, or a percentile of their
+         *     durations.
+         * @enum {string}
+         */
+        SpanGroupRank: "time" | "count" | "errors" | "error_rate" | "p50" | "p95" | "p99";
         /**
          * @description The spans a query keeps in a range, grouped by the values of some fields,
          *     the most time first.
@@ -869,6 +1065,13 @@ export interface components {
             /** @description The attributes the query compares that have no index. */
             unindexed: string[];
         };
+        /**
+         * @description The number a widget takes of spans: their count, their count per second,
+         *     their failures, the share of them that failed, or a percentile of their
+         *     durations.
+         * @enum {string}
+         */
+        SpanMeasure: "count" | "rate" | "errors" | "error_rate" | "p50" | "p95" | "p99";
         /**
          * @description The order of a list of spans, or of traces by their root span.
          * @enum {string}
@@ -991,6 +1194,98 @@ export interface components {
          * @enum {string}
          */
         ValueType: "null" | "bool" | "int" | "float" | "string" | "array" | "object" | "mixed" | "duration";
+        /** @description One tile of a dashboard. */
+        Widget: {
+            display: components["schemas"]["WidgetDisplay"];
+            layout: components["schemas"]["WidgetLayout"];
+            title: string;
+        };
+        /**
+         * @description What a widget draws.
+         *
+         *     `timeseries` charts each query over the range, a line per group. `value`
+         *     is one number over the range, with its trend. `toplist` ranks the groups
+         *     of one query. `note` is text.
+         */
+        WidgetDisplay: {
+            chart: components["schemas"]["ChartKind"];
+            /** @enum {string} */
+            kind: "timeseries";
+            queries: components["schemas"]["GroupedQuery"][];
+        } | {
+            /** @enum {string} */
+            kind: "value";
+            query: components["schemas"]["WidgetQuery"];
+        } | {
+            /** @enum {string} */
+            kind: "toplist";
+            /**
+             * Format: int32
+             * @description The most groups to rank.
+             */
+            limit: number;
+            /**
+             * @description Whether the groups with the `highest` number come first, or the
+             *     `lowest`. `highest` when missing.
+             */
+            order?: components["schemas"]["RankOrder"];
+            query: components["schemas"]["GroupedQuery"];
+        } | {
+            /** @enum {string} */
+            kind: "note";
+            text: string;
+        };
+        /**
+         * @description The area a widget takes on the grid of 12 columns of a wide screen.
+         *
+         *     A narrower screen has a grid of 6 or 2 columns, and the browser derives the
+         *     places there from these. A row has the same height on every screen.
+         */
+        WidgetLayout: {
+            /**
+             * Format: int32
+             * @description The first column of the widget, from 0 at the left.
+             */
+            column: number;
+            /**
+             * Format: int32
+             * @description The rows the widget spans.
+             */
+            height: number;
+            /**
+             * Format: int32
+             * @description The first row of the widget, from 0 at the top.
+             */
+            row: number;
+            /**
+             * Format: int32
+             * @description The columns the widget spans.
+             */
+            width: number;
+        };
+        /**
+         * @description The telemetry a widget reads, and the number it takes of it.
+         *
+         *     `spans` and `logs` read the records that `filter` keeps, in the query
+         *     language of their signal. `metrics` reads the series of the metric
+         *     `name` that `filter` keeps.
+         */
+        WidgetQuery: {
+            filter: string;
+            measure: components["schemas"]["SpanMeasure"];
+            /** @enum {string} */
+            signal: "spans";
+        } | {
+            filter: string;
+            /** @enum {string} */
+            signal: "logs";
+        } | {
+            aggregation: components["schemas"]["MetricAggregation"];
+            filter: string;
+            name: string;
+            /** @enum {string} */
+            signal: "metrics";
+        };
     };
     responses: never;
     parameters: never;
@@ -1056,6 +1351,174 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_dashboards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardList"];
+                };
+            };
+        };
+    };
+    create_dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardDefinition"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID of the dashboard */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    replace_dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID of the dashboard */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardDefinition"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID of the dashboard */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardList"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1246,6 +1709,61 @@ export interface operations {
             };
         };
     };
+    count_logs: {
+        parameters: {
+            query?: {
+                /**
+                 * @description The start of the range: a duration before now, such as `1h`, or an
+                 *     RFC 3339 timestamp. One hour before `until` when missing.
+                 */
+                since?: string;
+                /** @description The end of the range, in the form of `since`. Now when missing. */
+                until?: string;
+                /** @description The most groups to return. */
+                limit?: number;
+                /** @description The lines to count, such as `level >= warn`. Every line when missing. */
+                q?: string;
+                /**
+                 * @description The names to group the lines by, separated by commas: attributes,
+                 *     `service`, `level`, or `resource.<key>`. All lines are one group when
+                 *     missing.
+                 */
+                by?: string;
+                /**
+                 * @description The length of a bucket, such as `1m`. One that makes 120 buckets at
+                 *     most when missing.
+                 */
+                step?: string;
+                /**
+                 * @description Which groups come first and stay within the limit: the ones with the
+                 *     `highest` count of lines or the `lowest`. `highest` when missing.
+                 */
+                order?: components["schemas"]["RankOrder"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogCounts"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_log_groups: {
         parameters: {
             query?: {
@@ -1367,10 +1885,15 @@ export interface operations {
                  */
                 by?: string;
                 /**
-                 * @description Keep the N groups with the highest value over the range, and combine
-                 *     the rest into one group `other`.
+                 * @description Keep the N groups that come first in `order`, and combine the rest into
+                 *     one group `other`.
                  */
                 top?: number;
+                /**
+                 * @description Which groups come first and `top` keeps: the ones with the `highest`
+                 *     value over the range or the `lowest`. `highest` when missing.
+                 */
+                order?: components["schemas"]["RankOrder"];
             };
             header?: never;
             path: {
@@ -1560,6 +2083,18 @@ export interface operations {
                  *     most when missing.
                  */
                 step?: string;
+                /** @description Count the spans of each group in buckets too. False when missing. */
+                group_buckets?: boolean;
+                /**
+                 * @description The number the groups rank by: `time`, `count`, `errors`,
+                 *     `error_rate`, `p50`, `p95`, or `p99`. `time` when missing.
+                 */
+                rank?: components["schemas"]["SpanGroupRank"];
+                /**
+                 * @description Which groups come first and stay within the limit: the ones with the
+                 *     `highest` number of `rank` or the `lowest`. `highest` when missing.
+                 */
+                order?: components["schemas"]["RankOrder"];
             };
             header?: never;
             path?: never;

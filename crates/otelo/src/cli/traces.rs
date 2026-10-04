@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use otelo_indexed_storage::SpanId;
 use otelo_indexed_storage::query::{
-    SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, TraceSpan, Traces,
+    RankOrder, SpanGroupRank, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, TraceSpan,
+    Traces,
 };
 use otelo_query::Signal;
 
@@ -10,6 +11,9 @@ use super::client::{Client, OutputFormat, escape_path_segment, note_truncation, 
 use super::span_groups::{format_group_value, print_span_group_table};
 use super::table::{self, Table};
 use super::{QUERY_HELP, RangeArgs, join_query_words, note_unindexed_keys};
+
+const RANK_HELP: &str = "With --by, the number the groups rank by: time, count, errors, \
+    error_rate, p50, p95, or p99 [default: time]";
 
 #[derive(clap::Args)]
 pub struct SpansArgs {
@@ -26,6 +30,14 @@ pub struct SpansArgs {
     /// by duration [default: newest]
     #[arg(long, conflicts_with = "by")]
     sort: Option<SpanSort>,
+
+    #[arg(long, requires = "by", help = RANK_HELP)]
+    rank: Option<SpanGroupRank>,
+
+    /// With --by, whether the groups with the highest or the lowest number of
+    /// --rank come first and stay within the limit [default: highest]
+    #[arg(long, requires = "by")]
+    order: Option<RankOrder>,
 
     #[command(flatten)]
     range: RangeArgs,
@@ -84,6 +96,8 @@ fn print_span_groups(args: &SpansArgs, by: &str) -> anyhow::Result<()> {
     let mut params = args.range.to_query_params();
     params.push(("q", join_query_words(&args.query)));
     params.push(("by", Some(by.to_owned())));
+    params.push(("rank", args.rank.map(|rank| rank.name().to_owned())));
+    params.push(("order", args.order.map(|order| order.name().to_owned())));
     let answer: SpanGroups = args.client.get("/api/spans/groups", &params)?;
     match args.client.choose_output_format() {
         OutputFormat::Table => {

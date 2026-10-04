@@ -1,4 +1,5 @@
 import type { Attributes, AttributeValue, MetricSeries, SeriesGroup, SeriesInfo } from "@otelo/api";
+import type { SelectOption } from "@otelo/ui";
 import type { TimeFrame, TimeSeries, Unit } from "@otelo/viz";
 
 import { formatCount } from "../count";
@@ -50,14 +51,15 @@ export interface MetricName {
   readonly seriesCount: number;
 }
 
-interface GroupingSection {
-  readonly title: string;
-  readonly options: ReadonlyArray<GroupingOption>;
-}
+export type MetricKindName = SeriesInfo["kind"];
 
-interface GroupingOption {
-  readonly value: string;
-  readonly label: string;
+type Percentile = (typeof PERCENTILES)[number];
+
+export type ReadBucketValue = (bucket: SeriesGroup["buckets"][number]) => number | null;
+
+interface ChartUnit {
+  readonly unit: Unit;
+  readonly factor: number;
 }
 
 interface MetricChart {
@@ -67,15 +69,9 @@ interface MetricChart {
   readonly series: ReadonlyArray<TimeSeries>;
 }
 
-type MetricKindName = SeriesInfo["kind"];
-
 type GroupKey = SeriesGroup["key"];
 
 type SeriesGroupKey = Extract<GroupKey, { readonly type: "series" }>;
-
-type Percentile = (typeof PERCENTILES)[number];
-
-type ReadBucketValue = (bucket: SeriesGroup["buckets"][number]) => number | null;
 
 export function summarizeMetricNames(series: ReadonlyArray<SeriesInfo>): MetricName[] {
   const namesByName = new Map<string, MetricName>();
@@ -91,10 +87,10 @@ export function summarizeMetricNames(series: ReadonlyArray<SeriesInfo>): MetricN
   return [...namesByName.values()];
 }
 
-export function listGroupingSections(
+export function listGroupingOptions(
   seriesOfMetric: ReadonlyArray<SeriesInfo>,
   checked: ReadonlyArray<string>,
-): GroupingSection[] {
+): SelectOption<string>[] {
   const attributeOptions = listKeys(seriesOfMetric.map((series) => series.attributes))
     .filter((key) => !writeAttributeField(key).startsWith("`"))
     .map((key) => ({ value: writeAttributeField(key), label: key }));
@@ -117,21 +113,15 @@ export function listGroupingSections(
     .filter((value) => !knownValues.has(value))
     .map((value) => ({ value, label: value }));
   return [
-    {
-      title: "Attributes",
-      options: [
-        ...attributeOptions,
-        ...unknownChecked.filter((unknown) => !unknown.value.startsWith("resource.")),
-      ],
-    },
-    { title: "Service", options: [{ value: "service", label: "service" }] },
-    {
-      title: "Resource",
-      options: [
-        ...resourceOptions,
-        ...unknownChecked.filter((unknown) => unknown.value.startsWith("resource.")),
-      ],
-    },
+    ...[
+      ...attributeOptions,
+      ...unknownChecked.filter((unknown) => !unknown.value.startsWith("resource.")),
+    ].map(({ value, label }) => ({ value, label, section: "Attributes" })),
+    { value: "service", label: "service", section: "Service" },
+    ...[
+      ...resourceOptions,
+      ...unknownChecked.filter((unknown) => unknown.value.startsWith("resource.")),
+    ].map(({ value, label }) => ({ value, label, section: "Resource" })),
   ];
 }
 
@@ -217,7 +207,7 @@ export function readAveragesOrRates(group: SeriesGroup, frame: TimeFrame): (numb
   return readGroupValues(group, frame, readValue, pickChartUnit(group.unit, group.kind).factor);
 }
 
-function labelSeriesGroups(
+export function labelSeriesGroups(
   groups: ReadonlyArray<SeriesGroup>,
   by: ReadonlyArray<string>,
 ): string[] {
@@ -231,6 +221,59 @@ function labelSeriesGroups(
     }
     return formatCount(key.group_count, "other group");
   });
+}
+
+export function formatAttributeValue(value: AttributeValue | undefined): string {
+  if (value === undefined) return "–";
+  if (typeof value === "string") return value;
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+export function pickChartUnit(unit: string, kind: MetricKindName): ChartUnit {
+  const nanos = NANOS_PER_DURATION_UNIT[unit];
+  const bytes = BYTES_PER_BYTE_UNIT[unit];
+  const isCount = unit === "" || unit === "1" || /^\{.*\}$/.test(unit);
+  if (kind === "counter") {
+    if (bytes !== undefined) return { unit: "bytes-per-second", factor: bytes };
+    if (nanos !== undefined) return { unit: "number", factor: nanos / 1e9 };
+    return { unit: isCount ? "rate" : "number", factor: 1 };
+  }
+  if (nanos !== undefined) return { unit: "duration", factor: nanos };
+  if (bytes !== undefined) return { unit: "bytes", factor: bytes };
+  if (unit === "%") return { unit: "ratio", factor: 0.01 };
+  if (unit === "1" && kind === "gauge") return { unit: "ratio", factor: 1 };
+  return { unit: isCount ? "count" : "number", factor: 1 };
+}
+
+export function readRatePerSecond(bucket: SeriesGroup["buckets"][number]): number | null {
+  return bucket.change.kind === "rate" ? bucket.change.per_second : null;
+}
+
+export function readPercentile(percentile: Percentile): ReadBucketValue {
+  return (bucket) =>
+    bucket.change.kind === "distribution"
+      ? (bucket.change.percentiles?.[percentile] ?? null)
+      : null;
+}
+
+export function readGroupValues(
+  group: SeriesGroup,
+  frame: TimeFrame,
+  readValue: ReadBucketValue,
+  factor: number,
+): (number | null)[] {
+  const bucketsByStartMs = new Map(
+    group.buckets.map((bucket) => [parseTime(bucket.start_at).getTime(), bucket]),
+  );
+  const values = frame.bucketStartsMs.map((bucketStartMs) => {
+    const bucket = bucketsByStartMs.get(bucketStartMs);
+    const value = bucket ? readValue(bucket) : null;
+    return value === null ? null : value * factor;
+  });
+  return carryValuesIntoEmptySteps(values, frame.stepMs);
 }
 
 function labelSeriesKeys(keys: ReadonlyArray<SeriesGroupKey>): string[] {
@@ -270,74 +313,16 @@ function listKeys(attributeSets: ReadonlyArray<Attributes>): string[] {
   return [...new Set(attributeSets.flatMap((attributes) => Object.keys(attributes)))].toSorted();
 }
 
-function formatAttributeValue(value: AttributeValue | undefined): string {
-  if (value === undefined) return "–";
-  if (typeof value === "string") return value;
-  if (value === null || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return JSON.stringify(value);
-}
-
 function addUnique<T>(values: ReadonlyArray<T>, value: T): ReadonlyArray<T> {
   return values.includes(value) ? values : [...values, value];
-}
-
-interface ChartUnit {
-  readonly unit: Unit;
-  readonly factor: number;
-}
-
-function pickChartUnit(unit: string, kind: MetricKindName): ChartUnit {
-  const nanos = NANOS_PER_DURATION_UNIT[unit];
-  const bytes = BYTES_PER_BYTE_UNIT[unit];
-  const isCount = unit === "" || unit === "1" || /^\{.*\}$/.test(unit);
-  if (kind === "counter") {
-    if (bytes !== undefined) return { unit: "bytes-per-second", factor: bytes };
-    if (nanos !== undefined) return { unit: "number", factor: nanos / 1e9 };
-    return { unit: isCount ? "rate" : "number", factor: 1 };
-  }
-  if (nanos !== undefined) return { unit: "duration", factor: nanos };
-  if (bytes !== undefined) return { unit: "bytes", factor: bytes };
-  if (unit === "%") return { unit: "ratio", factor: 0.01 };
-  if (unit === "1" && kind === "gauge") return { unit: "ratio", factor: 1 };
-  return { unit: isCount ? "count" : "number", factor: 1 };
 }
 
 function readAverage(bucket: SeriesGroup["buckets"][number]): number | null {
   return bucket.avg;
 }
 
-function readRatePerSecond(bucket: SeriesGroup["buckets"][number]): number | null {
-  return bucket.change.kind === "rate" ? bucket.change.per_second : null;
-}
-
-function readPercentile(percentile: Percentile): ReadBucketValue {
-  return (bucket) =>
-    bucket.change.kind === "distribution"
-      ? (bucket.change.percentiles?.[percentile] ?? null)
-      : null;
-}
-
 function withOtherColor(key: GroupKey, series: TimeSeries): TimeSeries {
   return key.type === "other" ? { ...series, color: "muted" } : series;
-}
-
-function readGroupValues(
-  group: SeriesGroup,
-  frame: TimeFrame,
-  readValue: ReadBucketValue,
-  factor: number,
-): (number | null)[] {
-  const bucketsByStartMs = new Map(
-    group.buckets.map((bucket) => [parseTime(bucket.start_at).getTime(), bucket]),
-  );
-  const values = frame.bucketStartsMs.map((bucketStartMs) => {
-    const bucket = bucketsByStartMs.get(bucketStartMs);
-    const value = bucket ? readValue(bucket) : null;
-    return value === null ? null : value * factor;
-  });
-  return carryValuesIntoEmptySteps(values, frame.stepMs);
 }
 
 function carryValuesIntoEmptySteps(

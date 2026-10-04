@@ -44,12 +44,12 @@ export function useRange(): RangeState {
   };
 }
 
-type LiveRange = Pick<RangeState, "since" | "until" | "live">;
-
-interface RangeBounds {
+export interface RangeBounds {
   readonly since: string;
   readonly until: string;
 }
+
+type LiveRange = Pick<RangeState, "since" | "until" | "live">;
 
 export function createRangeFetch<K, T>(
   range: LiveRange,

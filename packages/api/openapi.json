@@ -105,6 +105,216 @@
         }
       }
     },
+    "/api/dashboards": {
+      "get": {
+        "summary": "The saved dashboards, the most recently changed first.",
+        "operationId": "list_dashboards",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Saves a new dashboard.",
+        "operationId": "create_dashboard",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dashboards/{id}": {
+      "get": {
+        "summary": "One saved dashboard.",
+        "operationId": "get_dashboard",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The ID of the dashboard",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replaces what a saved dashboard shows.",
+        "operationId": "replace_dashboard",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The ID of the dashboard",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes a saved dashboard, and lists the ones left.",
+        "operationId": "delete_dashboard",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The ID of the dashboard",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/indexes": {
       "get": {
         "summary": "The attributes that have an index.",
@@ -319,6 +529,100 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Logs"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/counts": {
+      "get": {
+        "summary": "The count of the log lines that the query keeps, over the range and in\nbuckets of one step, and grouped by the values of the `by` names, ranked\nby their count of lines in `order`. Each group has its own buckets.",
+        "operationId": "count_logs",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "The start of the range: a duration before now, such as `1h`, or an\nRFC 3339 timestamp. One hour before `until` when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "The end of the range, in the form of `since`. Now when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most groups to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "The lines to count, such as `level >= warn`. Every line when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "by",
+            "in": "query",
+            "description": "The names to group the lines by, separated by commas: attributes,\n`service`, `level`, or `resource.<key>`. All lines are one group when\nmissing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "step",
+            "in": "query",
+            "description": "The length of a bucket, such as `1m`. One that makes 120 buckets at\nmost when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Which groups come first and stay within the limit: the ones with the\n`highest` count of lines or the `lowest`. `highest` when missing.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RankOrder"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogCounts"
                 }
               }
             }
@@ -551,11 +855,20 @@
           {
             "name": "top",
             "in": "query",
-            "description": "Keep the N groups with the highest value over the range, and combine\nthe rest into one group `other`.",
+            "description": "Keep the N groups that come first in `order`, and combine the rest into\none group `other`.",
             "required": false,
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Which groups come first and `top` keeps: the ones with the `highest`\nvalue over the range or the `lowest`. `highest` when missing.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RankOrder"
             }
           }
         ],
@@ -794,7 +1107,7 @@
     },
     "/api/spans/groups": {
       "get": {
-        "summary": "The spans that the query keeps, grouped by the values of the `by` names,\nthe most time first. Each group has the count, the failures, the total\ntime, and the latency percentiles of its spans, and the name and the\nattributes of its newest span. The answer has the same numbers for all the\nspans, over the range and in buckets of one step.",
+        "summary": "The spans that the query keeps, grouped by the values of the `by` names,\nranked by `rank` in `order`, the most time first when both are missing. Each group has the count, the failures, the total\ntime, and the latency percentiles of its spans, and the name and the\nattributes of its newest span. The answer has the same numbers for all the\nspans, over the range and in buckets of one step.",
         "operationId": "list_span_groups",
         "parameters": [
           {
@@ -850,6 +1163,33 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "group_buckets",
+            "in": "query",
+            "description": "Count the spans of each group in buckets too. False when missing.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "rank",
+            "in": "query",
+            "description": "The number the groups rank by: `time`, `count`, `errors`,\n`error_rate`, `p50`, `p95`, or `p99`. `time` when missing.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SpanGroupRank"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Which groups come first and stay within the limit: the ones with the\n`highest` number of `rank` or the `lowest`. `highest` when missing.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RankOrder"
             }
           }
         ],
@@ -1231,6 +1571,15 @@
         ],
         "description": "What the points of a step say beyond their values.\n\n`none` for a gauge and an updown, and for a step with only the first\npoint of a cumulative series, which has nothing to count from. `rate` is\nhow much a counter grew per second: its increase between neighbouring\npoints, over the time between them. A value that goes down is a restart,\nand the increase counts from zero. `distribution` is the merged buckets\nof a histogram with percentile estimates."
       },
+      "ChartKind": {
+        "type": "string",
+        "description": "How a time series draws its values: lines, lines over a filled area, or\nstacked bars.",
+        "enum": [
+          "line",
+          "area",
+          "bar"
+        ]
+      },
       "CompletionKind": {
         "type": "string",
         "description": "What the text of a suggestion is.",
@@ -1265,6 +1614,114 @@
             "items": {
               "$ref": "#/components/schemas/SuggestionBody"
             }
+          }
+        }
+      },
+      "Dashboard": {
+        "type": "object",
+        "description": "A saved dashboard.",
+        "required": [
+          "id",
+          "definition",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/DashboardDefinition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/DashboardId"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DashboardDefinition": {
+        "type": "object",
+        "description": "What a dashboard shows: its name, its description, and its widgets, no two\nof which overlap on the grid.",
+        "required": [
+          "name",
+          "description",
+          "widgets"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Up to 1000 characters."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, without the spaces around it; 1 to 200 characters."
+          },
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Widget"
+            },
+            "description": "Up to 100 widgets."
+          }
+        }
+      },
+      "DashboardId": {
+        "type": "integer",
+        "format": "int64",
+        "description": "The ID of a saved dashboard."
+      },
+      "DashboardList": {
+        "type": "object",
+        "description": "The saved dashboards, the most recently changed first.",
+        "required": [
+          "dashboards"
+        ],
+        "properties": {
+          "dashboards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardSummary"
+            }
+          }
+        }
+      },
+      "DashboardSummary": {
+        "type": "object",
+        "description": "A saved dashboard without its widgets.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "widget_count",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/DashboardId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "widget_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -1546,6 +2003,26 @@
         ],
         "description": "What a group holds.\n\n`series` is one series, when the query groups by nothing. `values` is\nthe series that have these values of the names of `by`, and a name that\nthe series lack is missing. `other` is the groups past `top`."
       },
+      "GroupedQuery": {
+        "type": "object",
+        "description": "A query and the names to group what it reads by.",
+        "required": [
+          "query",
+          "by"
+        ],
+        "properties": {
+          "by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names to group by, as a query writes them, such as `service` or\n`http.route`. Everything is one group when empty."
+          },
+          "query": {
+            "$ref": "#/components/schemas/WidgetQuery"
+          }
+        }
+      },
       "IndexBody": {
         "type": "object",
         "required": [
@@ -1605,6 +2082,113 @@
           "p99": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "LogCountBucket": {
+        "type": "object",
+        "description": "The lines of one step.",
+        "required": [
+          "start_at",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The start of the step."
+          }
+        }
+      },
+      "LogCountGroup": {
+        "type": "object",
+        "description": "The lines that share the values of the grouping fields.",
+        "required": [
+          "values",
+          "count",
+          "buckets"
+        ],
+        "properties": {
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogCountBucket"
+            },
+            "description": "The lines of the group in every step, oldest first."
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "values": {
+            "$ref": "#/components/schemas/Attributes",
+            "description": "The values of the grouping fields, by the fields as a query writes\nthem, such as `service`. A `level` is its name in lower case, such as\n`warn`. A field the lines lack is missing."
+          }
+        }
+      },
+      "LogCounts": {
+        "type": "object",
+        "description": "The log lines a query keeps in a range, counted over the range and by\nstep, and grouped by the values of some fields, the most lines first.",
+        "required": [
+          "start_at",
+          "end_at",
+          "step_ns",
+          "count",
+          "buckets",
+          "groups",
+          "truncated",
+          "unindexed"
+        ],
+        "properties": {
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogCountBucket"
+            },
+            "description": "The lines of every step, oldest first."
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Every line the query keeps.",
+            "minimum": 0
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogCountGroup"
+            }
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The range, after the retention capped it."
+          },
+          "step_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The length of a bucket in nanoseconds."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More groups match than the limit let through, which kept the ones\nwith the most lines."
+          },
+          "unindexed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The attributes the query compares that have no index."
           }
         }
       },
@@ -1786,6 +2370,20 @@
           }
         }
       },
+      "MetricAggregation": {
+        "type": "string",
+        "description": "The number a widget takes of the points of a metric in a step. `avg`,\n`min`, `max`, and `last` fit a gauge and an updown, `rate` a counter, and\nthe percentiles a histogram.",
+        "enum": [
+          "avg",
+          "min",
+          "max",
+          "last",
+          "rate",
+          "p50",
+          "p90",
+          "p99"
+        ]
+      },
       "MetricKind": {
         "oneOf": [
           {
@@ -1943,6 +2541,14 @@
             "format": "double"
           }
         }
+      },
+      "RankOrder": {
+        "type": "string",
+        "description": "Which end of a ranking comes first: the groups with the `highest` number, or\nthe ones with the `lowest`.",
+        "enum": [
+          "highest",
+          "lowest"
+        ]
       },
       "Resolution": {
         "type": "string",
@@ -2248,12 +2854,23 @@
           "values",
           "name",
           "attributes",
-          "spans"
+          "spans",
+          "buckets"
         ],
         "properties": {
           "attributes": {
             "$ref": "#/components/schemas/Attributes",
             "description": "The attributes of its newest span."
+          },
+          "buckets": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SpanBucket"
+            },
+            "description": "The spans of the group in every step, oldest first, when\n`group_buckets` asked for them."
           },
           "name": {
             "type": "string",
@@ -2267,6 +2884,19 @@
             "description": "The values of the grouping fields, by the fields as a query writes\nthem, such as `http.route`. A field the spans lack is missing."
           }
         }
+      },
+      "SpanGroupRank": {
+        "type": "string",
+        "description": "The number span groups rank by: the total `time` of their spans, their\n`count`, their `errors`, their `error_rate`, or a percentile of their\ndurations.",
+        "enum": [
+          "time",
+          "count",
+          "errors",
+          "error_rate",
+          "p50",
+          "p95",
+          "p99"
+        ]
       },
       "SpanGroups": {
         "type": "object",
@@ -2325,6 +2955,19 @@
             "description": "The attributes the query compares that have no index."
           }
         }
+      },
+      "SpanMeasure": {
+        "type": "string",
+        "description": "The number a widget takes of spans: their count, their count per second,\ntheir failures, the share of them that failed, or a percentile of their\ndurations.",
+        "enum": [
+          "count",
+          "rate",
+          "errors",
+          "error_rate",
+          "p50",
+          "p95",
+          "p99"
+        ]
       },
       "SpanSort": {
         "type": "string",
@@ -2645,6 +3288,232 @@
           "mixed",
           "duration"
         ]
+      },
+      "Widget": {
+        "type": "object",
+        "description": "One tile of a dashboard.",
+        "required": [
+          "title",
+          "layout",
+          "display"
+        ],
+        "properties": {
+          "display": {
+            "$ref": "#/components/schemas/WidgetDisplay"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "WidgetDisplay": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "chart",
+              "queries",
+              "kind"
+            ],
+            "properties": {
+              "chart": {
+                "$ref": "#/components/schemas/ChartKind"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "timeseries"
+                ]
+              },
+              "queries": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GroupedQuery"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "query",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "value"
+                ]
+              },
+              "query": {
+                "$ref": "#/components/schemas/WidgetQuery"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "query",
+              "limit",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "toplist"
+                ]
+              },
+              "limit": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The most groups to rank.",
+                "minimum": 1
+              },
+              "order": {
+                "$ref": "#/components/schemas/RankOrder",
+                "description": "Whether the groups with the `highest` number come first, or the\n`lowest`. `highest` when missing."
+              },
+              "query": {
+                "$ref": "#/components/schemas/GroupedQuery"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "note"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "What a widget draws.\n\n`timeseries` charts each query over the range, a line per group. `value`\nis one number over the range, with its trend. `toplist` ranks the groups\nof one query. `note` is text."
+      },
+      "WidgetLayout": {
+        "type": "object",
+        "description": "The area a widget takes on the grid of 12 columns of a wide screen.\n\nA narrower screen has a grid of 6 or 2 columns, and the browser derives the\nplaces there from these. A row has the same height on every screen.",
+        "required": [
+          "column",
+          "row",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "column": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The first column of the widget, from 0 at the left.",
+            "maximum": 11,
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The rows the widget spans.",
+            "maximum": 16,
+            "minimum": 2
+          },
+          "row": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The first row of the widget, from 0 at the top.",
+            "maximum": 9999,
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The columns the widget spans.",
+            "maximum": 12,
+            "minimum": 1
+          }
+        }
+      },
+      "WidgetQuery": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "filter",
+              "measure",
+              "signal"
+            ],
+            "properties": {
+              "filter": {
+                "type": "string"
+              },
+              "measure": {
+                "$ref": "#/components/schemas/SpanMeasure"
+              },
+              "signal": {
+                "type": "string",
+                "enum": [
+                  "spans"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "filter",
+              "signal"
+            ],
+            "properties": {
+              "filter": {
+                "type": "string"
+              },
+              "signal": {
+                "type": "string",
+                "enum": [
+                  "logs"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "filter",
+              "aggregation",
+              "signal"
+            ],
+            "properties": {
+              "aggregation": {
+                "$ref": "#/components/schemas/MetricAggregation"
+              },
+              "filter": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "signal": {
+                "type": "string",
+                "enum": [
+                  "metrics"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The telemetry a widget reads, and the number it takes of it.\n\n`spans` and `logs` read the records that `filter` keeps, in the query\nlanguage of their signal. `metrics` reads the series of the metric\n`name` that `filter` keeps."
       }
     }
   }

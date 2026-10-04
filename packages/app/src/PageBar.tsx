@@ -20,7 +20,7 @@ export default function PageBar(props: PageBarProps) {
       {top()}
       <div
         class={[
-          "flex min-h-7 items-center gap-3 text-muted",
+          "flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2 text-muted",
           { "pt-3 pb-2.5": !!top(), "py-2.5": !top() },
         ]}
       >

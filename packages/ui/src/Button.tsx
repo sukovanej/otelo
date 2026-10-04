@@ -8,9 +8,11 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   default: `${plain} enabled:hover:bg-hover`,
   ghost:
     "border-transparent bg-transparent text-muted enabled:hover:bg-hover enabled:hover:text-ink",
+  danger: "border-error bg-error font-semibold text-on-accent enabled:hover:brightness-110",
+  "ghost-danger": "border-transparent bg-transparent text-error enabled:hover:bg-error-soft",
 };
 
-type ButtonVariant = "primary" | "default" | "ghost";
+type ButtonVariant = "primary" | "default" | "ghost" | "danger" | "ghost-danger";
 
 interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   readonly variant?: ButtonVariant;

@@ -3,9 +3,10 @@
 // package's `src`.
 
 export { default as ChartPanel } from "./ChartPanel";
+export type { SeriesColor } from "./color";
 export type { Column } from "./column";
 export { default as Panel } from "./Panel";
-export type { TimeFrame, TimeSeries } from "./series";
+export type { ChartKind, TimeFrame, TimeSeries } from "./series";
 export { default as Sparkline } from "./Sparkline";
 export { default as Stat } from "./Stat";
 export { default as Table, type TableSorting, type TableSortOrder } from "./Table";

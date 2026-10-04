@@ -18,7 +18,10 @@ use crate::Reader;
 
 const MAX_SAMPLES_PER_GROUP: usize = 3;
 
-fn compile_log_query(reader: &Reader, query: &Query) -> anyhow::Result<(WhereClause, Vec<String>)> {
+pub(super) fn compile_log_query(
+    reader: &Reader,
+    query: &Query,
+) -> anyhow::Result<(WhereClause, Vec<String>)> {
     ensure!(
         query.signal == Signal::Logs,
         "the query is over {}, not logs",

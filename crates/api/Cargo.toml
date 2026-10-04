@@ -21,6 +21,7 @@ utoipa-axum = { workspace = true }
 
 [dev-dependencies]
 otelo-indexed-storage-sqlite = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

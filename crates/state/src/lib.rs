@@ -1,3 +1,4 @@
+mod dashboard;
 mod password;
 
 use std::collections::BTreeSet;
@@ -9,6 +10,11 @@ use otelo_query::Signal;
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::password::{generate_password, hash_password};
+
+pub use dashboard::{
+    ChartKind, Dashboard, DashboardDefinition, DashboardId, DashboardList, DashboardSummary,
+    GroupedQuery, MetricAggregation, SpanMeasure, Widget, WidgetDisplay, WidgetLayout, WidgetQuery,
+};
 
 const STATE_SCHEMA: &str = include_str!("schema.sql");
 

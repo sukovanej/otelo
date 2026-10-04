@@ -1,6 +1,9 @@
 use axum::extract::{Path, Query, State};
 use otelo_indexed_storage::TraceId;
-use otelo_indexed_storage::query::{SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces};
+use otelo_indexed_storage::query::{
+    GroupBuckets, RankOrder, SpanGroupRank, SpanGroupRanking, SpanGroupingField, SpanGroups,
+    SpanSort, Spans, Trace, Traces,
+};
 use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -84,10 +87,18 @@ pub struct SpanGroupParams {
     /// The length of a bucket, such as `1m`. One that makes 120 buckets at
     /// most when missing.
     step: Option<String>,
+    /// Count the spans of each group in buckets too. False when missing.
+    group_buckets: Option<bool>,
+    /// The number the groups rank by: `time`, `count`, `errors`,
+    /// `error_rate`, `p50`, `p95`, or `p99`. `time` when missing.
+    rank: Option<SpanGroupRank>,
+    /// Which groups come first and stay within the limit: the ones with the
+    /// `highest` number of `rank` or the `lowest`. `highest` when missing.
+    order: Option<RankOrder>,
 }
 
 /// The spans that the query keeps, grouped by the values of the `by` names,
-/// the most time first. Each group has the count, the failures, the total
+/// ranked by `rank` in `order`, the most time first when both are missing. Each group has the count, the failures, the total
 /// time, and the latency percentiles of its spans, and the name and the
 /// attributes of its newest span. The answer has the same numbers for all the
 /// spans, over the range and in buckets of one step.
@@ -107,6 +118,15 @@ pub async fn list_span_groups(
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
     let by: Vec<SpanGroupingField> = parse_field_list(params.by.as_deref())?;
     let requested_step_ns = parse_step_ns(params.step.as_deref())?;
+    let ranking = SpanGroupRanking {
+        rank: params.rank.unwrap_or_default(),
+        order: params.order.unwrap_or_default(),
+    };
+    let group_buckets = if params.group_buckets.unwrap_or_default() {
+        GroupBuckets::Counted
+    } else {
+        GroupBuckets::Omitted
+    };
     api.run_limited_range_query(
         RequestedRange {
             signals: RangeSignals::One(Signal::Spans),
@@ -118,9 +138,14 @@ pub async fn list_span_groups(
         50,
         move |opened, limit| {
             let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
-            Ok(opened
-                .queries
-                .list_span_groups(&query, &by, step_ns, limit)?)
+            Ok(opened.queries.list_span_groups(
+                &query,
+                &by,
+                ranking,
+                step_ns,
+                group_buckets,
+                limit,
+            )?)
         },
     )
     .await

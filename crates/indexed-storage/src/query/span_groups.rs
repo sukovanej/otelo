@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -6,6 +7,7 @@ use otelo_query::{BuiltinField, Field, Signal, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use super::RankOrder;
 use crate::Attributes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +47,101 @@ impl fmt::Display for SpanGroupingField {
     }
 }
 
+/// The number span groups rank by: the total `time` of their spans, their
+/// `count`, their `errors`, their `error_rate`, or a percentile of their
+/// durations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SpanGroupRank {
+    #[default]
+    Time,
+    Count,
+    Errors,
+    ErrorRate,
+    P50,
+    P95,
+    P99,
+}
+
+impl SpanGroupRank {
+    pub const ALL: [Self; 7] = [
+        Self::Time,
+        Self::Count,
+        Self::Errors,
+        Self::ErrorRate,
+        Self::P50,
+        Self::P95,
+        Self::P99,
+    ];
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Time => "time",
+            Self::Count => "count",
+            Self::Errors => "errors",
+            Self::ErrorRate => "error_rate",
+            Self::P50 => "p50",
+            Self::P95 => "p95",
+            Self::P99 => "p99",
+        }
+    }
+
+    fn compare_lowest_first(self, a: &SpanStats, b: &SpanStats) -> Ordering {
+        let percentile =
+            |stats: &SpanStats, pick: fn(&Latency) -> i64| stats.latency.as_ref().map(pick);
+        match self {
+            Self::Time => a.total_ns.cmp(&b.total_ns),
+            Self::Count => a.count.cmp(&b.count),
+            Self::Errors => a.errors.cmp(&b.errors),
+            Self::ErrorRate => (u128::from(a.errors) * u128::from(b.count))
+                .cmp(&(u128::from(b.errors) * u128::from(a.count))),
+            Self::P50 => {
+                percentile(a, |latency| latency.p50).cmp(&percentile(b, |latency| latency.p50))
+            }
+            Self::P95 => {
+                percentile(a, |latency| latency.p95).cmp(&percentile(b, |latency| latency.p95))
+            }
+            Self::P99 => {
+                percentile(a, |latency| latency.p99).cmp(&percentile(b, |latency| latency.p99))
+            }
+        }
+    }
+}
+
+impl FromStr for SpanGroupRank {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|rank| rank.name() == name)
+            .ok_or_else(|| {
+                format!("{name:?} is not a rank: time, count, errors, error_rate, p50, p95, or p99")
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpanGroupRanking {
+    pub rank: SpanGroupRank,
+    pub order: RankOrder,
+}
+
+impl SpanGroupRanking {
+    #[must_use]
+    pub fn compare(self, a: &SpanStats, b: &SpanStats) -> Ordering {
+        self.order
+            .orient_ordering(self.rank.compare_lowest_first(a, b))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupBuckets {
+    Omitted,
+    Counted,
+}
+
 /// The spans a query keeps in a range, grouped by the values of some fields,
 /// the most time first.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -79,6 +176,10 @@ pub struct SpanGroup {
     /// The attributes of its newest span.
     pub attributes: Attributes,
     pub spans: SpanStats,
+    /// The spans of the group in every step, oldest first, when
+    /// `group_buckets` asked for them.
+    #[schema(required = true)]
+    pub buckets: Option<Vec<SpanBucket>>,
 }
 
 /// The spans of one step.

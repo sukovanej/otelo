@@ -1,6 +1,9 @@
 mod common;
 
-use otelo_indexed_storage::query::{SpanGroup, SpanGroupingField, SpanGroups};
+use otelo_indexed_storage::query::{
+    GroupBuckets, RankOrder, SpanGroup, SpanGroupRank, SpanGroupRanking, SpanGroupingField,
+    SpanGroups,
+};
 use otelo_indexed_storage::{
     AttributeValue, Attributes, RangeQueries, Records, Resource, Span, SpanId, SpanKind,
     SpanStatus, TimeRange, TraceId,
@@ -128,6 +131,27 @@ impl Fixture {
     }
 
     fn group_spans(&self, query: &str, by: &[&str], limit: usize) -> SpanGroups {
+        self.group_spans_with_buckets(query, by, GroupBuckets::Omitted, limit)
+    }
+
+    fn group_spans_with_buckets(
+        &self,
+        query: &str,
+        by: &[&str],
+        group_buckets: GroupBuckets,
+        limit: usize,
+    ) -> SpanGroups {
+        self.rank_span_groups(query, by, SpanGroupRanking::default(), group_buckets, limit)
+    }
+
+    fn rank_span_groups(
+        &self,
+        query: &str,
+        by: &[&str],
+        ranking: SpanGroupRanking,
+        group_buckets: GroupBuckets,
+        limit: usize,
+    ) -> SpanGroups {
         let by: Vec<SpanGroupingField> = by.iter().map(|field| field.parse().unwrap()).collect();
         Reader::open(
             self.directory.path(),
@@ -137,7 +161,9 @@ impl Fixture {
         .list_span_groups(
             &parse_query(query, Signal::Spans).unwrap(),
             &by,
+            ranking,
             MINUTE,
+            group_buckets,
             limit,
         )
         .unwrap()
@@ -274,5 +300,89 @@ fn spans_group_only_by_names_a_span_has() {
     assert_eq!(
         SpanGroupingField::Attribute("service".into()).to_string(),
         "attr.service"
+    );
+}
+
+#[test]
+fn each_group_counts_its_spans_by_step_when_asked() {
+    let fixture = Fixture::new();
+    let without = fixture.group_spans("kind = server", &["service"], 10);
+    assert!(without.groups.iter().all(|group| group.buckets.is_none()));
+
+    let by_service =
+        fixture.group_spans_with_buckets("kind = server", &["service"], GroupBuckets::Counted, 10);
+    let steps: Vec<_> = by_service
+        .groups
+        .iter()
+        .map(|group| {
+            let steps: Vec<_> = group
+                .buckets
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|bucket| (bucket.spans.count, bucket.spans.errors))
+                .collect();
+            (group.values["service"].clone(), steps)
+        })
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            (AttributeValue::from("worker"), vec![(0, 0), (1, 0)]),
+            (AttributeValue::from("api"), vec![(1, 1), (3, 0)]),
+        ]
+    );
+}
+
+#[test]
+fn the_kept_groups_count_their_steps_when_the_limit_drops_others() {
+    let fixture = Fixture::new();
+    let by_service =
+        fixture.group_spans_with_buckets("kind = server", &["service"], GroupBuckets::Counted, 1);
+    assert!(by_service.truncated);
+    assert_eq!(by_service.groups.len(), 1);
+    let group = &by_service.groups[0];
+    let counted_by_step: u64 = group
+        .buckets
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|bucket| bucket.spans.count)
+        .sum();
+    assert_eq!(counted_by_step, group.spans.count);
+}
+
+#[test]
+fn groups_rank_by_any_number_of_their_spans_from_either_end() {
+    let fixture = Fixture::new();
+    let routes_ranked_by = |rank, order, limit| {
+        let ranking = SpanGroupRanking { rank, order };
+        let groups = fixture.rank_span_groups(
+            "kind = server",
+            &["http.route"],
+            ranking,
+            GroupBuckets::Omitted,
+            limit,
+        );
+        let routes: Vec<_> = groups
+            .groups
+            .iter()
+            .map(|group| group.values.get("http.route").cloned())
+            .collect();
+        (routes, groups.truncated)
+    };
+    let users = Some(AttributeValue::from("/users"));
+    let orders = Some(AttributeValue::from("/orders"));
+    assert_eq!(
+        routes_ranked_by(SpanGroupRank::P95, RankOrder::Lowest, 2),
+        (vec![None, orders.clone()], true)
+    );
+    assert_eq!(
+        routes_ranked_by(SpanGroupRank::P95, RankOrder::Highest, 10),
+        (vec![users.clone(), orders, None], false)
+    );
+    assert_eq!(
+        routes_ranked_by(SpanGroupRank::ErrorRate, RankOrder::Highest, 1).0,
+        [users]
     );
 }

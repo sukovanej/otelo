@@ -7,6 +7,7 @@ use otelo_query::{BuiltinField, Field, Query, Signal, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use super::RankOrder;
 use crate::{Attributes, Distribution, MetricKind, TimeRange};
 
 pub const MAX_BUCKETS_IN_RANGE: i64 = 10_000;
@@ -154,6 +155,7 @@ impl fmt::Display for GroupingField {
 pub struct Grouping {
     pub by: Vec<GroupingField>,
     pub top: Option<NonZeroUsize>,
+    pub order: RankOrder,
 }
 
 #[derive(Clone, Debug)]

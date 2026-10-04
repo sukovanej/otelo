@@ -4,8 +4,9 @@ use std::time::Duration;
 use otelo_query::{Catalog, Query, Signal};
 
 use crate::query::{
-    AttributeKeys, LogGroups, Logs, MetricFilter, MetricList, MetricSeries, Resolution, Service,
-    Services, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
+    AttributeKeys, GroupBuckets, LogCounts, LogGroupingField, LogGroups, Logs, MetricFilter,
+    MetricList, MetricSeries, RankOrder, Resolution, Service, Services, SpanGroupRanking,
+    SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
 };
 use crate::{IndexedAttribute, Result, TimeRange, TraceId};
 
@@ -33,13 +34,24 @@ pub trait RangeQueries: Catalog {
 
     fn list_log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups>;
 
+    fn count_logs(
+        &self,
+        query: &Query,
+        by: &[LogGroupingField],
+        order: RankOrder,
+        step_ns: i64,
+        limit: usize,
+    ) -> Result<LogCounts>;
+
     fn list_spans(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Spans>;
 
     fn list_span_groups(
         &self,
         query: &Query,
         by: &[SpanGroupingField],
+        ranking: SpanGroupRanking,
         step_ns: i64,
+        group_buckets: GroupBuckets,
         limit: usize,
     ) -> Result<SpanGroups>;
 

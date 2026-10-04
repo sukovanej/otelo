@@ -6,6 +6,8 @@ import { Show } from "solid-js";
 import { isUnauthorizedError } from "@otelo/api";
 
 import App from "./App";
+import DashboardPage from "./dashboards/DashboardPage";
+import DashboardsPage from "./dashboards/DashboardsPage";
 import { askForLogin, finishLogin, isLoginNeeded } from "./login";
 import LoginPage from "./LoginPage";
 import LogsPage from "./logs/LogsPage";
@@ -36,6 +38,8 @@ const Router = createRouter({
     { path: "/traces", component: TracesPage },
     { path: "/traces/:id", component: TracePage },
     { path: "/metrics/:name?", component: MetricsPage },
+    { path: "/dashboards", component: DashboardsPage },
+    { path: "/dashboards/:id", component: DashboardPage },
     { path: "*", component: NotFound },
   ],
 });

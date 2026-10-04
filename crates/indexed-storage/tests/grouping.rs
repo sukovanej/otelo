@@ -1,6 +1,8 @@
 use std::num::NonZeroUsize;
 
-use otelo_indexed_storage::query::{BucketChange, GroupKey, Grouping, GroupingField, SeriesGroup};
+use otelo_indexed_storage::query::{
+    BucketChange, GroupKey, Grouping, GroupingField, RankOrder, SeriesGroup,
+};
 use otelo_indexed_storage::{
     Attributes, Buckets, ExplicitBuckets, Histogram, HistogramPoint, MetricKind, NumberPoint,
     SeriesPoint, SeriesSteps, SummarizedSeries, Temporality, group_series,
@@ -81,6 +83,7 @@ fn grouping(by: &[&str], top: Option<usize>) -> Grouping {
     Grouping {
         by: by.iter().map(|name| name.parse().unwrap()).collect(),
         top: top.map(|top| NonZeroUsize::new(top).unwrap()),
+        order: RankOrder::Highest,
     }
 }
 
@@ -230,44 +233,59 @@ fn a_group_holds_the_values_its_series_have() {
 
 #[test]
 fn top_keeps_the_highest_groups_and_combines_the_rest_as_other() {
-    let series = [
-        ("a", 10.0),
-        ("b", 50.0),
-        ("c", 30.0),
-        ("d", 40.0),
-        ("e", 20.0),
-    ]
-    .into_iter()
-    .map(|(service, value)| {
-        SeriesOf {
-            service,
-            ..SeriesOf::with_attributes(MetricKind::UpDown, json!({}))
-        }
-        .summarize(number_points(&[(0, value)]))
-    })
-    .collect();
-    let groups = group_series(series, &grouping(&[], Some(3)));
-    let described: Vec<(String, f64)> = groups
-        .iter()
-        .map(|group| {
-            let name = match &group.key {
-                GroupKey::Series { service, .. } => service.clone(),
-                GroupKey::Other {
-                    group_count,
-                    series_count,
-                } => format!("other of {group_count} groups, {series_count} series"),
-                GroupKey::Values { .. } => panic!("no group by values without by"),
-            };
-            (name, group.buckets[0].avg)
+    let five_series = || {
+        [
+            ("a", 10.0),
+            ("b", 50.0),
+            ("c", 30.0),
+            ("d", 40.0),
+            ("e", 20.0),
+        ]
+        .into_iter()
+        .map(|(service, value)| {
+            SeriesOf {
+                service,
+                ..SeriesOf::with_attributes(MetricKind::UpDown, json!({}))
+            }
+            .summarize(number_points(&[(0, value)]))
         })
-        .collect();
+        .collect()
+    };
+    let describe = |groups: Vec<SeriesGroup>| -> Vec<(String, f64)> {
+        groups
+            .iter()
+            .map(|group| {
+                let name = match &group.key {
+                    GroupKey::Series { service, .. } => service.clone(),
+                    GroupKey::Other {
+                        group_count,
+                        series_count,
+                    } => format!("other of {group_count} groups, {series_count} series"),
+                    GroupKey::Values { .. } => panic!("no group by values without by"),
+                };
+                (name, group.buckets[0].avg)
+            })
+            .collect()
+    };
     assert_eq!(
-        described,
+        describe(group_series(five_series(), &grouping(&[], Some(3)))),
         [
             ("b".to_owned(), 50.0),
             ("d".to_owned(), 40.0),
             ("c".to_owned(), 30.0),
             ("other of 2 groups, 2 series".to_owned(), 30.0),
+        ]
+    );
+    let lowest_two = Grouping {
+        order: RankOrder::Lowest,
+        ..grouping(&[], Some(2))
+    };
+    assert_eq!(
+        describe(group_series(five_series(), &lowest_two)),
+        [
+            ("a".to_owned(), 10.0),
+            ("e".to_owned(), 20.0),
+            ("other of 3 groups, 3 series".to_owned(), 120.0),
         ]
     );
 }
