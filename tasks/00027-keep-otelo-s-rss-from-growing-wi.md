@@ -5,6 +5,7 @@ tags:
 - bug
 pull_requests:
 - https://github.com/sukovanej/otelo/pull/46
+- https://github.com/sukovanej/otelo/pull/56
 ---
 # Keep otelo's RSS from growing with each UI query
 
