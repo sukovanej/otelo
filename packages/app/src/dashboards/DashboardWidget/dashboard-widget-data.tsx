@@ -36,7 +36,7 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
   const zoomRangeTo = (startMs: number, endMs: number) =>
     props.range.setRange(new Date(startMs).toISOString(), new Date(endMs).toISOString());
   const drawMessage = (message: JSX.Element) => (
-    <Panel title={title()} actions={props.actions} fill singleLineHeader>
+    <Panel title={title()} actions={props.actions} fill singleLineHeader actionsOnHover>
       <div class={`${WIDGET_BODY_CLASSES} justify-center text-center text-muted`}>{message}</div>
     </Panel>
   );
@@ -64,6 +64,7 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
               legendPlacement="footer"
               fill
               singleLineHeader
+              actionsOnHover
               drawSeriesLabel={(series) => (
                 <DashboardWidgetGroupTitle label={series.label} groupKey={series.groupKey} />
               )}
@@ -73,7 +74,7 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
         </Match>
         <Match when={readMeasured(fetched.data())}>
           {(measured) => (
-            <Panel title={title()} actions={props.actions} fill singleLineHeader>
+            <Panel title={title()} actions={props.actions} fill singleLineHeader actionsOnHover>
               <div class={[WIDGET_BODY_CLASSES, { "opacity-60": fetched.loading() }]}>
                 <Show
                   when={props.widget.display.kind === "toplist"}

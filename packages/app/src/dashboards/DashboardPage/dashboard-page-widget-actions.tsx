@@ -29,7 +29,7 @@ export default function DashboardPageWidgetActions(props: DashboardPageWidgetAct
     },
   ];
   return (
-    <div class="opacity-0 transition-opacity group-hover/widget:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
+    <>
       <div class="hidden items-center gap-0.5 @[16rem]/widget:flex">
         <Button
           size="sm"
@@ -62,6 +62,6 @@ export default function DashboardPageWidgetActions(props: DashboardPageWidgetAct
       <div class="@[16rem]/widget:hidden">
         <ActionMenu label="Widget actions" items={menuItems} />
       </div>
-    </div>
+    </>
   );
 }

@@ -22,6 +22,7 @@ interface ChartPanelProps<S extends TimeSeries> {
   readonly legendPlacement?: LegendPlacement;
   readonly fill?: boolean;
   readonly singleLineHeader?: boolean;
+  readonly actionsOnHover?: boolean;
   readonly drawSeriesLabel?: (series: S) => JSX.Element;
   readonly onZoom: (startMs: number, endMs: number) => void;
 }
@@ -57,6 +58,7 @@ export default function ChartPanel<S extends TimeSeries>(props: ChartPanelProps<
       description={props.description}
       fill={props.fill}
       singleLineHeader={props.singleLineHeader}
+      actionsOnHover={props.actionsOnHover}
       actions={
         <>
           <Show when={!legendInFooter()}>{legend()}</Show>

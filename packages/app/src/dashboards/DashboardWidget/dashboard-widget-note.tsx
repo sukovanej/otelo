@@ -12,7 +12,7 @@ interface DashboardWidgetNoteProps {
 
 export default function DashboardWidgetNote(props: DashboardWidgetNoteProps) {
   return (
-    <Panel title={props.title} actions={props.actions} fill singleLineHeader>
+    <Panel title={props.title} actions={props.actions} fill singleLineHeader actionsOnHover>
       <div class={`${WIDGET_BODY_CLASSES} overflow-y-auto whitespace-pre-wrap wrap-anywhere`}>
         {props.text}
       </div>
