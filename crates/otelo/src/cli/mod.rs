@@ -1,8 +1,10 @@
 mod catalog;
 pub mod client;
 mod dashboards;
+mod login;
 mod logs;
 mod metrics;
+mod remote;
 mod services;
 mod span_groups;
 pub mod table;
@@ -15,8 +17,10 @@ pub use catalog::{
     print_completions,
 };
 pub use dashboards::{DashboardArgs, change_and_print_dashboards};
+pub use login::{LoginArgs, LogoutArgs, delete_daemon_password, store_daemon_password};
 pub use logs::{LogsArgs, print_logs};
 pub use metrics::{MetricArgs, MetricsArgs, print_metric_series, print_metrics};
+pub use remote::{RemoteArgs, change_and_print_remotes};
 pub use services::{ServiceArgs, ServicesArgs, print_service, print_services};
 pub use traces::{SpansArgs, TraceArgs, TracesArgs, print_spans, print_trace, print_traces};
 

@@ -41,6 +41,12 @@ enum Command {
     Index(cli::IndexArgs),
     /// List, print, save, or delete the dashboards of the web UI
     Dashboard(cli::DashboardArgs),
+    /// List, add, or remove the otelo daemons on other machines that --daemon can name
+    Remote(cli::RemoteArgs),
+    /// Store the password of a daemon in the keyring, read from the terminal or stdin
+    Login(cli::LoginArgs),
+    /// Delete the password of a daemon from the keyring
+    Logout(cli::LogoutArgs),
     /// Print the spec of the query API that /api/openapi.json serves, without a daemon
     Openapi,
     /// Replace this executable with the newest release, or with the newest build of main
@@ -64,6 +70,9 @@ fn main() -> anyhow::Result<()> {
         Command::Complete(args) => cli::print_completions(&args),
         Command::Index(args) => cli::change_and_print_indexes(&args),
         Command::Dashboard(args) => cli::change_and_print_dashboards(&args),
+        Command::Remote(args) => cli::change_and_print_remotes(&args),
+        Command::Login(args) => cli::store_daemon_password(&args),
+        Command::Logout(args) => cli::delete_daemon_password(&args),
         Command::Openapi => {
             println!("{}", otelo_api::build_openapi_spec().to_pretty_json()?);
             Ok(())

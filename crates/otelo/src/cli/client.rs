@@ -1,4 +1,6 @@
 use std::io::{self, IsTerminal, Write};
+use std::str::FromStr;
+use std::sync::OnceLock;
 
 use anyhow::{Context, bail};
 use serde::Serialize;
@@ -8,22 +10,65 @@ use otelo_api::ErrorBody;
 use ureq::http::StatusCode;
 use ureq::http::header::AUTHORIZATION;
 
+use super::login::{StoredPassword, read_stored_password};
+use super::remote::{DaemonAddress, read_remote};
+
 const MAX_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 
 const PASSWORD_VARIABLE: &str = "OTELO_PASSWORD";
 
+const LOCAL_DAEMON_URL: &str = "http://127.0.0.1:7070";
+
 #[derive(clap::Args)]
 pub struct Client {
-    /// Address of the otelo daemon
+    #[command(flatten)]
+    daemon_args: DaemonArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
+
+    #[arg(skip)]
+    daemon: OnceLock<Daemon>,
+}
+
+#[derive(clap::Args)]
+pub struct DaemonArgs {
+    /// Address of the otelo daemon, or the name of a remote from `otelo remote list`. The CLI
+    /// sends the password the keyring keeps for that address, or else `OTELO_PASSWORD`
     #[arg(
         long = "daemon",
         value_name = "DAEMON",
         env = "OTELO_URL",
-        default_value = "http://127.0.0.1:7070",
+        default_value = LOCAL_DAEMON_URL,
         global = true
     )]
-    daemon_url: String,
+    daemon_choice: DaemonChoice,
+}
 
+#[derive(Clone)]
+enum DaemonChoice {
+    Address(DaemonAddress),
+    Remote { name: String },
+}
+
+impl FromStr for DaemonChoice {
+    type Err = String;
+
+    fn from_str(choice: &str) -> Result<Self, Self::Err> {
+        if choice.contains(['/', ':']) {
+            Ok(Self::Address(choice.parse()?))
+        } else if choice.is_empty() {
+            Err("name a remote or give an http:// or https:// address".into())
+        } else {
+            Ok(Self::Remote {
+                name: choice.to_owned(),
+            })
+        }
+    }
+}
+
+#[derive(clap::Args)]
+pub struct OutputArgs {
     /// Print JSON, the default when stdout is not a terminal
     #[arg(long, conflicts_with = "table", global = true)]
     json: bool,
@@ -39,7 +84,32 @@ pub enum OutputFormat {
     Table,
 }
 
-impl Client {
+struct Daemon {
+    url: String,
+    password: Option<String>,
+    password_advice: String,
+}
+
+impl DaemonArgs {
+    pub fn resolve_address(&self) -> anyhow::Result<DaemonAddress> {
+        match &self.daemon_choice {
+            DaemonChoice::Address(address) => Ok(address.clone()),
+            DaemonChoice::Remote { name } => Ok(read_remote(name)?.address),
+        }
+    }
+
+    fn describe_login_command(&self) -> String {
+        match &self.daemon_choice {
+            DaemonChoice::Address(address) if address.to_string() == LOCAL_DAEMON_URL => {
+                "otelo login".into()
+            }
+            DaemonChoice::Address(address) => format!("otelo login --daemon {address}"),
+            DaemonChoice::Remote { name } => format!("otelo login --daemon {name}"),
+        }
+    }
+}
+
+impl OutputArgs {
     #[must_use]
     pub fn choose_output_format(&self) -> OutputFormat {
         if !self.json && (self.table || io::stdout().is_terminal()) {
@@ -48,30 +118,41 @@ impl Client {
             OutputFormat::Json
         }
     }
+}
+
+impl Client {
+    #[must_use]
+    pub fn choose_output_format(&self) -> OutputFormat {
+        self.output.choose_output_format()
+    }
 
     pub fn get<T: DeserializeOwned>(
         &self,
         path: &str,
         params: &[(&str, Option<String>)],
     ) -> anyhow::Result<T> {
+        let daemon = self.resolve_daemon()?;
         let set_params = params
             .iter()
             .filter_map(|(name, value)| Some((*name, value.as_deref()?)));
-        let request = Self::build_agent()
-            .get(self.build_url(path))
+        let request = build_agent()
+            .get(daemon.build_url(path))
             .query_pairs(set_params);
-        let response = add_password(request)
+        let response = daemon
+            .add_password(request)
             .call()
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
-        read_json_response(response)
+            .with_context(|| daemon.describe_unreachable())?;
+        daemon.read_json_response(response)
     }
 
     pub fn put<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let request = Self::build_agent().put(self.build_url(path));
-        let response = add_password(request)
+        let daemon = self.resolve_daemon()?;
+        let request = build_agent().put(daemon.build_url(path));
+        let response = daemon
+            .add_password(request)
             .send_empty()
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
-        read_json_response(response)
+            .with_context(|| daemon.describe_unreachable())?;
+        daemon.read_json_response(response)
     }
 
     pub fn post_json<T: DeserializeOwned>(
@@ -79,11 +160,13 @@ impl Client {
         path: &str,
         body: &impl Serialize,
     ) -> anyhow::Result<T> {
-        let request = Self::build_agent().post(self.build_url(path));
-        let response = add_password(request)
+        let daemon = self.resolve_daemon()?;
+        let request = build_agent().post(daemon.build_url(path));
+        let response = daemon
+            .add_password(request)
             .send_json(body)
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
-        read_json_response(response)
+            .with_context(|| daemon.describe_unreachable())?;
+        daemon.read_json_response(response)
     }
 
     pub fn put_json<T: DeserializeOwned>(
@@ -91,56 +174,110 @@ impl Client {
         path: &str,
         body: &impl Serialize,
     ) -> anyhow::Result<T> {
-        let request = Self::build_agent().put(self.build_url(path));
-        let response = add_password(request)
+        let daemon = self.resolve_daemon()?;
+        let request = build_agent().put(daemon.build_url(path));
+        let response = daemon
+            .add_password(request)
             .send_json(body)
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
-        read_json_response(response)
+            .with_context(|| daemon.describe_unreachable())?;
+        daemon.read_json_response(response)
     }
 
     pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let request = Self::build_agent().delete(self.build_url(path));
-        let response = add_password(request)
+        let daemon = self.resolve_daemon()?;
+        let request = build_agent().delete(daemon.build_url(path));
+        let response = daemon
+            .add_password(request)
             .call()
-            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
-        read_json_response(response)
+            .with_context(|| daemon.describe_unreachable())?;
+        daemon.read_json_response(response)
     }
 
-    fn build_agent() -> ureq::Agent {
-        ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .build()
-            .into()
+    // A command can send several requests, and each read of the keyring can ask the user.
+    fn resolve_daemon(&self) -> anyhow::Result<&Daemon> {
+        if let Some(daemon) = self.daemon.get() {
+            return Ok(daemon);
+        }
+        let address = self.daemon_args.resolve_address()?;
+        let login_command = self.daemon_args.describe_login_command();
+        let (password, password_advice) = match read_stored_password(&address) {
+            StoredPassword::Found(password) => (
+                Some(password),
+                format!("`{login_command}` replaces the password in the keyring"),
+            ),
+            StoredPassword::Missing => (
+                read_password_variable(),
+                format!(
+                    "`{login_command}` stores the password in the keyring, or set \
+                     {PASSWORD_VARIABLE} to it"
+                ),
+            ),
+            StoredPassword::KeyringUnavailable(error) => (
+                read_password_variable(),
+                format!(
+                    "the keyring is unavailable ({error}), so set {PASSWORD_VARIABLE} to the password"
+                ),
+            ),
+        };
+        let daemon = Daemon {
+            url: address.to_string(),
+            password,
+            password_advice,
+        };
+        Ok(self.daemon.get_or_init(|| daemon))
     }
+}
 
+impl Daemon {
     fn build_url(&self, path: &str) -> String {
-        format!("{}{path}", self.daemon_url.trim_end_matches('/'))
+        format!("{}{path}", self.url)
+    }
+
+    fn add_password<Body>(
+        &self,
+        request: ureq::RequestBuilder<Body>,
+    ) -> ureq::RequestBuilder<Body> {
+        match &self.password {
+            Some(password) => request.header(AUTHORIZATION, format!("Bearer {password}")),
+            None => request,
+        }
+    }
+
+    fn describe_unreachable(&self) -> String {
+        format!("reach the otelo daemon at {}", self.url)
+    }
+
+    fn read_json_response<T: DeserializeOwned>(
+        &self,
+        mut response: ureq::http::Response<ureq::Body>,
+    ) -> anyhow::Result<T> {
+        let status = response.status();
+        let body = response.body_mut().with_config().limit(MAX_RESPONSE_BYTES);
+        if status.is_success() {
+            return body.read_json().context("read the response of the daemon");
+        }
+        let message = body.read_json::<ErrorBody>().map_or_else(
+            |_| format!("the daemon answered {status}"),
+            |rejection| rejection.error,
+        );
+        if status == StatusCode::UNAUTHORIZED {
+            bail!("{message}; {}", self.password_advice);
+        }
+        bail!("{message}")
     }
 }
 
-fn read_json_response<T: DeserializeOwned>(
-    mut response: ureq::http::Response<ureq::Body>,
-) -> anyhow::Result<T> {
-    let status = response.status();
-    let body = response.body_mut().with_config().limit(MAX_RESPONSE_BYTES);
-    if status.is_success() {
-        return body.read_json().context("read the response of the daemon");
-    }
-    let message = body.read_json::<ErrorBody>().map_or_else(
-        |_| format!("the daemon answered {status}"),
-        |rejection| rejection.error,
-    );
-    if status == StatusCode::UNAUTHORIZED {
-        bail!("{message}; set {PASSWORD_VARIABLE} to the password that `otelo init` printed");
-    }
-    bail!("{message}")
+fn read_password_variable() -> Option<String> {
+    std::env::var(PASSWORD_VARIABLE)
+        .ok()
+        .map(|password| password.trim().to_owned())
 }
 
-fn add_password<Body>(request: ureq::RequestBuilder<Body>) -> ureq::RequestBuilder<Body> {
-    match std::env::var(PASSWORD_VARIABLE) {
-        Ok(password) => request.header(AUTHORIZATION, format!("Bearer {}", password.trim())),
-        Err(_) => request,
-    }
+fn build_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into()
 }
 
 #[must_use]

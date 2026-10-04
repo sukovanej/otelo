@@ -29,8 +29,9 @@ pub fn init_data_directory(args: &InitArgs) -> anyhow::Result<()> {
     let password = state.replace_password()?;
     println!("{password}");
     eprintln!(
-        "That is the password of the UI, and of the CLI in OTELO_PASSWORD. otelo keeps only its \
-         hash, so it prints the password this once."
+        "That is the password of the UI and of the CLI, where `otelo login` stores it in the \
+         keyring, or OTELO_PASSWORD holds it. otelo keeps only its hash, so it prints the \
+         password this once."
     );
     Ok(())
 }
