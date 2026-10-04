@@ -5,7 +5,30 @@ All notable changes to otelo are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.3...main)
+## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.4...main)
+
+## [0.0.4](https://github.com/sukovanej/otelo/compare/v0.0.3...v0.0.4) - 2026-10-04
+
+### Added
+
+- `--daemon` takes the name of a remote as well as an address. `otelo remote
+  add prod https://otelo.example.com` keeps the name in
+  `~/.config/otelo/remote.json`, and `otelo logs --daemon prod` reads that
+  daemon. A value with / or : is an address, and anything else is a name.
+- `otelo login` keeps the password of a daemon in the keyring of the OS, the
+  macOS Keychain or the Secret Service on Linux, and `otelo logout` deletes
+  it. Where the keyring is unavailable or has no password for the address, the
+  CLI sends `OTELO_PASSWORD`. A 401 says which of the two to fix.
+
+### Fixed
+
+- A filter of alternatives, `service in (a, b, c)` or `service = a OR
+  service = b`, kept only its first alternative inside the time range and the
+  metric. The others matched records of any time and any metric, so a metric
+  grouped by service also drew the other metrics of those services.
+- A widget's action buttons no longer cut its title short. They take no width
+  until the widget is hovered or holds focus, and on a touch screen they
+  always show.
 
 ## [0.0.3](https://github.com/sukovanej/otelo/compare/v0.0.2...v0.0.3) - 2026-10-04
 
