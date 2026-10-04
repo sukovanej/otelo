@@ -65,3 +65,7 @@ Until this lands, the droplet can take `Environment=MALLOC_ARENA_MAX=1` in mudro
 ### 2026-10-03T22:56:52Z by Milan Suk via claude-code
 
 > The blocking pool is capped at 2 threads (#46): 33 MB instead of 50 MB after 100 page loads in the replay. The allocator comparison is still to do.
+
+### 2026-10-04T22:05:13Z by Milan Suk via claude-code
+
+> On prod (2026-10-04) the heap itself (cgroup anon, not page cache) jumped 46 to 155 MB in 4 minutes while a client read 4 days of spans in 10,000-row pages. #56 caps list pages at 1000 rows with cursors; measure prod again before the allocator comparison.
