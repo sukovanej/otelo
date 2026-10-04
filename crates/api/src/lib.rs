@@ -140,6 +140,20 @@ async fn trace_request(request: Request, next: Next) -> Response {
     response
 }
 
+// The pool has few threads, so a request can wait for one longer than its queries run.
+pub(crate) async fn spawn_blocking_in_current_span<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, tokio::task::JoinError> {
+    let span = tracing::Span::current();
+    let wait_span = tracing::info_span!("wait for a blocking thread");
+    tokio::task::spawn_blocking(move || {
+        drop(wait_span);
+        let _entered = span.enter();
+        work()
+    })
+    .await
+}
+
 pub(crate) struct OpenedRange {
     queries: Box<dyn RangeQueries>,
     range: TimeRange,
@@ -187,14 +201,10 @@ impl Api {
         query: impl FnOnce(&Self) -> Result<T, ApiError> + Send + 'static,
     ) -> ApiResult<T> {
         let api = self.clone();
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _entered = span.enter();
-            query(&api)
-        })
-        .await
-        .context("run the query")?
-        .map(Json)
+        spawn_blocking_in_current_span(move || query(&api))
+            .await
+            .context("run the query")?
+            .map(Json)
     }
 
     async fn run_range_query<T: Send + 'static>(
