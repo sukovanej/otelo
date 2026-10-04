@@ -296,6 +296,32 @@ fn a_query_combines_attributes_with_and_or() {
 }
 
 #[test]
+fn a_query_of_alternatives_keeps_to_the_range() {
+    let fixture = Fixture::new();
+    let reader = Reader::open(
+        fixture.directory.path(),
+        TimeRange::new(
+            fixture.today_start_at,
+            fixture.today_start_at + 600 * SECOND,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let logs_of_today = log_bodies_matching(&reader, "");
+    assert!(!logs_of_today.contains(&"user 7 signed in".to_owned()));
+    for query in [
+        "service in (caddy, api)",
+        "service = caddy OR service = api",
+    ] {
+        assert_eq!(
+            log_bodies_matching(&reader, query),
+            logs_of_today,
+            "{query}"
+        );
+    }
+}
+
+#[test]
 fn numbers_match_numbers_and_strings_of_them() {
     let fixture = Fixture::new();
     let reader = fixture.reader_around_midnight();
