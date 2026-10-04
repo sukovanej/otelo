@@ -28,14 +28,15 @@ interface BarPath {
   readonly path: string;
 }
 
-interface LinePath {
-  readonly cssColor: string;
-  readonly runs: ReadonlyArray<LineRun>;
-}
-
 interface LineRun {
+  readonly cssColor: string;
   readonly line: string;
   readonly area: string;
+}
+
+interface HoveredPoint {
+  readonly cssColor: string;
+  readonly value: number;
 }
 
 interface ZoomDrag {
@@ -59,7 +60,6 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   let plotElement!: HTMLDivElement;
   const [chartWidth, setChartWidth] = createSignal(0);
   onSettled(() => {
-    setChartWidth(plotElement.clientWidth);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry) setChartWidth(entry.contentRect.width);
@@ -103,12 +103,15 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
         : Math.max(0, ...values);
     }),
   );
-  const yTicks = createMemo(() => pickValueTicks(Math.max(0, ...bucketTops())));
+  const yTicks = createMemo(() => pickValueTicks(Math.max(0, ...bucketTops())), {
+    equals: haveSameItems,
+  });
   const yAxisMax = createMemo(() => yTicks().at(-1) || 1);
   const valueToY = (value: number) =>
     PLOT_TOP_PX + PLOT_HEIGHT_PX - (value / yAxisMax()) * PLOT_HEIGHT_PX;
-  const xTicks = createMemo(() =>
-    pickTimeTicks(frame().startMs, frame().endMs, Math.floor(plotWidth() / 96)),
+  const xTicks = createMemo(
+    () => pickTimeTicks(frame().startMs, frame().endMs, Math.floor(plotWidth() / 96)),
+    { equals: haveSameItems },
   );
 
   const barWidth = createMemo(() => {
@@ -119,66 +122,79 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
     );
   });
 
-  const barPaths = createMemo<BarPath[]>(() =>
-    props.kind !== "bar"
-      ? []
-      : frame().bucketStartsMs.flatMap((_, bucketIndex) => {
-          const width = barWidth();
-          const left = bucketCenterX(bucketIndex) - width / 2;
-          let stackedValue = 0;
-          const stack = shownSeries().flatMap((series) => {
-            const value = series.values[bucketIndex] ?? 0;
-            const segment = {
-              cssColor: series.cssColor,
-              fromValue: stackedValue,
-              toValue: stackedValue + value,
-            };
-            stackedValue += value;
-            return value > 0 ? [segment] : [];
-          });
-          return stack.map((segment, segmentIndex) => {
-            const isTopSegment = segmentIndex === stack.length - 1;
-            const bottom = valueToY(segment.fromValue) - (segmentIndex > 0 ? BAR_GAP_PX / 2 : 0);
-            const top = valueToY(segment.toValue) + (isTopSegment ? 0 : BAR_GAP_PX / 2);
-            const height = Math.max(1, bottom - top);
-            return {
-              cssColor: segment.cssColor,
-              path: toBarPath(
-                left,
-                bottom - height,
-                width,
-                height,
-                isTopSegment && width >= MIN_ROUNDED_BAR_WIDTH_PX,
-              ),
-            };
-          });
-        }),
+  const barPaths = createMemo<BarPath[]>(
+    () =>
+      props.kind !== "bar"
+        ? []
+        : frame().bucketStartsMs.flatMap((_, bucketIndex) => {
+            const width = barWidth();
+            const left = bucketCenterX(bucketIndex) - width / 2;
+            let stackedValue = 0;
+            const stack = shownSeries().flatMap((series) => {
+              const value = series.values[bucketIndex] ?? 0;
+              const segment = {
+                cssColor: series.cssColor,
+                fromValue: stackedValue,
+                toValue: stackedValue + value,
+              };
+              stackedValue += value;
+              return value > 0 ? [segment] : [];
+            });
+            return stack.map((segment, segmentIndex) => {
+              const isTopSegment = segmentIndex === stack.length - 1;
+              const bottom = valueToY(segment.fromValue) - (segmentIndex > 0 ? BAR_GAP_PX / 2 : 0);
+              const top = valueToY(segment.toValue) + (isTopSegment ? 0 : BAR_GAP_PX / 2);
+              const height = Math.max(1, bottom - top);
+              return {
+                cssColor: segment.cssColor,
+                path: toBarPath(
+                  left,
+                  bottom - height,
+                  width,
+                  height,
+                  isTopSegment && width >= MIN_ROUNDED_BAR_WIDTH_PX,
+                ),
+              };
+            });
+          }),
+    { equals: (previous, next) => haveSameItems(previous, next, isSameBarPath) },
   );
 
-  const linePaths = createMemo<LinePath[]>(() =>
-    props.kind === "bar"
-      ? []
-      : shownSeries().map((series) => ({
-          cssColor: series.cssColor,
-          runs: splitIntoRuns(series.values).map((run) => {
-            const points = run.map(
-              ({ bucketIndex, value }) => `${bucketCenterX(bucketIndex)},${valueToY(value)}`,
-            );
-            const firstBucketIndex = run[0]?.bucketIndex ?? 0;
-            const lastBucketIndex = run.at(-1)?.bucketIndex ?? firstBucketIndex;
-            const loneValue = run.length === 1 ? run[0] : undefined;
-            return {
-              line: loneValue
-                ? toLoneValueDash(bucketCenterX(loneValue.bucketIndex), valueToY(loneValue.value))
-                : `M${points.join("L")}`,
-              area: `M${bucketCenterX(firstBucketIndex)},${valueToY(0)}L${points.join("L")}L${bucketCenterX(lastBucketIndex)},${valueToY(0)}Z`,
-            };
-          }),
-        })),
+  const lineRuns = createMemo<LineRun[]>(
+    () =>
+      props.kind === "bar"
+        ? []
+        : shownSeries().flatMap((series) =>
+            splitIntoRuns(series.values).map((run) => {
+              const points = run.map(
+                ({ bucketIndex, value }) => `${bucketCenterX(bucketIndex)},${valueToY(value)}`,
+              );
+              const firstBucketIndex = run[0]?.bucketIndex ?? 0;
+              const lastBucketIndex = run.at(-1)?.bucketIndex ?? firstBucketIndex;
+              const loneValue = run.length === 1 ? run[0] : undefined;
+              return {
+                cssColor: series.cssColor,
+                line: loneValue
+                  ? toLoneValueDash(bucketCenterX(loneValue.bucketIndex), valueToY(loneValue.value))
+                  : `M${points.join("L")}`,
+                area: `M${bucketCenterX(firstBucketIndex)},${valueToY(0)}L${points.join("L")}L${bucketCenterX(lastBucketIndex)},${valueToY(0)}Z`,
+              };
+            }),
+          ),
+    { equals: (previous, next) => haveSameItems(previous, next, isSameLineRun) },
   );
 
   const [hoveredBucketIndex, setHoveredBucketIndex] = createSignal<number>();
   const [zoomDrag, setZoomDrag] = createSignal<ZoomDrag>();
+
+  const hoveredPoints = createMemo<HoveredPoint[]>(() => {
+    const bucketIndex = hoveredBucketIndex();
+    if (bucketIndex === undefined) return [];
+    return shownSeries().flatMap((series) => {
+      const value = series.values[bucketIndex];
+      return value === null || value === undefined ? [] : [{ cssColor: series.cssColor, value }];
+    });
+  });
 
   const findBucketIndexAt = (x: number) => {
     const bucketCount = frame().bucketStartsMs.length;
@@ -317,25 +333,21 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
             <For each={barPaths()} keyed={false}>
               {(bar) => <path d={bar().path} fill={bar().cssColor} />}
             </For>
-            <For each={linePaths()} keyed={false}>
-              {(line) => (
-                <For each={line().runs} keyed={false}>
-                  {(run) => (
-                    <>
-                      <Show when={props.kind === "area"}>
-                        <path d={run().area} fill={line().cssColor} fill-opacity="0.1" />
-                      </Show>
-                      <path
-                        d={run().line}
-                        fill="none"
-                        stroke={line().cssColor}
-                        stroke-width="2"
-                        stroke-linejoin="round"
-                        stroke-linecap="round"
-                      />
-                    </>
-                  )}
-                </For>
+            <Show when={props.kind === "area"}>
+              <For each={lineRuns()} keyed={false}>
+                {(run) => <path d={run().area} fill={run().cssColor} fill-opacity="0.1" />}
+              </For>
+            </Show>
+            <For each={lineRuns()} keyed={false}>
+              {(run) => (
+                <path
+                  d={run().line}
+                  fill="none"
+                  stroke={run().cssColor}
+                  stroke-width="2"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                />
               )}
             </For>
 
@@ -348,23 +360,16 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
                 stroke="var(--color-muted)"
                 stroke-width="1"
               />
-              <For each={shownSeries()}>
-                {(series) => (
-                  <Show
-                    when={
-                      series.values[hoveredBucketIndex() ?? 0] !== null &&
-                      series.values[hoveredBucketIndex() ?? 0] !== undefined
-                    }
-                  >
-                    <circle
-                      cx={bucketCenterX(hoveredBucketIndex() ?? 0)}
-                      cy={valueToY(series.values[hoveredBucketIndex() ?? 0] ?? 0)}
-                      r="4"
-                      fill={series.cssColor}
-                      stroke="var(--viz-surface, var(--color-surface))"
-                      stroke-width="2"
-                    />
-                  </Show>
+              <For each={hoveredPoints()} keyed={false}>
+                {(point) => (
+                  <circle
+                    cx={bucketCenterX(hoveredBucketIndex() ?? 0)}
+                    cy={valueToY(point().value)}
+                    r="4"
+                    fill={point().cssColor}
+                    stroke="var(--viz-surface, var(--color-surface))"
+                    stroke-width="2"
+                  />
                 )}
               </For>
             </Show>
@@ -444,6 +449,32 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
         </table>
       </div>
     </div>
+  );
+}
+
+function haveSameItems<T>(
+  previous: ReadonlyArray<T>,
+  next: ReadonlyArray<T>,
+  isSameItem: (previousItem: T, nextItem: T) => boolean = Object.is,
+): boolean {
+  return (
+    previous.length === next.length &&
+    previous.every((item, index) => {
+      const nextItem = next[index];
+      return nextItem !== undefined && isSameItem(item, nextItem);
+    })
+  );
+}
+
+function isSameBarPath(previous: BarPath, next: BarPath): boolean {
+  return previous.cssColor === next.cssColor && previous.path === next.path;
+}
+
+function isSameLineRun(previous: LineRun, next: LineRun): boolean {
+  return (
+    previous.cssColor === next.cssColor &&
+    previous.line === next.line &&
+    previous.area === next.area
   );
 }
 
