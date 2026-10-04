@@ -134,7 +134,10 @@ fn traces_itself() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(children, ["open reader", "SELECT"]);
+    assert_eq!(
+        children,
+        ["wait for a blocking thread", "open reader", "SELECT"]
+    );
     // The rollups and the retention of the writer trace none of their statements.
     let spans_outside_a_request: i64 = connection
         .query_row(

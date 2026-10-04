@@ -6,9 +6,9 @@ use otelo_indexed_storage::{IndexedAttribute, IndexedSignal};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::Api;
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::params::parse_signal;
+use crate::{Api, spawn_blocking_in_current_span};
 
 /// The attributes that have an index.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -83,9 +83,7 @@ impl Api {
             .and_then(|signal| IndexedAttribute::new(signal, key))
             .map_err(|error| ApiError::bad_request(&error))?;
         let api = self.clone();
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || -> Result<IndexList, ApiError> {
-            let _entered = span.enter();
+        spawn_blocking_in_current_span(move || -> Result<IndexList, ApiError> {
             match change {
                 IndexChange::Add => api.state.add_indexed_attribute(&attribute)?,
                 IndexChange::Remove => {
