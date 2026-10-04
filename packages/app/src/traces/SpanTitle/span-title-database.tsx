@@ -1,11 +1,10 @@
 import { Show } from "solid-js";
 
 import { DatabaseSystemIcon, toDatabaseName } from "@otelo/icons";
-import { SqlCode, SqlStart, Tooltip } from "@otelo/ui";
+import { Tooltip } from "@otelo/ui";
 
 import { type DatabaseSpan, isSqlSystem, toDatabaseIconId } from "../../semantics";
-
-const TOOLTIP_MAX_LINES = 24;
+import SqlQueryStart from "../../SqlQueryStart";
 
 interface SpanTitleDatabaseProps {
   readonly meaning: DatabaseSpan;
@@ -29,15 +28,7 @@ export default function SpanTitleDatabase(props: SpanTitleDatabaseProps) {
           </span>
         }
       >
-        <Tooltip
-          rich
-          content={<SqlCode text={queryOrName()} maxLines={TOOLTIP_MAX_LINES} />}
-          class="min-w-0"
-        >
-          <span class="truncate">
-            <SqlStart text={queryOrName()} />
-          </span>
-        </Tooltip>
+        <SqlQueryStart query={queryOrName()} />
       </Show>
     </>
   );

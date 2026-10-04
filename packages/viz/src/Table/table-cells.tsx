@@ -2,8 +2,8 @@ import type { JSX } from "@solidjs/web";
 import { For } from "solid-js";
 
 import { type CellTone, type Column, pickAlignClass } from "../column";
+import Meter from "../Meter";
 import Value from "../Value";
-import TableMeter from "./table-meter";
 
 const CELL_TONE_CLASSES: Record<CellTone, string> = {
   error: "text-error",
@@ -25,21 +25,28 @@ export default function TableCells<R>(props: TableCellsProps<R>) {
           const tone = column.tone?.(props.row);
           return tone ? CELL_TONE_CLASSES[tone] : "";
         };
-        const drawContent = (): JSX.Element => {
-          if (column.kind === "cell") return column.cell(props.row);
-          if (column.kind === "text") {
-            return <span class="truncate">{column.value(props.row) ?? "–"}</span>;
-          }
-          const valueElement = (
-            <Value value={column.value(props.row)} unit={column.unit} inColumn />
-          );
-          if (column.kind === "number") return valueElement;
+        if (column.kind === "meter") {
           const share = () => {
             const value = column.value(props.row);
             const largest = props.largestMeterValues.get(column.id) ?? 0;
             return largest > 0 && value !== null ? value / largest : 0;
           };
-          return <TableMeter share={share()}>{valueElement}</TableMeter>;
+          return (
+            <div
+              role="cell"
+              class={`col-span-2 grid grid-cols-subgrid items-center text-right ${toneClass()}`}
+            >
+              <Meter share={share()} />
+              <Value value={column.value(props.row)} unit={column.unit} inColumn />
+            </div>
+          );
+        }
+        const drawContent = (): JSX.Element => {
+          if (column.kind === "cell") return column.cell(props.row);
+          if (column.kind === "text") {
+            return <span class="truncate">{column.value(props.row) ?? "–"}</span>;
+          }
+          return <Value value={column.value(props.row)} unit={column.unit} inColumn />;
         };
         return (
           <div

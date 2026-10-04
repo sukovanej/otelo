@@ -5,6 +5,7 @@
 export { default as ChartPanel } from "./ChartPanel";
 export type { SeriesColor } from "./color";
 export type { Column } from "./column";
+export { default as Meter } from "./Meter";
 export { default as Panel } from "./Panel";
 export type { ChartKind, TimeFrame, TimeSeries } from "./series";
 export { default as Sparkline } from "./Sparkline";

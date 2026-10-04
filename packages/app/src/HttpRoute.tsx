@@ -1,6 +1,6 @@
 import { For } from "solid-js";
 
-import { type RoutePartKind, splitRouteIntoParts } from "../../semantics";
+import { type RoutePartKind, splitRouteIntoParts } from "./semantics";
 
 const ROUTE_PART_CLASSES: Record<RoutePartKind, string> = {
   slash: "text-muted",
@@ -8,11 +8,11 @@ const ROUTE_PART_CLASSES: Record<RoutePartKind, string> = {
   text: "",
 };
 
-interface SpanTitleRouteProps {
+interface HttpRouteProps {
   readonly route: string;
 }
 
-export default function SpanTitleRoute(props: SpanTitleRouteProps) {
+export default function HttpRoute(props: HttpRouteProps) {
   return (
     <span class="truncate" title={props.route}>
       <For each={splitRouteIntoParts(props.route)} keyed={false}>

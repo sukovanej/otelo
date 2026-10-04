@@ -59,7 +59,13 @@ test("spans without grouping are one series of the whole range", () => {
   const measured = measureSpanGroups(SPAN_GROUPS, "error_rate", [], "Error rate");
   expect(measured.unit).toBe("ratio");
   expect(measured.groups).toEqual([
-    { label: "Error rate", values: [0, 0.25], total: 1 / 6, color: "error" },
+    {
+      label: "Error rate",
+      groupKey: { by: [], attributes: {} },
+      values: [0, 0.25],
+      total: 1 / 6,
+      color: "error",
+    },
   ]);
   const rate = measureSpanGroups(SPAN_GROUPS, "rate", [], "Rate");
   expect(rate.groups[0]?.values).toEqual([2 / 60, 4 / 60]);
@@ -99,9 +105,11 @@ test("log counts keep the groups of the daemon", () => {
     unindexed: [],
   };
   expect(measureLogCounts(counts, [], "Logs").groups).toEqual([
-    { label: "Logs", values: [1, 2], total: 3 },
+    { label: "Logs", groupKey: { by: [], attributes: {} }, values: [1, 2], total: 3 },
   ]);
-  expect(measureLogCounts(counts, ["level"], "Logs").groups[0]?.label).toBe("error");
+  const byLevel = measureLogCounts(counts, ["level"], "Logs").groups[0];
+  expect(byLevel?.label).toBe("error");
+  expect(byLevel?.groupKey).toEqual({ by: ["level"], attributes: { level: "error" } });
 });
 
 function toMemoryGroup(service: string, values: number[]): SeriesGroup {
@@ -133,7 +141,9 @@ test("the series of a metric add up without grouping", () => {
   };
   const measured = measureMetricSeries(memory, "avg", [], "Memory", "kept");
   expect(measured?.unit).toBe("bytes");
-  expect(measured?.groups).toEqual([{ label: "Memory", values: [150, 250], total: 200 }]);
+  expect(measured?.groups).toEqual([
+    { label: "Memory", groupKey: { by: [], attributes: {} }, values: [150, 250], total: 200 },
+  ]);
   expect(
     measureMetricSeries({ ...memory, groups: [] }, "avg", [], "Memory", "kept"),
   ).toBeUndefined();
@@ -144,11 +154,11 @@ test("the queries of a chart line up on the frame of the first", () => {
   const later = {
     ...spans,
     frame: { ...spans.frame, bucketStartsMs: [Date.parse(END_AT) - 60_000] },
-    groups: [{ label: "Later", values: [7], total: 7 }],
+    groups: [{ label: "Later", groupKey: { by: [], attributes: {} }, values: [7], total: 7 }],
   };
   expect(combineMeasuredQueries([spans, later])?.series).toEqual([
-    { label: "Count", values: [2, 4] },
-    { label: "Later", values: [null, 7] },
+    { label: "Count", groupKey: { by: [], attributes: {} }, values: [2, 4] },
+    { label: "Later", groupKey: { by: [], attributes: {} }, values: [null, 7] },
   ]);
   expect(combineMeasuredQueries([])).toBeUndefined();
 });
