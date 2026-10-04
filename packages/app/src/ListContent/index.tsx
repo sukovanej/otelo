@@ -1,13 +1,14 @@
 import type { JSX } from "@solidjs/web";
-import { Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
 
 import type { IndexedSignal } from "@otelo/api";
-import { Button, Callout } from "@otelo/ui";
+import { Callout } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
 import { pageContent } from "../classes";
 import FetchErrorBoundary from "../FetchErrorBoundary";
 import type { ListResult, ListState } from "../list";
+import ListContentEnd from "./list-content-end";
 import ListContentIndexHint from "./list-content-index-hint";
 
 interface IndexedListResult<V extends string> extends ListResult<V> {
@@ -33,9 +34,10 @@ export default function ListContent<
   S extends string,
 >(props: ListContentProps<V, R, S>) {
   const list = () => props.list;
+  const [scrollElement, setScrollElement] = createSignal<HTMLDivElement>();
   return (
     <div class="flex min-h-0 flex-1">
-      <div class={`min-w-0 flex-1 ${pageContent}`}>
+      <div ref={setScrollElement} class={`min-w-0 flex-1 ${pageContent}`}>
         <Show when={list().fetched.errorMessage()}>
           {(errorMessage) => (
             <div class="mb-3">
@@ -57,14 +59,15 @@ export default function ListContent<
 
           <Panel flush>{props.children}</Panel>
 
-          <Show when={list().canShowMore()}>
-            <Button
-              class="mx-auto mt-3 block"
-              disabled={list().fetched.loading()}
-              onClick={() => list().showMore()}
-            >
-              Show more
-            </Button>
+          <Show when={scrollElement()}>
+            {(element) => (
+              <ListContentEnd
+                scrollElement={element()}
+                canShowMore={list().canShowMore()}
+                loading={list().fetched.loading()}
+                onShowMore={() => list().showMore()}
+              />
+            )}
           </Show>
         </FetchErrorBoundary>
       </div>
