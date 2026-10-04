@@ -8,6 +8,7 @@ interface PanelProps {
   readonly flush?: boolean | undefined;
   readonly fill?: boolean | undefined;
   readonly singleLineHeader?: boolean | undefined;
+  readonly actionsOnHover?: boolean | undefined;
   readonly children: JSX.Element;
 }
 
@@ -15,7 +16,7 @@ export default function Panel(props: PanelProps) {
   return (
     <section
       class={[
-        "flex min-w-0 flex-col overflow-clip rounded-lg border border-line bg-panel",
+        "group/panel flex min-w-0 flex-col overflow-clip rounded-lg border border-line bg-panel",
         { "h-full": props.fill },
       ]}
       // What sits on the panel and has to cover what scrolls under it, such
@@ -42,6 +43,10 @@ export default function Panel(props: PanelProps) {
               class={[
                 "flex items-center gap-3 text-xs",
                 props.singleLineHeader ? "shrink-0" : "max-w-full min-w-0",
+                {
+                  "transition-opacity not-group-hover/panel:not-focus-within:not-pointer-coarse:-ms-3 not-group-hover/panel:not-focus-within:not-pointer-coarse:max-w-0 not-group-hover/panel:not-focus-within:not-pointer-coarse:overflow-hidden not-group-hover/panel:not-focus-within:not-pointer-coarse:opacity-0":
+                    props.actionsOnHover,
+                },
               ]}
             >
               {props.actions}
