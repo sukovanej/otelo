@@ -22,7 +22,7 @@ The first user is mudro (conquer) on a DigitalOcean droplet: Ubuntu 24.04, 1 vCP
 - Host collector: every 15 seconds, the CPU, load, memory, swap, disks, and network of the machine, the CPU and memory of every service the service manager runs, and the CPU, memory, and data size of otelo itself ([[../tasks/00007-collect-host-and-service-metrics.md]]). It needs no configuration. [[./telemetry.md]] lists the metrics, and [[./platforms.md]] says where each number comes from.
 - The daemon's own telemetry, which it sends to its own receiver under the service `otelo`.
 - Query API over HTTP, which the CLI and the UI both read. [[./telemetry.md]] has the queries.
-- UI: a SolidJS SPA, built with Vite, in a pnpm workspace under `packages/`: `app` is the SPA, `ui` its components, its Tailwind v4 theme of colors and type, and its fonts, and `viz` the parts that show data: a chart of values over time, a table, a stat, a sparkline, and the panel that frames them. The pages build on `viz`, and so will custom dashboards, so its props are plain data and name units (`count`, `duration`, `ratio`, `rate`, `bytes`) and series colors (`series-1` to `series-8`, `error`, `p95`) by string, which a dashboard can keep as JSON. The UI ships IBM Plex Sans and IBM Plex Mono, so it looks the same on macOS, Windows, and Linux. A release binary embeds `packages/app/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
+- UI: a SolidJS SPA, built with Vite, in a pnpm workspace under `packages/`: `app` is the SPA, `ui` its components, its Tailwind v4 theme of colors and type, and its fonts, and `viz` the parts that show data: a chart of values over time, a table, a stat, a sparkline, and the panel that frames them. The pages and the dashboards build on `viz`, so its props are plain data and name units (`count`, `duration`, `ratio`, `rate`, `bytes`) and series colors (`series-1` to `series-8`, `error`, `p95`) by string, which a dashboard can keep as JSON. The UI ships IBM Plex Sans and IBM Plex Mono, so it looks the same on macOS, Windows, and Linux. A release binary embeds `packages/app/dist`, and the daemon serves it on the address of the API. Any path outside `/api` gets `index.html`.
 
 ## Code
 
@@ -33,7 +33,7 @@ The Rust workspace in `crates/` has one crate per part, and the `otelo` binary p
 | `otelo-query` | the query language: its parser and its completion |
 | `otelo-indexed-storage` | the storage interface: the model of the records, what the queries return, the meters of the pipeline from the receiver to the index, and the `Storage` and `RangeQueries` traits |
 | `otelo-indexed-storage-sqlite` | the SQLite backend: the telemetry file, its storage version and lock, the indexer that builds it from the journal, its rollups and retention, and the queries |
-| `otelo-state` | the state file, `state.sqlite`: the indexed attributes and the hash of the password |
+| `otelo-state` | the state file, `state.sqlite`: the indexed attributes, the hash of the password, and the dashboards |
 | `otelo-journal` | the journal of OTLP requests: its frames, its segments, their compression, and the retention ([[../tasks/00023-journal-the-otlp-that-otelo-rece.md]]) |
 | `otelo-otlp` | the OTLP receiver over HTTP and gRPC |
 | `otelo-host` | the host collector: the readers of the machine, of its services, and of otelo itself, and the mapping from what they read to metric points |
@@ -47,7 +47,7 @@ A journal and an index ([[../tasks/00021-rebuild-the-index-from-a-journal.md]]).
 - The journal keeps the OTLP export requests as protobuf, in hourly segments per signal, compressed with zstd once the hour ends. It is the only telemetry that has to outlive a change of the storage, and it keeps 30 days by default. The receiver answers a request once its frame is synced, so a request otelo accepted survives a crash ([[../tasks/00023-journal-the-otlp-that-otelo-rece.md]]). [[./telemetry.md]] has the format.
 - The index is one SQLite file, `telemetry.sqlite`, that an indexer builds from the journal: FTS5 for log search, spans indexed by `trace_id`, metrics in a `metric_series` table and a narrow `metric_points` table, and their 1-minute and 1-hour summaries ([[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]]). Each signal has its own retention, 7 days by default. Retention deletes rows in small transactions, and an incremental vacuum gives the pages back after a retention was lowered ([[../tasks/00022-keep-the-index-in-one-sqlite-fil.md]]).
 - The index carries a storage version. After a change of the storage, the daemon does not start on an index of another version, and `otelo reindex` rebuilds it from the journal.
-- One state file, `state.sqlite`, for the indexed attributes and the hash of the password, and later the users and tokens. A journal cannot rebuild it.
+- One state file, `state.sqlite`, for the indexed attributes, the hash of the password, and the dashboards, and later the users and tokens. A journal cannot rebuild it.
 
 ## UI and CLI auth
 
