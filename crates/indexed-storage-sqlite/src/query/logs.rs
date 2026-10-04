@@ -20,10 +20,8 @@ use crate::Reader;
 const MAX_SAMPLES_PER_GROUP: usize = 3;
 
 const NEWEST_LOGS_FIRST: PageOrder = PageOrder {
-    columns: &[
-        order_column("log.logged_at", RowDirection::Descending),
-        order_column("log.rowid", RowDirection::Descending),
-    ],
+    first_column: order_column("log.logged_at", RowDirection::Descending),
+    later_columns: &[order_column("log.rowid", RowDirection::Descending)],
 };
 
 pub(super) fn compile_log_query(
@@ -53,8 +51,6 @@ pub(super) fn compile_log_query(
 const LOG_LINE_COLUMNS: &str = "log.logged_at, resource.service, log.severity_number, log.body,
     log.trace_id, log.span_id, log.attributes,
     resource.attributes AS resource_attributes";
-
-const LOG_LINE_CURSOR_INDEX: usize = 8;
 
 pub(super) fn explain_logs(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
     let (where_clause, _) = compile_log_query(reader, query)?;
@@ -123,16 +119,16 @@ pub(super) fn read_logs(
     let sql = format!(
         "{} ORDER BY {} LIMIT :limit",
         select_logs(
-            &format!("{LOG_LINE_COLUMNS}, {}", NEWEST_LOGS_FIRST.cursor_columns()),
+            &format!(
+                "{LOG_LINE_COLUMNS}, {}",
+                NEWEST_LOGS_FIRST.cursor_columns_sql()
+            ),
             &where_clause
         ),
         NEWEST_LOGS_FIRST.order_by_sql()
     );
     let rows = reader.collect_rows(&sql, &where_clause, |row| {
-        Ok((
-            NEWEST_LOGS_FIRST.read_cursor(row, LOG_LINE_CURSOR_INDEX)?,
-            log_line_from_row(row)?,
-        ))
+        Ok((NEWEST_LOGS_FIRST.read_cursor(row)?, log_line_from_row(row)?))
     })?;
     let (logs, next) = split_page(rows, page.limit);
     Ok(Logs {

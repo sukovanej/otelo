@@ -173,7 +173,7 @@ fn a_deleted_log_no_longer_matches_a_full_text_search() {
     let search_bodies = || {
         let query = parse_query(r#"body ~ "payment""#, Signal::Logs).unwrap();
         reader_of_the_week(directory.path())
-            .list_logs(&query, PageRequest::first(10))
+            .list_logs(&query, &PageRequest::first(10))
             .unwrap()
             .logs
             .into_iter()

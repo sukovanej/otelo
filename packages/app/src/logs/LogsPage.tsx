@@ -41,7 +41,11 @@ export default function LogsPage() {
       key.view === "groups"
         ? { view: "groups", body: await getLogGroups(key, signal) }
         : { view: "lines", body: await getLogs(key, signal) },
-    joinPages: joinLogsPages,
+    pageJoining: {
+      readNextCursor: (result) =>
+        result.view === "lines" ? (result.body.next ?? undefined) : undefined,
+      joinPages: joinLogsPages,
+    },
   });
 
   // The line stays open when a reload or another query no longer brings it.

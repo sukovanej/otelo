@@ -67,7 +67,7 @@ pub async fn list_spans(
         move |opened, limit| {
             Ok(opened
                 .queries
-                .list_spans(&query, sort, PageRequest { after, limit })?)
+                .list_spans(&query, sort, &PageRequest { after, limit })?)
         },
     )
     .await
@@ -191,7 +191,7 @@ pub async fn list_traces(
         move |opened, limit| {
             Ok(opened
                 .queries
-                .list_traces(&query, sort, PageRequest { after, limit })?)
+                .list_traces(&query, sort, &PageRequest { after, limit })?)
         },
     )
     .await

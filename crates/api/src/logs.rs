@@ -61,7 +61,7 @@ pub async fn list_logs(
         move |opened, limit| {
             Ok(opened
                 .queries
-                .list_logs(&query, PageRequest { after, limit })?)
+                .list_logs(&query, &PageRequest { after, limit })?)
         },
     )
     .await

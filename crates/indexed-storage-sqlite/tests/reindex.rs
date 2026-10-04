@@ -111,14 +111,14 @@ fn answer_queries(data_directory: &Path) -> String {
         reader
             .list_logs(
                 &parse_query("user.id = 7", Signal::Logs).unwrap(),
-                PageRequest::first(10)
+                &PageRequest::first(10)
             )
             .unwrap(),
         reader
             .list_spans(
                 &parse_query("", Signal::Spans).unwrap(),
                 SpanSort::Newest,
-                PageRequest::first(10)
+                &PageRequest::first(10)
             )
             .unwrap(),
         reader

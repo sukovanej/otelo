@@ -240,14 +240,14 @@ impl Fixture {
 
 fn log_bodies_matching(reader: &Reader, query: &str) -> Vec<String> {
     let query = parse_query(query, Signal::Logs).unwrap();
-    let logs = reader.list_logs(&query, PageRequest::first(100)).unwrap();
+    let logs = reader.list_logs(&query, &PageRequest::first(100)).unwrap();
     logs.logs.into_iter().map(|line| line.body).collect()
 }
 
 fn span_names_matching(reader: &Reader, query: &str) -> Vec<String> {
     let query = parse_query(query, Signal::Spans).unwrap();
     let spans = reader
-        .list_spans(&query, SpanSort::Newest, PageRequest::first(100))
+        .list_spans(&query, SpanSort::Newest, &PageRequest::first(100))
         .unwrap();
     spans.spans.into_iter().map(|span| span.name).collect()
 }
@@ -255,7 +255,7 @@ fn span_names_matching(reader: &Reader, query: &str) -> Vec<String> {
 fn trace_names_matching(reader: &Reader, query: &str) -> Vec<String> {
     let query = parse_query(query, Signal::Spans).unwrap();
     let traces = reader
-        .list_traces(&query, SpanSort::Newest, PageRequest::first(100))
+        .list_traces(&query, SpanSort::Newest, &PageRequest::first(100))
         .unwrap();
     traces.traces.into_iter().map(|trace| trace.name).collect()
 }
@@ -265,7 +265,9 @@ fn logs_come_newest_first_and_say_when_they_are_cut() {
     let fixture = Fixture::new();
     let reader = fixture.reader_around_midnight();
     let every_log = parse_query("", Signal::Logs).unwrap();
-    let logs = reader.list_logs(&every_log, PageRequest::first(3)).unwrap();
+    let logs = reader
+        .list_logs(&every_log, &PageRequest::first(3))
+        .unwrap();
     assert!(logs.next.is_some());
     let bodies: Vec<&str> = logs.logs.iter().map(|line| line.body.as_str()).collect();
     assert_eq!(
@@ -281,7 +283,7 @@ fn logs_come_newest_first_and_say_when_they_are_cut() {
     assert_eq!(logs.logs[0].resource["host.name"], "droplet");
     assert!(
         reader
-            .list_logs(&every_log, PageRequest::first(7))
+            .list_logs(&every_log, &PageRequest::first(7))
             .unwrap()
             .next
             .is_none()
@@ -418,7 +420,7 @@ fn an_invalid_query_says_why() {
     ] {
         let query = parse_query(query, Signal::Logs).unwrap();
         let error = reader
-            .list_logs(&query, PageRequest::first(10))
+            .list_logs(&query, &PageRequest::first(10))
             .unwrap_err();
         assert!(matches!(error, Error::InvalidQuery(_)), "{error:#}");
         assert!(error.to_string().contains(message), "{error:#}");
@@ -461,7 +463,7 @@ fn traces_match_on_any_of_their_spans() {
         .list_traces(
             &parse_query("", Signal::Spans).unwrap(),
             SpanSort::Newest,
-            PageRequest::first(10),
+            &PageRequest::first(10),
         )
         .unwrap();
     let found: Vec<(&str, u64, bool)> = all_traces
@@ -524,7 +526,7 @@ fn spans_list_the_matching_spans() {
     );
     let query = parse_query("db.system = sqlite", Signal::Spans).unwrap();
     let span = &reader
-        .list_spans(&query, SpanSort::Newest, PageRequest::first(10))
+        .list_spans(&query, SpanSort::Newest, &PageRequest::first(10))
         .unwrap()
         .spans[0];
     assert_eq!(span.trace_id, TRACE_ID);
@@ -534,7 +536,7 @@ fn spans_list_the_matching_spans() {
 fn sorted_span_names(reader: &Reader, sort: SpanSort) -> Vec<String> {
     let every_span = parse_query("", Signal::Spans).unwrap();
     let spans = reader
-        .list_spans(&every_span, sort, PageRequest::first(100))
+        .list_spans(&every_span, sort, &PageRequest::first(100))
         .unwrap();
     spans.spans.into_iter().map(|span| span.name).collect()
 }
@@ -542,7 +544,7 @@ fn sorted_span_names(reader: &Reader, sort: SpanSort) -> Vec<String> {
 fn sorted_trace_names(reader: &Reader, sort: SpanSort) -> Vec<String> {
     let every_span = parse_query("", Signal::Spans).unwrap();
     let traces = reader
-        .list_traces(&every_span, sort, PageRequest::first(100))
+        .list_traces(&every_span, sort, &PageRequest::first(100))
         .unwrap();
     traces.traces.into_iter().map(|trace| trace.name).collect()
 }
@@ -594,7 +596,7 @@ fn span_names_page_by_page(reader: &Reader, sort: SpanSort) -> Vec<String> {
     let mut names = Vec::new();
     let mut page = PageRequest::first(1);
     loop {
-        let spans = reader.list_spans(&every_span, sort, page.clone()).unwrap();
+        let spans = reader.list_spans(&every_span, sort, &page).unwrap();
         names.extend(spans.spans.into_iter().map(|span| span.name));
         let Some(next) = spans.next else {
             return names;
@@ -608,7 +610,7 @@ fn trace_names_page_by_page(reader: &Reader, sort: SpanSort) -> Vec<String> {
     let mut names = Vec::new();
     let mut page = PageRequest::first(1);
     loop {
-        let traces = reader.list_traces(&every_span, sort, page.clone()).unwrap();
+        let traces = reader.list_traces(&every_span, sort, &page).unwrap();
         names.extend(traces.traces.into_iter().map(|trace| trace.name));
         let Some(next) = traces.next else {
             return names;
@@ -643,7 +645,7 @@ fn pages_of_logs_continue_where_the_last_one_ended() {
     let reader = fixture.reader_around_midnight();
     let every_log = parse_query("", Signal::Logs).unwrap();
     let all_bodies: Vec<String> = reader
-        .list_logs(&every_log, PageRequest::first(100))
+        .list_logs(&every_log, &PageRequest::first(100))
         .unwrap()
         .logs
         .into_iter()
@@ -652,7 +654,7 @@ fn pages_of_logs_continue_where_the_last_one_ended() {
     let mut paged_bodies = Vec::new();
     let mut page = PageRequest::first(2);
     loop {
-        let logs = reader.list_logs(&every_log, page.clone()).unwrap();
+        let logs = reader.list_logs(&every_log, &page).unwrap();
         paged_bodies.extend(logs.logs.into_iter().map(|line| line.body));
         let Some(next) = logs.next else {
             break;
@@ -668,14 +670,14 @@ fn a_cursor_of_another_order_is_an_invalid_query() {
     let reader = fixture.reader_around_midnight();
     let every_span = parse_query("", Signal::Spans).unwrap();
     let newest_cursor = reader
-        .list_spans(&every_span, SpanSort::Newest, PageRequest::first(1))
+        .list_spans(&every_span, SpanSort::Newest, &PageRequest::first(1))
         .unwrap()
         .next;
     let error = reader
         .list_spans(
             &every_span,
             SpanSort::Longest,
-            PageRequest {
+            &PageRequest {
                 after: newest_cursor,
                 limit: 1,
             },
@@ -926,7 +928,7 @@ fn an_indexed_attribute_has_an_index_on_its_table() {
     let query = parse_query("user.id = 7 OR http.route = x", Signal::Logs).unwrap();
     assert_eq!(
         reader
-            .list_logs(&query, PageRequest::first(10))
+            .list_logs(&query, &PageRequest::first(10))
             .unwrap()
             .unindexed,
         ["user.id", "http.route"]
@@ -934,7 +936,7 @@ fn an_indexed_attribute_has_an_index_on_its_table() {
     reader.set_indexed_attributes(indexes.attributes());
     assert_eq!(
         reader
-            .list_logs(&query, PageRequest::first(10))
+            .list_logs(&query, &PageRequest::first(10))
             .unwrap()
             .unindexed,
         ["http.route"]

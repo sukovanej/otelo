@@ -36,10 +36,6 @@ const SPAN_COLUMNS: &str = "span.trace_id, span.span_id, span.parent_span_id, re
     span.name, span.kind, span.started_at, span.duration_ns, span.status_code, span.attributes,
     span.events, resource.attributes AS resource_attributes";
 
-const SPAN_CURSOR_INDEX: usize = 12;
-
-const ROOT_SPAN_CURSOR_INDEX: usize = 8;
-
 fn select_spans(columns: &str, where_clause: &WhereClause) -> String {
     format!(
         "SELECT {columns}
@@ -51,31 +47,27 @@ fn select_spans(columns: &str, where_clause: &WhereClause) -> String {
 }
 
 const NEWEST_SPANS_FIRST: PageOrder = PageOrder {
-    columns: &[
-        order_column("span.started_at", RowDirection::Descending),
-        order_column("span.rowid", RowDirection::Descending),
-    ],
+    first_column: order_column("span.started_at", RowDirection::Descending),
+    later_columns: &[order_column("span.rowid", RowDirection::Descending)],
 };
 
 const OLDEST_SPANS_FIRST: PageOrder = PageOrder {
-    columns: &[
-        order_column("span.started_at", RowDirection::Ascending),
-        order_column("span.rowid", RowDirection::Ascending),
-    ],
+    first_column: order_column("span.started_at", RowDirection::Ascending),
+    later_columns: &[order_column("span.rowid", RowDirection::Ascending)],
 };
 
 // Spans of the same duration go newest first in both duration orders.
 const LONGEST_SPANS_FIRST: PageOrder = PageOrder {
-    columns: &[
-        order_column("span.duration_ns", RowDirection::Descending),
+    first_column: order_column("span.duration_ns", RowDirection::Descending),
+    later_columns: &[
         order_column("span.started_at", RowDirection::Descending),
         order_column("span.rowid", RowDirection::Descending),
     ],
 };
 
 const SHORTEST_SPANS_FIRST: PageOrder = PageOrder {
-    columns: &[
-        order_column("span.duration_ns", RowDirection::Ascending),
+    first_column: order_column("span.duration_ns", RowDirection::Ascending),
+    later_columns: &[
         order_column("span.started_at", RowDirection::Descending),
         order_column("span.rowid", RowDirection::Descending),
     ],
@@ -195,16 +187,13 @@ pub(super) fn read_spans(
     let sql = format!(
         "{} ORDER BY {} LIMIT :limit",
         select_spans(
-            &format!("{SPAN_COLUMNS}, {}", order.cursor_columns()),
+            &format!("{SPAN_COLUMNS}, {}", order.cursor_columns_sql()),
             &where_clause
         ),
         order.order_by_sql()
     );
     let rows = reader.collect_rows(&sql, &where_clause, |row| {
-        Ok((
-            order.read_cursor(row, SPAN_CURSOR_INDEX)?,
-            trace_span_from_row(row)?,
-        ))
+        Ok((order.read_cursor(row)?, trace_span_from_row(row)?))
     })?;
     let (spans, next) = split_page(rows, page.limit);
     Ok(Spans {
@@ -258,7 +247,7 @@ pub(super) fn read_traces(
          WHERE {}
          ORDER BY {}
          LIMIT :limit",
-        order.cursor_columns(),
+        order.cursor_columns_sql(),
         where_clause.sql(),
         order.order_by_sql()
     );
@@ -266,7 +255,7 @@ pub(super) fn read_traces(
     let rows = reader.collect_rows(&sql, &where_clause, |row| {
         let attributes: String = row.get(6)?;
         let resource: String = row.get(7)?;
-        let cursor = order.read_cursor(row, ROOT_SPAN_CURSOR_INDEX)?;
+        let cursor = order.read_cursor(row)?;
         Ok((
             cursor,
             RootSpan {

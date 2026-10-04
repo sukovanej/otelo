@@ -8,6 +8,7 @@ mod span_groups;
 mod span_stats;
 mod traces;
 
+use std::iter;
 use std::ops::ControlFlow;
 
 use anyhow::bail;
@@ -220,10 +221,11 @@ pub struct OrderColumn {
     pub direction: RowDirection,
 }
 
-// The columns end in a unique one, such as the rowid, so the rows have one order and a
-// cursor points between two of them.
+// The last column is unique, such as the rowid, so the rows have one order and a cursor
+// points between two of them.
 pub struct PageOrder {
-    pub columns: &'static [OrderColumn],
+    pub first_column: OrderColumn,
+    pub later_columns: &'static [OrderColumn],
 }
 
 impl RowDirection {
@@ -250,17 +252,24 @@ impl RowDirection {
 }
 
 impl PageOrder {
-    pub fn cursor_columns(&self) -> String {
-        self.columns
-            .iter()
-            .map(|column| column.name)
+    fn columns(&self) -> impl Iterator<Item = &OrderColumn> {
+        iter::once(&self.first_column).chain(self.later_columns)
+    }
+
+    const fn column_count(&self) -> usize {
+        1 + self.later_columns.len()
+    }
+
+    pub fn cursor_columns_sql(&self) -> String {
+        self.columns()
+            .enumerate()
+            .map(|(position, column)| format!("{} AS order_value_{position}", column.name))
             .collect::<Vec<_>>()
             .join(", ")
     }
 
     pub fn order_by_sql(&self) -> String {
-        self.columns
-            .iter()
+        self.columns()
             .map(|column| format!("{} {}", column.name, column.direction.keyword()))
             .collect::<Vec<_>>()
             .join(", ")
@@ -276,56 +285,52 @@ impl PageOrder {
             return Ok(());
         };
         let order_values = after.order_values();
-        let [first_column, ..] = self.columns else {
-            return Ok(());
-        };
-        if order_values.len() != self.columns.len() {
+        if order_values.len() != self.column_count() {
             let message = format!(
-                "{:?} is not the next of a page in this order",
+                "{:?} is not the `next` of a page in this order",
                 after.to_string()
             );
             return Err(InvalidQuery(message).into());
         }
-        let param_names: Vec<String> = (0..order_values.len())
-            .map(|position| format!(":after_{position}"))
-            .collect();
         where_clause.push_condition(format!(
-            "{} {} {}",
-            first_column.name,
-            first_column.direction.operator_at_or_after(),
-            param_names[0]
+            "{} {} :after_0",
+            self.first_column.name,
+            self.first_column.direction.operator_at_or_after()
         ));
-        where_clause.push_condition(self.format_rows_after(&param_names));
-        for (param_name, order_value) in param_names.iter().zip(order_values) {
-            where_clause.push_param(param_name, *order_value);
+        where_clause.push_condition(self.format_rows_after());
+        for (position, order_value) in order_values.iter().enumerate() {
+            where_clause.push_param(&format!(":after_{position}"), *order_value);
         }
         Ok(())
     }
 
-    fn format_rows_after(&self, param_names: &[String]) -> String {
-        let later_in_one_column = self.columns.iter().zip(param_names).enumerate().map(
-            |(position, (column, param_name))| {
-                let mut terms: Vec<String> = self.columns[..position]
+    fn format_rows_after(&self) -> String {
+        let columns: Vec<&OrderColumn> = self.columns().collect();
+        let later_in_one_column: Vec<String> = columns
+            .iter()
+            .enumerate()
+            .map(|(position, column)| {
+                let mut terms: Vec<String> = columns[..position]
                     .iter()
-                    .zip(param_names)
-                    .map(|(earlier, earlier_param_name)| {
-                        format!("{} = {earlier_param_name}", earlier.name)
+                    .enumerate()
+                    .map(|(earlier_position, earlier)| {
+                        format!("{} = :after_{earlier_position}", earlier.name)
                     })
                     .collect();
                 terms.push(format!(
-                    "{} {} {param_name}",
+                    "{} {} :after_{position}",
                     column.name,
                     column.direction.operator_after()
                 ));
-                terms.join(" AND ")
-            },
-        );
-        later_in_one_column.collect::<Vec<_>>().join(" OR ")
+                format!("({})", terms.join(" AND "))
+            })
+            .collect();
+        later_in_one_column.join(" OR ")
     }
 
-    pub fn read_cursor(&self, row: &Row, first_index: usize) -> rusqlite::Result<PageCursor> {
-        let order_values = (first_index..first_index + self.columns.len())
-            .map(|index| row.get(index))
+    pub fn read_cursor(&self, row: &Row) -> rusqlite::Result<PageCursor> {
+        let order_values = (0..self.column_count())
+            .map(|position| row.get(format!("order_value_{position}").as_str()))
             .collect::<rusqlite::Result<Vec<i64>>>()?;
         Ok(PageCursor::new(order_values))
     }
@@ -367,8 +372,8 @@ fn classify_query_error(error: anyhow::Error) -> Error {
 }
 
 impl RangeQueries for Reader {
-    fn list_logs(&self, query: &Query, page: PageRequest) -> Result<Logs> {
-        logs::read_logs(self, query, &page).map_err(classify_query_error)
+    fn list_logs(&self, query: &Query, page: &PageRequest) -> Result<Logs> {
+        logs::read_logs(self, query, page).map_err(classify_query_error)
     }
 
     fn list_log_groups(&self, query: &Query, limit: usize) -> Result<LogGroups> {
@@ -386,8 +391,8 @@ impl RangeQueries for Reader {
         log_counts::count_logs(self, query, by, order, step_ns, limit).map_err(classify_query_error)
     }
 
-    fn list_spans(&self, query: &Query, sort: SpanSort, page: PageRequest) -> Result<Spans> {
-        traces::read_spans(self, query, sort, &page).map_err(classify_query_error)
+    fn list_spans(&self, query: &Query, sort: SpanSort, page: &PageRequest) -> Result<Spans> {
+        traces::read_spans(self, query, sort, page).map_err(classify_query_error)
     }
 
     fn list_span_groups(
@@ -403,8 +408,8 @@ impl RangeQueries for Reader {
             .map_err(classify_query_error)
     }
 
-    fn list_traces(&self, query: &Query, sort: SpanSort, page: PageRequest) -> Result<Traces> {
-        traces::read_traces(self, query, sort, &page).map_err(classify_query_error)
+    fn list_traces(&self, query: &Query, sort: SpanSort, page: &PageRequest) -> Result<Traces> {
+        traces::read_traces(self, query, sort, page).map_err(classify_query_error)
     }
 
     fn get_trace(&self, trace_id: TraceId, limit: usize) -> Result<Option<Trace>> {

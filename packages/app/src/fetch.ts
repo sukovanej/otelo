@@ -23,13 +23,13 @@ export interface PagedFetchState<T> extends FetchState<T> {
   readonly fetchNextPage: () => void;
 }
 
-interface ReplaceableFetchState<T> extends FetchState<T> {
-  readonly replaceData: (data: T) => void;
-}
-
-interface PageJoining<T> {
+export interface PageJoining<T> {
   readonly readNextCursor: (page: T) => string | undefined;
   readonly joinPages: (shown: T, page: T) => T;
+}
+
+interface ReplaceableFetchState<T> extends FetchState<T> {
+  readonly replaceData: (data: T) => void;
 }
 
 export function createFetch<K, T>(
@@ -65,22 +65,23 @@ export function createFetch<K, T>(
   };
 }
 
-// Each request reads one page, and a reload or a live refresh reads each loaded page again.
 export function createPagedFetch<K, T>(
   queryName: string,
   key: Accessor<K>,
   fetcher: (key: K, after: string | undefined, signal: AbortSignal) => Promise<T>,
-  pageJoining: PageJoining<T>,
+  pageJoining: PageJoining<T> | undefined,
   live: Accessor<boolean> = () => false,
 ): PagedFetchState<T> {
   const query = useInfiniteQuery(() => {
     const requestKey = key();
+    const isLive = live();
     return {
-      queryKey: [queryName, requestKey],
+      // A refresh reads every loaded page again, so a live list keeps its own single page.
+      queryKey: [queryName, requestKey, isLive],
       queryFn: ({ pageParam, signal }) => fetcher(requestKey, pageParam, signal),
       initialPageParam: undefined as string | undefined,
-      getNextPageParam: pageJoining.readNextCursor,
-      refetchInterval: live() ? LIVE_RELOAD_MS : false,
+      getNextPageParam: (page: T) => (isLive ? undefined : pageJoining?.readNextCursor(page)),
+      refetchInterval: isLive ? LIVE_RELOAD_MS : false,
     };
   });
   const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
@@ -94,7 +95,9 @@ export function createPagedFetch<K, T>(
   };
   const joinedPages = createMemo(() => {
     const [firstPage, ...nextPages] = readPages();
-    return firstPage && nextPages.reduce(pageJoining.joinPages, firstPage);
+    return firstPage && pageJoining
+      ? nextPages.reduce(pageJoining.joinPages, firstPage)
+      : firstPage;
   });
   return {
     data: joinedPages,

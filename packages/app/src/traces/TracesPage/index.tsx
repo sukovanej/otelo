@@ -56,7 +56,10 @@ export default function TracesPage() {
       key.view === "spans"
         ? { view: "spans", body: await getSpans(key, signal) }
         : { view: "traces", body: await getTraces(key, signal) },
-    joinPages: joinTracesPages,
+    pageJoining: {
+      readNextCursor: (result) => result.body.next ?? undefined,
+      joinPages: joinTracesPages,
+    },
   });
 
   // The span stays open when a reload or another query no longer brings it.
@@ -80,7 +83,7 @@ export default function TracesPage() {
   usePageKeys({ queryInput: () => queryInput, onEscape: () => setSelectedSpan(undefined) });
 
   const sort = () => list.sortOrder() ?? "newest";
-  const describeOrderOfTruncatedList = (next: string | null) =>
+  const describeMoreMatching = (next: string | null) =>
     next === null ? "" : `, ${SPAN_SORT_DESCRIPTIONS[sort()]}; more match`;
 
   const traces = () => {
@@ -106,7 +109,7 @@ export default function TracesPage() {
             {(body) => (
               <>
                 {formatCount(body().traces.length, "trace")}
-                {describeOrderOfTruncatedList(body().next)}
+                {describeMoreMatching(body().next)}
               </>
             )}
           </Match>
@@ -114,7 +117,7 @@ export default function TracesPage() {
             {(body) => (
               <>
                 {formatCount(body().spans.length, "span")}
-                {describeOrderOfTruncatedList(body().next)}
+                {describeMoreMatching(body().next)}
               </>
             )}
           </Match>

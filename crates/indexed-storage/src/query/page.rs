@@ -51,7 +51,7 @@ impl FromStr for PageCursor {
             .split('.')
             .map(str::parse)
             .collect::<Result<Vec<i64>, _>>()
-            .map_err(|_| format!("{text:?} is not the next of a page"))?;
+            .map_err(|_| format!("{text:?} is not the `next` of a page"))?;
         Ok(Self { order_values })
     }
 }
