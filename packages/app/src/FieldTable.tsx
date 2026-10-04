@@ -1,8 +1,9 @@
-import { For, Show } from "solid-js";
+import { For, Match, Show, Switch } from "solid-js";
 
 import type { AttributeValue } from "@otelo/api";
 import { Button, SqlCode } from "@otelo/ui";
 
+import { link } from "./classes";
 import type { Field } from "./field";
 
 interface FieldTableProps {
@@ -26,9 +27,18 @@ export default function FieldTable(props: FieldTableProps) {
                 {field.label}
               </th>
               <td class="py-px pr-2 align-top whitespace-pre-wrap wrap-anywhere">
-                <Show when={field.isSqlQuery} fallback={formatAttributeValue(field.value)}>
-                  <SqlCode text={formatAttributeValue(field.value)} />
-                </Show>
+                <Switch fallback={formatAttributeValue(field.value)}>
+                  <Match when={field.href}>
+                    {(href) => (
+                      <a href={href()} class={link}>
+                        {formatAttributeValue(field.value)}
+                      </a>
+                    )}
+                  </Match>
+                  <Match when={field.isSqlQuery}>
+                    <SqlCode text={formatAttributeValue(field.value)} />
+                  </Match>
+                </Switch>
               </td>
               <td class="w-[1%] py-px align-top whitespace-nowrap">
                 <Show when={field.query.kind === "comparable" && field.query}>

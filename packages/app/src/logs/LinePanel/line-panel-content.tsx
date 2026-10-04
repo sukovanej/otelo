@@ -3,11 +3,13 @@ import type { LogLine } from "@otelo/api";
 import { logBody, timesLine } from "../../classes";
 import {
   type FieldSection,
+  linkField,
   listAttributeFields,
   listResourceFields,
   toBuiltinField,
 } from "../../field";
 import FieldSections from "../../FieldSections";
+import { toServicePagePath, toTracePagePath } from "../../path";
 import { formatDateTime, parseTime } from "../../time";
 import { toLevelName } from "../level";
 
@@ -22,10 +24,21 @@ export default function LinePanelContent(props: LinePanelContentProps) {
     {
       title: "Line",
       fields: [
-        toBuiltinField("service", props.line.service),
+        linkField(
+          toBuiltinField("service", props.line.service),
+          toServicePagePath(props.line.service),
+        ),
         toBuiltinField("level", level(), level().toLowerCase()),
-        toBuiltinField("trace_id", props.line.trace_id),
-        toBuiltinField("span_id", props.line.span_id),
+        linkField(
+          toBuiltinField("trace_id", props.line.trace_id),
+          props.line.trace_id && toTracePagePath(props.line.trace_id),
+        ),
+        linkField(
+          toBuiltinField("span_id", props.line.span_id),
+          props.line.trace_id &&
+            props.line.span_id &&
+            toTracePagePath(props.line.trace_id, props.line.span_id),
+        ),
       ].filter((field) => field.value !== null),
     },
     { title: "Attributes", fields: listAttributeFields(props.line.attributes) },

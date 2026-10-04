@@ -8,6 +8,7 @@ export interface Field {
   readonly value: AttributeValue;
   readonly query: FieldQuery;
   readonly isSqlQuery: boolean;
+  readonly href: string | null;
 }
 
 export interface FieldSection {
@@ -37,11 +38,21 @@ export function toBuiltinField(
   value: string | null,
   literal = value && quoteString(value),
 ): Field {
-  return { label: name, value, query: toFieldQuery(name, literal), isSqlQuery: false };
+  return {
+    label: name,
+    value,
+    query: toFieldQuery(name, literal),
+    isSqlQuery: false,
+    href: null,
+  };
 }
 
 export function toUnnamedField(label: string, value: AttributeValue): Field {
-  return { label, value, query: { kind: "unnamed" }, isSqlQuery: false };
+  return { label, value, query: { kind: "unnamed" }, isSqlQuery: false, href: null };
+}
+
+export function linkField(field: Field, href: string | null): Field {
+  return { ...field, href };
 }
 
 export function listAttributeFields(attributes: Attributes): Field[] {
@@ -50,6 +61,7 @@ export function listAttributeFields(attributes: Attributes): Field[] {
     value,
     query: toFieldQuery(writeAttributeField(key), writeLiteral(value)),
     isSqlQuery: isSqlQueryAttribute(attributes, key),
+    href: null,
   }));
 }
 
@@ -59,6 +71,7 @@ export function listResourceFields(resource: Attributes): Field[] {
     value,
     query: toFieldQuery(writeResourceField(key), writeLiteral(value)),
     isSqlQuery: false,
+    href: null,
   }));
 }
 
