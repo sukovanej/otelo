@@ -109,7 +109,11 @@ impl WhereClause {
         if self.conditions.is_empty() {
             return "TRUE".into();
         }
-        self.conditions.join(" AND ")
+        self.conditions
+            .iter()
+            .map(|condition| format!("({condition})"))
+            .collect::<Vec<_>>()
+            .join(" AND ")
     }
 
     fn params(&self) -> Vec<(&str, &dyn ToSql)> {
