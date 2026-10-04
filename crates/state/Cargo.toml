@@ -10,8 +10,12 @@ license.workspace = true
 anyhow = { workspace = true }
 data-encoding = { workspace = true }
 getrandom = { workspace = true }
+jiff = { workspace = true, features = ["serde"] }
 rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
+utoipa = { workspace = true }
 otelo-query = { workspace = true }
 otelo-indexed-storage = { workspace = true }
 

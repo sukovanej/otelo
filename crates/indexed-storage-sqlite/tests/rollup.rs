@@ -3,7 +3,7 @@ mod common;
 use std::path::Path;
 
 use otelo_indexed_storage::query::{
-    Bucket, BucketChange, Grouping, MetricFilter, MetricSeries, Resolution,
+    Bucket, BucketChange, Grouping, MetricFilter, MetricSeries, RankOrder, Resolution,
 };
 use otelo_indexed_storage::{
     Attributes, Batch, Buckets, ExplicitBuckets, ExponentialBuckets, Histogram, HistogramPoint,
@@ -310,6 +310,7 @@ fn a_group_of_minutes_combines_as_the_group_of_raw_points_does() {
         let grouping = Grouping {
             by: vec!["service".parse().unwrap()],
             top: None,
+            order: RankOrder::Highest,
         };
         let mut metric_series =
             read_grouped_metric_series(directory.path(), name, resolution, MINUTE, grouping);

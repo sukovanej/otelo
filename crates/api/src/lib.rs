@@ -1,5 +1,6 @@
 mod auth;
 mod catalog;
+mod dashboards;
 mod error;
 mod indexes;
 mod logs;
@@ -19,7 +20,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use jiff::Timestamp;
-use otelo_indexed_storage::query::SpanSort;
+use otelo_indexed_storage::query::{SpanGroupRank, SpanSort};
 use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
 use otelo_query::Signal;
 use otelo_state::StateFile;
@@ -47,8 +48,8 @@ pub(crate) const QUERY_TIME_LIMIT: Duration = Duration::from_secs(10);
 
 const HOUR_NS: i64 = 3_600_000_000_000;
 
-// The `signal` and `sort` query parameters refer to the Signal and SpanSort schemas, and no
-// body holds one, so only this list puts them in the spec.
+// The `signal`, `sort`, and `rank` query parameters refer to the Signal, SpanSort, and
+// SpanGroupRank schemas, and no body holds one, so only this list puts them in the spec.
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -57,7 +58,7 @@ const HOUR_NS: i64 = 3_600_000_000_000;
             the login and the logout needs the password of `otelo init`, as the cookie \
             `otelo_password` or as `Authorization: Bearer <password>`."
     ),
-    components(schemas(SignalName, SpanSort))
+    components(schemas(SignalName, SpanGroupRank, SpanSort))
 )]
 struct OpenApiInfo;
 
@@ -71,6 +72,7 @@ fn build_api_routes() -> OpenApiRouter<Api> {
     OpenApiRouter::with_openapi(OpenApiInfo::openapi())
         .routes(routes!(logs::list_logs))
         .routes(routes!(logs::list_log_groups))
+        .routes(routes!(logs::count_logs))
         .routes(routes!(traces::list_spans))
         .routes(routes!(traces::list_span_groups))
         .routes(routes!(traces::list_traces))
@@ -81,6 +83,15 @@ fn build_api_routes() -> OpenApiRouter<Api> {
         .routes(routes!(services::get_service))
         .routes(routes!(catalog::list_attribute_keys))
         .routes(routes!(catalog::complete_query))
+        .routes(routes!(
+            dashboards::list_dashboards,
+            dashboards::create_dashboard
+        ))
+        .routes(routes!(
+            dashboards::get_dashboard,
+            dashboards::replace_dashboard,
+            dashboards::delete_dashboard
+        ))
         .routes(routes!(indexes::list_indexes))
         .routes(routes!(indexes::add_index, indexes::remove_index))
         .routes(routes!(auth::log_in))

@@ -1,5 +1,6 @@
 mod catalog;
 pub mod client;
+mod dashboards;
 mod logs;
 mod metrics;
 mod services;
@@ -13,6 +14,7 @@ pub use catalog::{
     AttributesArgs, CompleteArgs, IndexArgs, change_and_print_indexes, print_attributes,
     print_completions,
 };
+pub use dashboards::{DashboardArgs, change_and_print_dashboards};
 pub use logs::{LogsArgs, print_logs};
 pub use metrics::{MetricArgs, MetricsArgs, print_metric_series, print_metrics};
 pub use services::{ServiceArgs, ServicesArgs, print_service, print_services};

@@ -39,6 +39,8 @@ enum Command {
     Complete(cli::CompleteArgs),
     /// List, add, or remove the indexed attributes
     Index(cli::IndexArgs),
+    /// List, print, save, or delete the dashboards of the web UI
+    Dashboard(cli::DashboardArgs),
     /// Print the spec of the query API that /api/openapi.json serves, without a daemon
     Openapi,
     /// Replace this executable with the newest release, or with the newest build of main
@@ -61,6 +63,7 @@ fn main() -> anyhow::Result<()> {
         Command::Attributes(args) => cli::print_attributes(&args),
         Command::Complete(args) => cli::print_completions(&args),
         Command::Index(args) => cli::change_and_print_indexes(&args),
+        Command::Dashboard(args) => cli::change_and_print_dashboards(&args),
         Command::Openapi => {
             println!("{}", otelo_api::build_openapi_spec().to_pretty_json()?);
             Ok(())

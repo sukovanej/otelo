@@ -6,7 +6,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use otelo_indexed_storage::query::{
-    Bucket, BucketChange, GroupKey, Grouping, MetricFilter, Resolution, SeriesGroup, SpanSort,
+    Bucket, BucketChange, GroupKey, Grouping, MetricFilter, RankOrder, Resolution, SeriesGroup,
+    SpanSort,
 };
 use otelo_indexed_storage::{
     AttributeValue, Attributes, Batch, Buckets, Distribution, Error, ExplicitBuckets,
@@ -1211,6 +1212,7 @@ fn a_group_combines_the_series_of_two_resources() {
         grouping: Grouping {
             by: vec!["system.memory.state".parse().unwrap()],
             top: None,
+            order: RankOrder::Highest,
         },
     };
     let group_totals = |filter: &MetricFilter, limit: usize| {
@@ -1247,6 +1249,7 @@ fn a_group_combines_the_series_of_two_resources() {
         grouping: Grouping {
             by: vec!["resource.host.name".parse().unwrap()],
             top: NonZeroUsize::new(1),
+            order: RankOrder::Highest,
         },
         ..by_state.clone()
     };

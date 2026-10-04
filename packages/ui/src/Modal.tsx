@@ -1,8 +1,16 @@
 import type { JSX } from "@solidjs/web";
 import { onCleanup, onSettled } from "solid-js";
 
+const SIZE_CLASSES: Record<ModalSize, string> = {
+  page: "h-[88dvh] w-[min(94vw,96rem)]",
+  dialog: "w-[min(92vw,28rem)]",
+};
+
+type ModalSize = "page" | "dialog";
+
 interface ModalProps {
   readonly label: string;
+  readonly size?: ModalSize;
   readonly onClose: () => void;
   readonly onEscape?: () => boolean;
   readonly children: JSX.Element;
@@ -41,7 +49,7 @@ export default function Modal(props: ModalProps) {
     <dialog
       ref={dialog}
       aria-label={props.label}
-      class="m-auto h-[88dvh] max-h-none w-[min(94vw,96rem)] max-w-none overflow-hidden rounded-lg border border-line bg-surface p-0 text-ink shadow-popup backdrop:bg-[rgb(0_0_0/0.45)] open:flex open:flex-col"
+      class={`m-auto max-h-none ${SIZE_CLASSES[props.size ?? "page"]} max-w-none overflow-hidden rounded-lg border border-line bg-surface p-0 text-ink shadow-popup backdrop:bg-[rgb(0_0_0/0.45)] open:flex open:flex-col`}
       // The dialog gets a click on its backdrop; its content covers the rest.
       onClick={(e) => {
         if (e.target === dialog) props.onClose();

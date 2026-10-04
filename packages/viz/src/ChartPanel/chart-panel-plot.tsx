@@ -7,6 +7,7 @@ import { formatValue, type Unit } from "../units";
 import ChartPanelTooltip from "./chart-panel-tooltip";
 
 const PLOT_HEIGHT_PX = 150;
+const MIN_FILLED_PLOT_HEIGHT_PX = 40;
 const AXIS_HEIGHT_PX = 20;
 const PLOT_LEFT_PX = 52;
 const PLOT_RIGHT_MARGIN_PX = 4;
@@ -44,6 +45,8 @@ interface ZoomDrag {
   readonly toX: number;
 }
 
+type PlotHeight = "fixed" | "fill";
+
 interface ChartPanelPlotProps {
   readonly label: string;
   readonly frame: TimeFrame;
@@ -53,21 +56,30 @@ interface ChartPanelPlotProps {
   readonly isolatedIndex: number | undefined;
   readonly loading: boolean;
   readonly emptyMessage: string | undefined;
+  readonly height: PlotHeight;
   readonly onZoom: (startMs: number, endMs: number) => void;
 }
 
 export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   let plotElement!: HTMLDivElement;
   const [chartWidth, setChartWidth] = createSignal(0);
+  const [filledHeight, setFilledHeight] = createSignal(0);
   onSettled(() => {
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) setChartWidth(entry.contentRect.width);
+      if (!entry) return;
+      setChartWidth(entry.contentRect.width);
+      setFilledHeight(entry.contentRect.height);
     });
     observer.observe(plotElement);
     return () => observer.disconnect();
   });
 
+  const plotHeight = () =>
+    props.height === "fill"
+      ? Math.max(MIN_FILLED_PLOT_HEIGHT_PX, filledHeight() - PLOT_TOP_PX - AXIS_HEIGHT_PX)
+      : PLOT_HEIGHT_PX;
+  const canvasHeight = () => PLOT_TOP_PX + plotHeight() + AXIS_HEIGHT_PX;
   const plotWidth = () => Math.max(40, chartWidth() - PLOT_LEFT_PX - PLOT_RIGHT_MARGIN_PX);
   const frame = createMemo(() => props.frame);
   const frameLengthMs = () => Math.max(1, frame().endMs - frame().startMs);
@@ -108,7 +120,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
   });
   const yAxisMax = createMemo(() => yTicks().at(-1) || 1);
   const valueToY = (value: number) =>
-    PLOT_TOP_PX + PLOT_HEIGHT_PX - (value / yAxisMax()) * PLOT_HEIGHT_PX;
+    PLOT_TOP_PX + plotHeight() - (value / yAxisMax()) * plotHeight();
   const xTicks = createMemo(
     () => pickTimeTicks(frame().startMs, frame().endMs, Math.floor(plotWidth() / 96)),
     { equals: haveSameItems },
@@ -259,11 +271,14 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
     shownSeries().reduce((sum, series) => sum + (series.values[bucketIndex] ?? 0), 0);
 
   return (
-    <div class="relative min-w-0">
+    <div class={["relative min-w-0", { "flex min-h-0 flex-1 flex-col": props.height === "fill" }]}>
       <div
         ref={plotElement}
-        class="relative cursor-crosshair touch-none rounded-md outline-offset-2 select-none"
-        style={{ height: `${PLOT_TOP_PX + PLOT_HEIGHT_PX + AXIS_HEIGHT_PX}px` }}
+        class={[
+          "relative cursor-crosshair touch-none rounded-md outline-offset-2 select-none",
+          { "min-h-0 flex-1": props.height === "fill" },
+        ]}
+        style={props.height === "fill" ? {} : { height: `${canvasHeight()}px` }}
         tabindex={0}
         role="group"
         aria-label={`${props.label}. The arrow keys read the values of each step.`}
@@ -279,7 +294,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
         <Show when={chartWidth() > 0}>
           <svg
             width={chartWidth()}
-            height={PLOT_TOP_PX + PLOT_HEIGHT_PX + AXIS_HEIGHT_PX}
+            height={canvasHeight()}
             class={["block overflow-visible transition-opacity", { "opacity-50": props.loading }]}
             aria-hidden="true"
           >
@@ -310,7 +325,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
               {(tick) => (
                 <text
                   x={timeToX(tick())}
-                  y={PLOT_TOP_PX + PLOT_HEIGHT_PX + 15}
+                  y={PLOT_TOP_PX + plotHeight() + 15}
                   text-anchor="middle"
                   class="fill-muted text-[11px] tabular-nums"
                 >
@@ -324,7 +339,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
                 x={bucketCenterX(hoveredBucketIndex() ?? 0) - barWidth() / 2 - 3}
                 y={PLOT_TOP_PX}
                 width={barWidth() + 6}
-                height={PLOT_HEIGHT_PX}
+                height={plotHeight()}
                 rx="3"
                 fill="var(--color-hover)"
               />
@@ -356,7 +371,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
                 x1={Math.round(bucketCenterX(hoveredBucketIndex() ?? 0)) + 0.5}
                 x2={Math.round(bucketCenterX(hoveredBucketIndex() ?? 0)) + 0.5}
                 y1={PLOT_TOP_PX}
-                y2={PLOT_TOP_PX + PLOT_HEIGHT_PX}
+                y2={PLOT_TOP_PX + plotHeight()}
                 stroke="var(--color-muted)"
                 stroke-width="1"
               />
@@ -380,7 +395,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
                   x={Math.min(drag().fromX, drag().toX)}
                   y={PLOT_TOP_PX}
                   width={Math.abs(drag().toX - drag().fromX)}
-                  height={PLOT_HEIGHT_PX}
+                  height={plotHeight()}
                   fill="var(--color-accent)"
                   fill-opacity="0.12"
                 />
@@ -394,7 +409,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
             class="absolute inset-x-0 flex items-center justify-center text-sm text-muted"
             style={{
               top: `${PLOT_TOP_PX}px`,
-              height: `${PLOT_HEIGHT_PX}px`,
+              height: `${plotHeight()}px`,
               left: `${PLOT_LEFT_PX}px`,
             }}
           >

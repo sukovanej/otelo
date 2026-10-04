@@ -2,12 +2,12 @@ import { type SearchParams, useSearchParams } from "@solidjs/router";
 import { createMemo, For, latest, Show } from "solid-js";
 
 import { getMetricSeries, type MetricSeries, type SeriesInfo } from "@otelo/api";
-import { Callout, CheckboxMenu, EmptyMessage, Select } from "@otelo/ui";
+import { Callout, EmptyMessage, Select } from "@otelo/ui";
 import { ChartPanel, formatValue } from "@otelo/viz";
 
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { createRangeFetch, type RangeState } from "../../services/range";
-import { listGroupingSections, toMetricCharts, toMetricFrame } from "../metric";
+import { listGroupingOptions, toMetricCharts, toMetricFrame } from "../metric";
 
 const TOP_OPTIONS = [
   { value: "", label: "Every group" },
@@ -89,14 +89,16 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
         >
           {latest(() => props.name)}
         </h1>
-        <CheckboxMenu
+        <Select
+          selection="multiple"
           label="Group by"
           placeholder="nothing"
-          sections={listGroupingSections(props.seriesOfMetric, latest(by))}
-          checked={latest(by)}
+          options={listGroupingOptions(props.seriesOfMetric, latest(by))}
+          values={latest(by)}
           onChange={(checked) => setParams({ by: checked.join(",") || undefined })}
         />
         <Select
+          selection="single"
           label="Top"
           options={TOP_OPTIONS}
           value={latest(top)}

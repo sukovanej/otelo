@@ -1,5 +1,6 @@
 mod catalog;
 mod compile;
+mod log_counts;
 mod logs;
 mod metrics;
 mod services;
@@ -12,8 +13,9 @@ use std::ops::ControlFlow;
 use anyhow::bail;
 use jiff::Timestamp;
 use otelo_indexed_storage::query::{
-    AttributeKeys, LogGroups, Logs, MetricFilter, MetricList, MetricSeries, Resolution, Service,
-    Services, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
+    AttributeKeys, GroupBuckets, LogCounts, LogGroupingField, LogGroups, Logs, MetricFilter,
+    MetricList, MetricSeries, RankOrder, Resolution, Service, Services, SpanGroupRanking,
+    SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
 };
 use otelo_indexed_storage::{Error, RangeQueries, Result, SpanId, TraceId};
 use otelo_query::{Query, Signal};
@@ -185,6 +187,20 @@ pub fn row_limit_with_one_more(limit: usize) -> anyhow::Result<i64> {
     Ok(i64::try_from(limit)?.saturating_add(1))
 }
 
+// The groups of an answer that counts each group by step keep fewer than the
+// limit when their buckets would pass this, so a fine step over a long range
+// cannot ask for millions of buckets.
+const MAX_BUCKETS_OF_GROUPS: usize = 100_000;
+
+pub fn limit_groups_with_buckets(reader: &Reader, step_ns: i64, limit: usize) -> usize {
+    let range = reader.range();
+    let first_step_at = range.start_at().div_euclid(step_ns) * step_ns;
+    let bucket_count = usize::try_from((range.end_at() - first_step_at + step_ns - 1) / step_ns)
+        .unwrap_or(usize::MAX)
+        .max(1);
+    limit.min(MAX_BUCKETS_OF_GROUPS / bucket_count)
+}
+
 pub fn truncate_to_limit<T>(rows: &mut Vec<T>, limit: usize) -> bool {
     let truncated = rows.len() > limit;
     rows.truncate(limit);
@@ -218,6 +234,17 @@ impl RangeQueries for Reader {
         logs::group_logs(self, query, limit).map_err(classify_query_error)
     }
 
+    fn count_logs(
+        &self,
+        query: &Query,
+        by: &[LogGroupingField],
+        order: RankOrder,
+        step_ns: i64,
+        limit: usize,
+    ) -> Result<LogCounts> {
+        log_counts::count_logs(self, query, by, order, step_ns, limit).map_err(classify_query_error)
+    }
+
     fn list_spans(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Spans> {
         traces::read_spans(self, query, sort, limit).map_err(classify_query_error)
     }
@@ -226,10 +253,13 @@ impl RangeQueries for Reader {
         &self,
         query: &Query,
         by: &[SpanGroupingField],
+        ranking: SpanGroupRanking,
         step_ns: i64,
+        group_buckets: GroupBuckets,
         limit: usize,
     ) -> Result<SpanGroups> {
-        span_groups::group_spans(self, query, by, step_ns, limit).map_err(classify_query_error)
+        span_groups::group_spans(self, query, by, ranking, step_ns, group_buckets, limit)
+            .map_err(classify_query_error)
     }
 
     fn list_traces(&self, query: &Query, sort: SpanSort, limit: usize) -> Result<Traces> {

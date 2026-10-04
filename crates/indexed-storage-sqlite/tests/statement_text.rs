@@ -2,7 +2,10 @@ mod common;
 
 use std::sync::{Arc, Mutex};
 
-use otelo_indexed_storage::query::{Resolution, SpanGroupingField, SpanSort};
+use otelo_indexed_storage::query::{
+    GroupBuckets, LogGroupingField, RankOrder, Resolution, SpanGroupRanking, SpanGroupingField,
+    SpanSort,
+};
 use otelo_indexed_storage::{
     Attributes, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind, SpanStatus,
     TimeRange, TraceContext, TraceId,
@@ -117,7 +120,23 @@ fn run_queries(reader: &Reader, level: &str, kind: &str, limit: usize) {
     reader.list_traces(&spans, SpanSort::Newest, limit).unwrap();
     let all_spans = parse_query("", Signal::Spans).unwrap();
     reader
-        .list_span_groups(&all_spans, &[SpanGroupingField::Name], MINUTE, limit)
+        .list_span_groups(
+            &all_spans,
+            &[SpanGroupingField::Name],
+            SpanGroupRanking::default(),
+            MINUTE,
+            GroupBuckets::Counted,
+            limit,
+        )
+        .unwrap();
+    reader
+        .count_logs(
+            &logs,
+            &[LogGroupingField::Level],
+            RankOrder::Highest,
+            MINUTE,
+            limit,
+        )
         .unwrap();
     reader.get_trace(TraceId([1; 16]), limit).unwrap();
     let metrics = parse_query("", Signal::Metrics).unwrap();

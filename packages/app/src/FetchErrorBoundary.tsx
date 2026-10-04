@@ -3,6 +3,8 @@ import { Errored } from "solid-js";
 
 import { Callout } from "@otelo/ui";
 
+import { describeError } from "./fetch";
+
 interface FetchErrorBoundaryProps {
   readonly children: JSX.Element;
 }
@@ -13,8 +15,4 @@ export default function FetchErrorBoundary(props: FetchErrorBoundaryProps) {
       {props.children}
     </Errored>
   );
-}
-
-function describeError(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }

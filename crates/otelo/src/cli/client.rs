@@ -74,6 +74,30 @@ impl Client {
         read_json_response(response)
     }
 
+    pub fn post_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+    ) -> anyhow::Result<T> {
+        let request = Self::build_agent().post(self.build_url(path));
+        let response = add_password(request)
+            .send_json(body)
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
+        read_json_response(response)
+    }
+
+    pub fn put_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+    ) -> anyhow::Result<T> {
+        let request = Self::build_agent().put(self.build_url(path));
+        let response = add_password(request)
+            .send_json(body)
+            .with_context(|| format!("reach the otelo daemon at {}", self.daemon_url))?;
+        read_json_response(response)
+    }
+
     pub fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let request = Self::build_agent().delete(self.build_url(path));
         let response = add_password(request)

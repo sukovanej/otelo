@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 
 use otelo_indexed_storage::MetricKind;
 use otelo_indexed_storage::query::{
-    Bucket, BucketChange, GroupKey, MetricList, MetricSeries, Resolution, SeriesGroup,
+    Bucket, BucketChange, GroupKey, MetricList, MetricSeries, RankOrder, Resolution, SeriesGroup,
 };
 
 use super::client::{Client, OutputFormat, escape_path_segment, note_truncation, print_json};
@@ -76,10 +76,15 @@ pub struct MetricArgs {
     #[arg(long, value_delimiter = ',')]
     by: Vec<String>,
 
-    /// Keep the N groups with the highest value over the range, and combine
-    /// the rest into one group other
+    /// Keep the N groups that come first in --order, and combine the rest
+    /// into one group other
     #[arg(long)]
     top: Option<NonZeroUsize>,
+
+    /// Whether the groups with the highest or the lowest value over the range
+    /// come first [default: highest]
+    #[arg(long)]
+    order: Option<RankOrder>,
 
     #[command(flatten)]
     range: RangeArgs,
@@ -100,6 +105,7 @@ pub fn print_metric_series(args: &MetricArgs) -> anyhow::Result<()> {
         ),
         ("by", (!args.by.is_empty()).then(|| args.by.join(","))),
         ("top", args.top.map(|top| top.to_string())),
+        ("order", args.order.map(|order| order.name().to_owned())),
     ]);
     let metric: MetricSeries = args.client.get(
         &format!("/api/metrics/{}", escape_path_segment(&args.name)),

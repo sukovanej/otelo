@@ -1362,6 +1362,7 @@ dependencies = [
  "otelo-query",
  "otelo-state",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
@@ -1486,11 +1487,15 @@ dependencies = [
  "anyhow",
  "data-encoding",
  "getrandom 0.4.3",
+ "jiff",
  "otelo-indexed-storage",
  "otelo-query",
  "rusqlite",
+ "serde",
+ "serde_json",
  "sha2",
  "tempfile",
+ "utoipa",
 ]
 
 [[package]]

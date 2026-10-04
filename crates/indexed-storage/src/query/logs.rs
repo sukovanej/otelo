@@ -1,4 +1,8 @@
+use std::fmt;
+use std::str::FromStr;
+
 use jiff::Timestamp;
+use otelo_query::{BuiltinField, Field, Signal, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -67,4 +71,85 @@ pub struct LogGroup {
     pub last_at: Timestamp,
     /// Up to three different bodies, newest first.
     pub samples: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LogGroupingField {
+    Service,
+    Level,
+    Attribute(String),
+    Resource(String),
+}
+
+impl FromStr for LogGroupingField {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match resolve_field(Signal::Logs, name) {
+            Field::Builtin(BuiltinField::Service) => Ok(Self::Service),
+            Field::Builtin(BuiltinField::Level) => Ok(Self::Level),
+            Field::Attribute(key) => Ok(Self::Attribute(key)),
+            Field::Resource(key) => Ok(Self::Resource(key)),
+            Field::Builtin(builtin_field) => Err(format!(
+                "logs group by service, level, an attribute, or resource.<key>, not {}",
+                builtin_field.name()
+            )),
+        }
+    }
+}
+
+impl fmt::Display for LogGroupingField {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let field = match self {
+            Self::Service => Field::Builtin(BuiltinField::Service),
+            Self::Level => Field::Builtin(BuiltinField::Level),
+            Self::Attribute(key) => Field::Attribute(key.clone()),
+            Self::Resource(key) => Field::Resource(key.clone()),
+        };
+        field.fmt(formatter)
+    }
+}
+
+/// The log lines a query keeps in a range, counted over the range and by
+/// step, and grouped by the values of some fields, the most lines first.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LogCounts {
+    /// The range, after the retention capped it.
+    #[schema(value_type = String, format = DateTime)]
+    pub start_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub end_at: Timestamp,
+    /// The length of a bucket in nanoseconds.
+    pub step_ns: i64,
+    /// Every line the query keeps.
+    pub count: u64,
+    /// The lines of every step, oldest first.
+    pub buckets: Vec<LogCountBucket>,
+    pub groups: Vec<LogCountGroup>,
+    /// More groups match than the limit let through, which kept the ones
+    /// with the most lines.
+    pub truncated: bool,
+    /// The attributes the query compares that have no index.
+    pub unindexed: Vec<String>,
+}
+
+/// The lines that share the values of the grouping fields.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LogCountGroup {
+    /// The values of the grouping fields, by the fields as a query writes
+    /// them, such as `service`. A `level` is its name in lower case, such as
+    /// `warn`. A field the lines lack is missing.
+    pub values: Attributes,
+    pub count: u64,
+    /// The lines of the group in every step, oldest first.
+    pub buckets: Vec<LogCountBucket>,
+}
+
+/// The lines of one step.
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct LogCountBucket {
+    /// The start of the step.
+    #[schema(value_type = String, format = DateTime)]
+    pub start_at: Timestamp,
+    pub count: u64,
 }

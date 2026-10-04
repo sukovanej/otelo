@@ -43,7 +43,9 @@ pub fn group_series(series: Vec<SummarizedSeries>, grouping: &Grouping) -> Vec<S
         .into_iter()
         .map(|(identity, group)| (group.value_over_range(), identity, group))
         .collect();
-    ranked_groups.sort_by(|(value, ..), (other_value, ..)| other_value.total_cmp(value));
+    ranked_groups.sort_by(|(value, ..), (other_value, ..)| {
+        grouping.order.orient_ordering(value.total_cmp(other_value))
+    });
     let groups = ranked_groups
         .into_iter()
         .map(|(_, identity, group)| (identity, group));

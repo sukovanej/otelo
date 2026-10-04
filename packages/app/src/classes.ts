@@ -14,3 +14,11 @@ export const sectionHeading =
 export const pageContent = "overflow-y-auto px-4 pb-8 [&>:first-child]:mt-5";
 
 export const link = "text-accent hover:underline";
+
+export const textField =
+  "h-8 min-w-0 rounded-md border border-line bg-surface px-2.5 focus:border-line-focus focus:outline-none";
+
+export const fieldLabel = "text-xs font-medium text-muted";
+
+export const inlineField =
+  "min-w-0 rounded-md border border-transparent bg-transparent px-1.5 hover:border-line focus:border-line-focus focus:bg-surface focus:outline-none";

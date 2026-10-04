@@ -51,6 +51,7 @@ interface QueryInputProps {
   readonly onInput: (query: string) => void;
   readonly onSubmit: () => void;
   readonly placeholder?: string;
+  readonly label?: string;
   readonly size?: Size | undefined;
   readonly ref?: (input: HTMLInputElement) => void;
 }
@@ -243,6 +244,7 @@ export default function QueryInput(props: QueryInputProps) {
         spellcheck={false}
         autocomplete="off"
         placeholder={props.placeholder}
+        aria-label={props.label}
         value={props.value}
         onInput={(e) => {
           closeHelp();

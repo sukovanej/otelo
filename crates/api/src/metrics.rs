@@ -1,7 +1,9 @@
 use std::num::NonZeroUsize;
 
 use axum::extract::{Path, Query, State};
-use otelo_indexed_storage::query::{Grouping, MetricFilter, MetricList, MetricSeries, Resolution};
+use otelo_indexed_storage::query::{
+    Grouping, MetricFilter, MetricList, MetricSeries, RankOrder, Resolution,
+};
 use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -73,10 +75,13 @@ pub struct MetricParams {
     /// The series with the same values of them combine into one group. Each
     /// series is its own group when missing.
     by: Option<String>,
-    /// Keep the N groups with the highest value over the range, and combine
-    /// the rest into one group `other`.
+    /// Keep the N groups that come first in `order`, and combine the rest into
+    /// one group `other`.
     #[param(value_type = Option<usize>, minimum = 1)]
     top: Option<NonZeroUsize>,
+    /// Which groups come first and `top` keeps: the ones with the `highest`
+    /// value over the range or the `lowest`. `highest` when missing.
+    order: Option<RankOrder>,
 }
 
 /// The series of one metric, or the groups of them, each in buckets of one
@@ -104,6 +109,7 @@ pub async fn get_metric_series(
     let grouping = Grouping {
         by: parse_field_list(params.by.as_deref())?,
         top: params.top,
+        order: params.order.unwrap_or_default(),
     };
     api.run_limited_range_query(
         RequestedRange {
