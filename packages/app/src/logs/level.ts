@@ -14,3 +14,8 @@ export function toLevelName(severity: number): LevelName {
     "UNSPECIFIED"
   );
 }
+
+export function parseLevelName(text: string): LevelName | undefined {
+  const upperText = text.toUpperCase();
+  return LEVEL_NAMES.find((level) => level === upperText);
+}

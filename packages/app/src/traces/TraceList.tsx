@@ -47,7 +47,7 @@ const COLUMNS: Column<TraceSummary>[] = [
     id: "duration",
     label: "Duration",
     unit: "duration",
-    width: "20ch",
+    barWidth: "12ch",
     value: (trace) => trace.duration_ns,
   },
 ];

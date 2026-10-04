@@ -22,7 +22,7 @@ export default function LogGroupList(props: LogGroupListProps) {
       id: "count",
       label: "Lines",
       unit: "count",
-      width: "16ch",
+      barWidth: "8ch",
       value: (group) => group.count,
     },
     {

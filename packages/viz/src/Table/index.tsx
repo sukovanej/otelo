@@ -12,7 +12,7 @@ import {
 import {
   type Column,
   pickAlignClass,
-  pickGridTrack,
+  pickGridTracks,
   pickSortValueReader,
   resolveColumnAlign,
 } from "../column";
@@ -102,7 +102,7 @@ export default function Table<R>(props: TableProps<R>) {
       aria-label={props.label}
       aria-busy={props.loading ? "true" : undefined}
       class={["grid gap-x-3 font-mono text-sm transition-opacity", { "opacity-60": props.loading }]}
-      style={{ "grid-template-columns": props.columns.map(pickGridTrack).join(" ") }}
+      style={{ "grid-template-columns": props.columns.map(pickGridTracks).join(" ") }}
     >
       <div
         role="row"
@@ -119,7 +119,10 @@ export default function Table<R>(props: TableProps<R>) {
                   isSorted() ? (sortOrder()?.descending ? "descending" : "ascending") : undefined
                 }
                 aria-label={drawHeader ? column.label : undefined}
-                class={`flex min-w-0 ${pickAlignClass(column)}`}
+                class={[
+                  `flex min-w-0 ${pickAlignClass(column)}`,
+                  { "col-span-2": column.kind === "meter" },
+                ]}
                 title={column.description}
               >
                 <Show

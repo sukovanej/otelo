@@ -1,18 +1,12 @@
 import { Show } from "solid-js";
 
 import { GlobeIcon } from "@otelo/icons";
-import { Badge, type BadgeTone, Tooltip } from "@otelo/ui";
+import { Tooltip } from "@otelo/ui";
 
+import HttpMethodBadge from "../../HttpMethodBadge";
+import HttpRoute from "../../HttpRoute";
+import HttpStatusBadge from "../../HttpStatusBadge";
 import type { HttpSpan } from "../../semantics";
-import SpanTitleRoute from "./span-title-route";
-
-const METHOD_TONES: Record<string, BadgeTone> = {
-  GET: "info",
-  POST: "success",
-  PUT: "warn",
-  PATCH: "warn",
-  DELETE: "error",
-};
 
 interface SpanTitleHttpProps {
   readonly meaning: HttpSpan;
@@ -25,24 +19,12 @@ export default function SpanTitleHttp(props: SpanTitleHttpProps) {
       <Tooltip content="HTTP request" class="self-center">
         <GlobeIcon class="text-muted" title="HTTP request" />
       </Tooltip>
-      <Show when={props.meaning.method}>
-        {(method) => <Badge tone={METHOD_TONES[method()] ?? "muted"}>{method()}</Badge>}
-      </Show>
-      <Show when={props.meaning.route}>{(route) => <SpanTitleRoute route={route()} />}</Show>
-      <Show when={props.meaning.status}>
-        {(status) => <Badge tone={toStatusTone(status())}>{status()}</Badge>}
-      </Show>
+      <Show when={props.meaning.method}>{(method) => <HttpMethodBadge method={method()} />}</Show>
+      <Show when={props.meaning.route}>{(route) => <HttpRoute route={route()} />}</Show>
+      <Show when={props.meaning.status}>{(status) => <HttpStatusBadge status={status()} />}</Show>
       <Show when={props.remainingName}>
         <span class="truncate text-muted">{props.remainingName}</span>
       </Show>
     </>
   );
-}
-
-function toStatusTone(status: number): BadgeTone {
-  if (status >= 500) return "error";
-  if (status >= 400) return "warn";
-  if (status >= 300) return "info";
-  if (status >= 200) return "success";
-  return "muted";
 }

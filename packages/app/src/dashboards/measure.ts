@@ -88,6 +88,8 @@ const METRIC_AGGREGATION_COLORS: Record<MetricAggregation, SeriesColor | undefin
   p99: "p99",
 };
 
+const WHOLE_QUERY_KEY: GroupKey = { by: [], attributes: {} };
+
 export interface MeasuredQuery {
   readonly frame: TimeFrame;
   readonly unit: Unit;
@@ -95,8 +97,16 @@ export interface MeasuredQuery {
   readonly truncated: boolean;
 }
 
+// The values a group shares, by the names the query groups by. A group without
+// them, the whole query or the groups a metric folds into one, has its label.
+export interface GroupKey {
+  readonly by: ReadonlyArray<string>;
+  readonly attributes: Attributes;
+}
+
 interface MeasuredGroup {
   readonly label: string;
+  readonly groupKey: GroupKey;
   readonly values: ReadonlyArray<number | null>;
   readonly total: number | null;
   readonly color?: SeriesColor;
@@ -105,11 +115,15 @@ interface MeasuredGroup {
 export interface MeasuredChart {
   readonly frame: TimeFrame;
   readonly unit: Unit;
-  readonly series: ReadonlyArray<TimeSeries>;
+  readonly series: ReadonlyArray<GroupSeries>;
   readonly truncated: boolean;
   // The queries left out because their numbers have another unit than the
   // first query's, which sets the axis.
   readonly otherUnitQueryCount: number;
+}
+
+export interface GroupSeries extends TimeSeries {
+  readonly groupKey: GroupKey;
 }
 
 // A metric grouped with `top` folds the groups past the top ones into one: a
@@ -140,6 +154,7 @@ export function measureSpanGroups(
       groups: [
         {
           label,
+          groupKey: WHOLE_QUERY_KEY,
           values: measureSteps(answer.buckets),
           total: readMeasure(answer.spans, rangeSeconds),
           ...(color ? { color } : {}),
@@ -153,6 +168,7 @@ export function measureSpanGroups(
     unit: SPAN_MEASURE_UNITS[measure],
     groups: answer.groups.map((group) => ({
       label: labelGroupValues(group.values, by),
+      groupKey: { by, attributes: group.values },
       values: measureSteps(group.buckets ?? []),
       total: readMeasure(group.spans, rangeSeconds),
     })),
@@ -171,9 +187,17 @@ export function measureLogCounts(
     unit: "count",
     groups:
       by.length === 0
-        ? [{ label, values: countSteps(answer.buckets), total: answer.count }]
+        ? [
+            {
+              label,
+              groupKey: WHOLE_QUERY_KEY,
+              values: countSteps(answer.buckets),
+              total: answer.count,
+            },
+          ]
         : answer.groups.map((group) => ({
             label: labelGroupValues(group.values, by),
+            groupKey: { by, attributes: group.values },
             values: countSteps(group.buckets),
             total: group.count,
           })),
@@ -205,7 +229,15 @@ export function measureMetricSeries(
     return {
       frame,
       unit: chartUnit.unit,
-      groups: [{ label, values, total: measureGroup(values), ...(color ? { color } : {}) }],
+      groups: [
+        {
+          label,
+          groupKey: WHOLE_QUERY_KEY,
+          values,
+          total: measureGroup(values),
+          ...(color ? { color } : {}),
+        },
+      ],
       truncated: answer.truncated,
     };
   }
@@ -217,6 +249,7 @@ export function measureMetricSeries(
     return [
       {
         label: labels[index] ?? "",
+        groupKey: { by, attributes: group.key.type === "values" ? group.key.values : {} },
         values,
         total: measureGroup(values),
         ...(isFolded ? { color: "muted" as const } : {}),
@@ -243,6 +276,7 @@ export function combineMeasuredQueries(
     series: sameUnit.flatMap((query) =>
       query.groups.map((group) => ({
         label: group.label,
+        groupKey: group.groupKey,
         values: alignValuesToFrame(group.values, query.frame, first.frame),
         ...(group.color ? { color: group.color } : {}),
       })),

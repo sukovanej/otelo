@@ -1,3 +1,4 @@
+import type { JSX } from "@solidjs/web";
 import { For, Show } from "solid-js";
 
 import { formatInstant } from "../scale";
@@ -5,7 +6,7 @@ import type { Unit } from "../units";
 import Value from "../Value";
 
 interface TooltipRow {
-  readonly label: string;
+  readonly label: JSX.Element;
   readonly cssColor: string;
   readonly value: number | null;
 }

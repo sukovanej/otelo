@@ -1,6 +1,22 @@
 import type { Attributes } from "@otelo/api";
 
+const HTTP_METHOD_KEYS = ["http.request.method", "http.method"];
+
+const HTTP_STATUS_KEYS = ["http.response.status_code", "http.status_code"];
+
+const HTTP_ROUTE_KEYS = ["http.route", "url.template", "url.path", "http.target"];
+
+const DATABASE_SYSTEM_KEYS = ["db.system.name", "db.system"];
+
 const DATABASE_QUERY_KEYS = ["db.query.text", "db.statement"];
+
+const ATTRIBUTE_MEANINGS: ReadonlyMap<string, AttributeMeaning> = new Map([
+  ...HTTP_METHOD_KEYS.map((key) => [key, "http-method"] as const),
+  ...HTTP_STATUS_KEYS.map((key) => [key, "http-status"] as const),
+  ...HTTP_ROUTE_KEYS.map((key) => [key, "http-route"] as const),
+  ...DATABASE_SYSTEM_KEYS.map((key) => [key, "database-system"] as const),
+  ...DATABASE_QUERY_KEYS.map((key) => [key, "database-query"] as const),
+]);
 
 // A `:name` parameter starts a segment; a colon inside one, such as in
 // `10:30` or `users:batch`, is text.
@@ -46,6 +62,14 @@ export interface DatabaseSpan {
   readonly query: string | undefined;
 }
 
+export type AttributeMeaning =
+  | "http-method"
+  | "http-status"
+  | "http-route"
+  | "database-system"
+  | "database-query"
+  | "plain";
+
 export type RoutePartKind = "slash" | "parameter" | "text";
 
 interface OtherSpan {
@@ -58,24 +82,28 @@ interface RoutePart {
 }
 
 export function readSpanMeaning(attributes: Attributes): SpanMeaning {
-  const method = readFirstText(attributes, "http.request.method", "http.method");
-  const status = readFirstText(attributes, "http.response.status_code", "http.status_code");
+  const method = readFirstText(attributes, ...HTTP_METHOD_KEYS);
+  const status = readFirstText(attributes, ...HTTP_STATUS_KEYS);
   if (method !== undefined || status !== undefined || "url.full" in attributes) {
     const code = Number(status);
     return {
       kind: "http",
       method: method?.toUpperCase(),
       route:
-        readFirstText(attributes, "http.route", "url.template", "url.path", "http.target") ??
+        readFirstText(attributes, ...HTTP_ROUTE_KEYS) ??
         parseUrlPath(readFirstText(attributes, "url.full", "http.url")),
       status: Number.isInteger(code) && code > 0 ? code : undefined,
     };
   }
-  const system = readFirstText(attributes, "db.system.name", "db.system");
+  const system = readFirstText(attributes, ...DATABASE_SYSTEM_KEYS);
   if (system !== undefined) {
     return { kind: "database", system, query: readFirstText(attributes, ...DATABASE_QUERY_KEYS) };
   }
   return { kind: "other" };
+}
+
+export function readAttributeMeaning(key: string): AttributeMeaning {
+  return ATTRIBUTE_MEANINGS.get(key) ?? "plain";
 }
 
 export function splitRouteIntoParts(route: string): RoutePart[] {
@@ -97,7 +125,7 @@ export function isSqlSystem(system: string): boolean {
 }
 
 export function isSqlQueryAttribute(attributes: Attributes, key: string): boolean {
-  const system = readFirstText(attributes, "db.system.name", "db.system");
+  const system = readFirstText(attributes, ...DATABASE_SYSTEM_KEYS);
   return system !== undefined && isSqlSystem(system) && DATABASE_QUERY_KEYS.includes(key);
 }
 

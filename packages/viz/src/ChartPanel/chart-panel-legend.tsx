@@ -1,3 +1,4 @@
+import type { JSX } from "@solidjs/web";
 import { For } from "solid-js";
 
 import { pickDefaultColor, toCssColor } from "../color";
@@ -13,6 +14,7 @@ interface ChartPanelLegendProps {
   readonly series: ReadonlyArray<TimeSeries>;
   readonly kind: ChartKind;
   readonly isolatedIndex: number | undefined;
+  readonly drawLabel: (index: number) => JSX.Element;
   readonly onIsolate: (index: number | undefined) => void;
 }
 
@@ -36,7 +38,7 @@ export default function ChartPanelLegend(props: ChartPanelLegendProps) {
                 onClick={() => props.onIsolate(isIsolated() ? undefined : index())}
               >
                 <span class={KEY_CLASSES[props.kind]} style={{ background: cssColor() }} />
-                {series.label}
+                {props.drawLabel(index())}
               </button>
             </li>
           );

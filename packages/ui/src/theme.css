@@ -30,7 +30,6 @@
   --color-database: #0f7f86;
   --color-error-soft: #fdecec;
   --color-hint: #fff7e0;
-  --color-bar: #dbe6fb;
   /* The colors of a query in the query input: its keywords, and its values
      by their type. Its fields are `ink`, and its operators `muted`. */
   --color-syntax-keyword: #7a4fcf;
@@ -118,7 +117,6 @@
       --color-database: #3cc0c8;
       --color-error-soft: #3a1d20;
       --color-hint: #332b15;
-      --color-bar: #253552;
       --color-syntax-keyword: #b79cf2;
       --color-syntax-string: #5fc98d;
       --color-syntax-number: #e2a458;

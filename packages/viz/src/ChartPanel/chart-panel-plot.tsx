@@ -1,3 +1,4 @@
+import type { JSX } from "@solidjs/web";
 import { createMemo, createSignal, flush, For, onSettled, Show } from "solid-js";
 
 import { pickDefaultColor, toCssColor } from "../color";
@@ -54,6 +55,7 @@ interface ChartPanelPlotProps {
   readonly kind: ChartKind;
   readonly unit: Unit;
   readonly isolatedIndex: number | undefined;
+  readonly drawLabel: (index: number) => JSX.Element;
   readonly loading: boolean;
   readonly emptyMessage: string | undefined;
   readonly height: PlotHeight;
@@ -424,7 +426,7 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
             bucketStartMs={frame().bucketStartsMs[hoveredBucketIndex() ?? 0] ?? 0}
             stepMs={frame().stepMs}
             rows={shownSeries().map((series) => ({
-              label: series.label,
+              label: props.drawLabel(series.index),
               cssColor: series.cssColor,
               value: series.values[hoveredBucketIndex() ?? 0] ?? null,
             }))}

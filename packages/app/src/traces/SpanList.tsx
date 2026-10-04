@@ -55,7 +55,7 @@ const COLUMNS: Column<TraceSpan>[] = [
     id: "duration",
     label: "Duration",
     unit: "duration",
-    width: "20ch",
+    barWidth: "12ch",
     value: (span) => span.duration_ns,
   },
 ];

@@ -9,11 +9,11 @@ import ChartPanelPlot from "./chart-panel-plot";
 
 type LegendPlacement = "header" | "footer";
 
-interface ChartPanelProps {
+interface ChartPanelProps<S extends TimeSeries> {
   readonly title: string;
   readonly description: JSX.Element;
   readonly frame: TimeFrame;
-  readonly series: ReadonlyArray<TimeSeries>;
+  readonly series: ReadonlyArray<S>;
   readonly kind: ChartKind;
   readonly unit: Unit;
   readonly loading: boolean;
@@ -22,10 +22,11 @@ interface ChartPanelProps {
   readonly legendPlacement?: LegendPlacement;
   readonly fill?: boolean;
   readonly singleLineHeader?: boolean;
+  readonly drawSeriesLabel?: (series: S) => JSX.Element;
   readonly onZoom: (startMs: number, endMs: number) => void;
 }
 
-export default function ChartPanel(props: ChartPanelProps) {
+export default function ChartPanel<S extends TimeSeries>(props: ChartPanelProps<S>) {
   const [isolatedLabel, setIsolatedLabel] = createSignal<string>();
   const isolatedIndex = createMemo(() => {
     const index = props.series.findIndex((series) => series.label === isolatedLabel());
@@ -33,12 +34,18 @@ export default function ChartPanel(props: ChartPanelProps) {
   });
   const isolateSeries = (index: number | undefined) =>
     setIsolatedLabel(index === undefined ? undefined : props.series[index]?.label);
+  const drawSeriesLabelAt = (index: number): JSX.Element => {
+    const series = props.series[index];
+    if (!series) return undefined;
+    return props.drawSeriesLabel ? props.drawSeriesLabel(series) : series.label;
+  };
   const legend = () => (
     <Show when={props.series.length > 1}>
       <ChartPanelLegend
         series={props.series}
         kind={props.kind}
         isolatedIndex={isolatedIndex()}
+        drawLabel={drawSeriesLabelAt}
         onIsolate={isolateSeries}
       />
     </Show>
@@ -65,6 +72,7 @@ export default function ChartPanel(props: ChartPanelProps) {
           kind={props.kind}
           unit={props.unit}
           isolatedIndex={isolatedIndex()}
+          drawLabel={drawSeriesLabelAt}
           loading={props.loading}
           emptyMessage={props.emptyMessage}
           height={props.fill ? "fill" : "fixed"}

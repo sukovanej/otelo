@@ -11,6 +11,7 @@ import { type FetchedDisplay, fetchWidgetData, type WidgetData } from "../fetch-
 import type { MeasuredChart } from "../measure";
 import { describeWidgetTitle } from "../widget";
 import { WIDGET_BODY_CLASSES } from "./dashboard-widget-body";
+import DashboardWidgetGroupTitle from "./dashboard-widget-group-title";
 import DashboardWidgetToplist from "./dashboard-widget-toplist";
 import DashboardWidgetValue from "./dashboard-widget-value";
 
@@ -63,6 +64,9 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
               legendPlacement="footer"
               fill
               singleLineHeader
+              drawSeriesLabel={(series) => (
+                <DashboardWidgetGroupTitle label={series.label} groupKey={series.groupKey} />
+              )}
               onZoom={zoomRangeTo}
             />
           )}
