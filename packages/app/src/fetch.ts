@@ -1,5 +1,6 @@
 import {
   type InfiniteData,
+  type QueryClient,
   replaceEqualDeep,
   useInfiniteQuery,
   useQuery,
@@ -111,6 +112,25 @@ export function createPagedFetch<K, T>(
   };
 }
 
+// A refresh reads every page a list holds, so a list nobody shows keeps its first page only,
+// and showing it again reads one page.
+export function trimUnwatchedListsToFirstPage(queryClient: QueryClient): void {
+  queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "observerRemoved") return;
+    const { query } = event;
+    // The observer leaves while Solid disposes the page, so the write waits until it is done.
+    setTimeout(() => {
+      const data: unknown = query.state.data;
+      if (query.getObserversCount() > 0 || !isInfiniteData(data) || data.pages.length < 2) return;
+      queryClient.setQueryData(
+        query.queryKey,
+        { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) },
+        { updatedAt: query.state.dataUpdatedAt },
+      );
+    }, 0);
+  });
+}
+
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -123,4 +143,15 @@ export function freezeDeeply<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+function isInfiniteData(data: unknown): data is InfiniteData<unknown> {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "pages" in data &&
+    Array.isArray(data.pages) &&
+    "pageParams" in data &&
+    Array.isArray(data.pageParams)
+  );
 }
