@@ -12,7 +12,7 @@ use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    PageOrder, RowDirection, WhereClause, order_column, row_limit_with_one_more, span_id_from_blob,
+    OrderColumn, PageOrder, SortDirection, WhereClause, row_limit_with_one_more, span_id_from_blob,
     split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
@@ -20,8 +20,8 @@ use crate::Reader;
 const MAX_SAMPLES_PER_GROUP: usize = 3;
 
 const NEWEST_LOGS_FIRST: PageOrder = PageOrder {
-    first_column: order_column("log.logged_at", RowDirection::Descending),
-    later_columns: &[order_column("log.rowid", RowDirection::Descending)],
+    first_column: OrderColumn::new("log.logged_at", SortDirection::Descending),
+    later_columns: &[OrderColumn::new("log.rowid", SortDirection::Descending)],
 };
 
 pub(super) fn compile_log_query(
@@ -117,7 +117,9 @@ pub(super) fn read_logs(
     NEWEST_LOGS_FIRST.push_condition_after(&mut where_clause, page.after.as_ref())?;
     where_clause.push_param(":limit", row_limit_with_one_more(page.limit)?);
     let sql = format!(
-        "{} ORDER BY {} LIMIT :limit",
+        "{}
+         ORDER BY {}
+         LIMIT :limit",
         select_logs(
             &format!(
                 "{LOG_LINE_COLUMNS}, {}",

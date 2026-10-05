@@ -10,7 +10,7 @@ use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    PageOrder, RowDirection, WhereClause, order_column, row_limit_with_one_more, span_id_from_blob,
+    OrderColumn, PageOrder, SortDirection, WhereClause, row_limit_with_one_more, span_id_from_blob,
     split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
@@ -47,29 +47,29 @@ fn select_spans(columns: &str, where_clause: &WhereClause) -> String {
 }
 
 const NEWEST_SPANS_FIRST: PageOrder = PageOrder {
-    first_column: order_column("span.started_at", RowDirection::Descending),
-    later_columns: &[order_column("span.rowid", RowDirection::Descending)],
+    first_column: OrderColumn::new("span.started_at", SortDirection::Descending),
+    later_columns: &[OrderColumn::new("span.rowid", SortDirection::Descending)],
 };
 
 const OLDEST_SPANS_FIRST: PageOrder = PageOrder {
-    first_column: order_column("span.started_at", RowDirection::Ascending),
-    later_columns: &[order_column("span.rowid", RowDirection::Ascending)],
+    first_column: OrderColumn::new("span.started_at", SortDirection::Ascending),
+    later_columns: &[OrderColumn::new("span.rowid", SortDirection::Ascending)],
 };
 
 // Spans of the same duration go newest first in both duration orders.
 const LONGEST_SPANS_FIRST: PageOrder = PageOrder {
-    first_column: order_column("span.duration_ns", RowDirection::Descending),
+    first_column: OrderColumn::new("span.duration_ns", SortDirection::Descending),
     later_columns: &[
-        order_column("span.started_at", RowDirection::Descending),
-        order_column("span.rowid", RowDirection::Descending),
+        OrderColumn::new("span.started_at", SortDirection::Descending),
+        OrderColumn::new("span.rowid", SortDirection::Descending),
     ],
 };
 
 const SHORTEST_SPANS_FIRST: PageOrder = PageOrder {
-    first_column: order_column("span.duration_ns", RowDirection::Ascending),
+    first_column: OrderColumn::new("span.duration_ns", SortDirection::Ascending),
     later_columns: &[
-        order_column("span.started_at", RowDirection::Descending),
-        order_column("span.rowid", RowDirection::Descending),
+        OrderColumn::new("span.started_at", SortDirection::Descending),
+        OrderColumn::new("span.rowid", SortDirection::Descending),
     ],
 };
 
@@ -185,7 +185,9 @@ pub(super) fn read_spans(
     order.push_condition_after(&mut where_clause, page.after.as_ref())?;
     where_clause.push_param(":limit", row_limit_with_one_more(page.limit)?);
     let sql = format!(
-        "{} ORDER BY {} LIMIT :limit",
+        "{}
+         ORDER BY {}
+         LIMIT :limit",
         select_spans(
             &format!("{SPAN_COLUMNS}, {}", order.cursor_columns_sql()),
             &where_clause

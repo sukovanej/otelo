@@ -206,19 +206,21 @@ pub fn limit_groups_with_buckets(reader: &Reader, step_ns: i64, limit: usize) ->
     limit.min(MAX_BUCKETS_OF_GROUPS / bucket_count)
 }
 
-pub const fn order_column(name: &'static str, direction: RowDirection) -> OrderColumn {
-    OrderColumn { name, direction }
-}
-
 #[derive(Clone, Copy)]
-pub enum RowDirection {
+pub enum SortDirection {
     Ascending,
     Descending,
 }
 
 pub struct OrderColumn {
     pub name: &'static str,
-    pub direction: RowDirection,
+    pub direction: SortDirection,
+}
+
+impl OrderColumn {
+    pub const fn new(name: &'static str, direction: SortDirection) -> Self {
+        Self { name, direction }
+    }
 }
 
 // The last column is unique, such as the rowid, so the rows have one order and a cursor
@@ -228,7 +230,7 @@ pub struct PageOrder {
     pub later_columns: &'static [OrderColumn],
 }
 
-impl RowDirection {
+impl SortDirection {
     const fn keyword(self) -> &'static str {
         match self {
             Self::Ascending => "ASC",
@@ -306,7 +308,7 @@ impl PageOrder {
 
     fn format_rows_after(&self) -> String {
         let columns: Vec<&OrderColumn> = self.columns().collect();
-        let later_in_one_column: Vec<String> = columns
+        let rows_after_by_first_different_column: Vec<String> = columns
             .iter()
             .enumerate()
             .map(|(position, column)| {
@@ -325,7 +327,7 @@ impl PageOrder {
                 format!("({})", terms.join(" AND "))
             })
             .collect();
-        later_in_one_column.join(" OR ")
+        rows_after_by_first_different_column.join(" OR ")
     }
 
     pub fn read_cursor(&self, row: &Row) -> rusqlite::Result<PageCursor> {
