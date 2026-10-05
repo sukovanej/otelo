@@ -421,8 +421,8 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
 
         <Show when={hoveredBucketIndex() !== undefined && !zoomDrag() && !hasNoValues()}>
           <ChartPanelTooltip
+            plot={plotElement}
             crosshairX={bucketCenterX(hoveredBucketIndex() ?? 0)}
-            chartWidth={chartWidth()}
             bucketStartMs={frame().bucketStartsMs[hoveredBucketIndex() ?? 0] ?? 0}
             stepMs={frame().stepMs}
             rows={shownSeries().map((series) => ({
