@@ -1,4 +1,11 @@
-import { replaceEqualDeep, useQuery, useQueryClient } from "@tanstack/solid-query";
+import {
+  type InfiniteData,
+  type QueryClient,
+  replaceEqualDeep,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/solid-query";
 import { type Accessor, createMemo, isPending } from "solid-js";
 
 export const LIVE_RELOAD_MS = 5_000;
@@ -9,6 +16,17 @@ export interface FetchState<T> {
   readonly loading: Accessor<boolean>;
   readonly updatedAt: Accessor<Date | undefined>;
   readonly reload: () => void;
+}
+
+export interface PagedFetchState<T> extends FetchState<T> {
+  readonly hasNextPage: Accessor<boolean>;
+  readonly pageCount: Accessor<number>;
+  readonly fetchNextPage: () => void;
+}
+
+export interface PageJoining<T> {
+  readonly readNextCursor: (page: T) => string | undefined;
+  readonly joinPages: (shown: T, page: T) => T;
 }
 
 interface ReplaceableFetchState<T> extends FetchState<T> {
@@ -48,6 +66,75 @@ export function createFetch<K, T>(
   };
 }
 
+export function createPagedFetch<K, T>(
+  queryName: string,
+  key: Accessor<K>,
+  fetcher: (key: K, after: string | undefined, signal: AbortSignal) => Promise<T>,
+  pageJoining: PageJoining<T> | undefined,
+  live: Accessor<boolean> = () => false,
+): PagedFetchState<T> {
+  const query = useInfiniteQuery(() => {
+    const requestKey = key();
+    const isLive = live();
+    return {
+      // A refresh reads every loaded page again, so a live list keeps its own single page.
+      queryKey: [queryName, requestKey, isLive],
+      queryFn: ({ pageParam, signal }) => fetcher(requestKey, pageParam, signal),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (page: T) => (isLive ? undefined : pageJoining?.readNextCursor(page)),
+      refetchInterval: isLive ? LIVE_RELOAD_MS : false,
+    };
+  });
+  const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
+  const updatedAt = createMemo<Date | undefined>((previous) =>
+    query.dataUpdatedAt === 0 ? previous : new Date(query.dataUpdatedAt),
+  );
+  // A new key leaves the pages undefined until its first page lands.
+  const readPages = (): ReadonlyArray<T> => {
+    const data: InfiniteData<T> | undefined = answered() ? query.data : undefined;
+    return data?.pages ?? [];
+  };
+  const joinedPages = createMemo(() => {
+    const [firstPage, ...nextPages] = readPages();
+    return firstPage && pageJoining
+      ? nextPages.reduce(pageJoining.joinPages, firstPage)
+      : firstPage;
+  });
+  return {
+    data: joinedPages,
+    errorMessage: () => (!answered() || query.isRefetchError ? query.error?.message : undefined),
+    loading: () => query.isFetching || isPending(() => query.data),
+    updatedAt,
+    reload: () => void query.refetch(),
+    hasNextPage: () => query.hasNextPage,
+    pageCount: () => readPages().length,
+    fetchNextPage: () => void query.fetchNextPage(),
+  };
+}
+
+// A refresh reads every page a list holds, so a list nobody shows keeps its first page only,
+// and showing it again reads one page.
+export function trimUnwatchedListsToFirstPage(queryClient: QueryClient): void {
+  queryClient.getQueryCache().subscribe((event) => {
+    // A page still loading when the list left lands after it, so its update trims again.
+    if (event.type !== "observerRemoved" && event.type !== "updated") return;
+    const { query } = event;
+    if (query.getObserversCount() > 0) return;
+    // The observer leaves while Solid disposes the page, so the write waits until it is done.
+    setTimeout(() => {
+      const data: unknown = query.state.data;
+      const isUnwatchedAndIdle =
+        query.getObserversCount() === 0 && query.state.fetchStatus === "idle";
+      if (!isUnwatchedAndIdle || !isInfiniteData(data) || data.pages.length < 2) return;
+      queryClient.setQueryData(
+        query.queryKey,
+        { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) },
+        { updatedAt: query.state.dataUpdatedAt },
+      );
+    }, 0);
+  });
+}
+
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -60,4 +147,15 @@ export function freezeDeeply<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+function isInfiniteData(data: unknown): data is InfiniteData<unknown> {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "pages" in data &&
+    Array.isArray(data.pages) &&
+    "pageParams" in data &&
+    Array.isArray(data.pageParams)
+  );
 }

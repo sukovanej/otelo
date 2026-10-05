@@ -3,7 +3,7 @@ import { createSignal, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
-import { createFetch, type FetchState } from "./fetch";
+import { createPagedFetch, type PageJoining, type PagedFetchState } from "./fetch";
 import { addTerm } from "./query";
 
 export const DEFAULT_SINCE = "1h";
@@ -30,13 +30,19 @@ export interface ListState<V extends string, R extends ListResult<V>, S extends 
   readonly setSortOrder: (sort: S) => void;
   readonly setRange: (since: string, until: string) => void;
   readonly setLive: (live: boolean) => void;
-  readonly fetched: FetchState<R>;
+  readonly fetched: PagedFetchState<R>;
   readonly shownResult: () => R | undefined;
   readonly canShowMore: () => boolean;
   readonly showMore: () => void;
 }
 
-interface ListBody {
+type ListBody = PagedListBody | TruncatedListBody;
+
+interface PagedListBody {
+  readonly next: string | null;
+}
+
+interface TruncatedListBody {
   readonly truncated: boolean;
 }
 
@@ -55,6 +61,7 @@ interface ListOptions<V extends string, R extends ListResult<V>, S extends strin
   readonly sorts?: ListSorts<S>;
   readonly firstLimits: Record<V, number>;
   readonly fetch: (key: ListKey<V, S>, signal: AbortSignal) => Promise<R>;
+  readonly pageJoining?: PageJoining<R>;
 }
 
 interface ListSearchParams extends SearchParams {
@@ -90,9 +97,9 @@ export function createListState<
   const limit = () =>
     raisedLimit().forQuery === queryIdentity() ? raisedLimit().limit : options.firstLimits[view()];
 
-  const fetched = createFetch(
+  const fetched = createPagedFetch(
     options.name,
-    () => {
+    (): ListKey<V, S> => {
       const sort = sortOrder();
       return {
         view: view(),
@@ -103,7 +110,8 @@ export function createListState<
         limit: limit(),
       };
     },
-    options.fetch,
+    (key, after, signal) => options.fetch(after === undefined ? key : { ...key, after }, signal),
+    options.pageJoining,
     live,
   );
 
@@ -137,9 +145,17 @@ export function createListState<
     setLive: (enabled) => setParams({ live: enabled ? "1" : undefined }),
     fetched,
     shownResult,
-    canShowMore: () => (shownResult()?.body.truncated ?? false) && limit() < API_MAX_ROWS,
-    showMore: () =>
-      setRaisedLimit({ forQuery: queryIdentity(), limit: Math.min(API_MAX_ROWS, limit() * 2) }),
+    canShowMore: () => {
+      if (fetched.hasNextPage()) return fetched.pageCount() * limit() < API_MAX_ROWS;
+      const body = shownResult()?.body;
+      return body !== undefined && "truncated" in body && body.truncated && limit() < API_MAX_ROWS;
+    },
+    showMore: () => {
+      if (fetched.hasNextPage()) fetched.fetchNextPage();
+      else {
+        setRaisedLimit({ forQuery: queryIdentity(), limit: Math.min(API_MAX_ROWS, limit() * 2) });
+      }
+    },
   };
 }
 

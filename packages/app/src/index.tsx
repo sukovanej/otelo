@@ -8,6 +8,7 @@ import { isUnauthorizedError } from "@otelo/api";
 import App from "./App";
 import DashboardPage from "./dashboards/DashboardPage";
 import DashboardsPage from "./dashboards/DashboardsPage";
+import { trimUnwatchedListsToFirstPage } from "./fetch";
 import { askForLogin, finishLogin, isLoginNeeded } from "./login";
 import LoginPage from "./LoginPage";
 import LogsPage from "./logs/LogsPage";
@@ -28,6 +29,7 @@ const queryClient = new QueryClient({
   }),
   defaultOptions: { queries: { retry: false } },
 });
+trimUnwatchedListsToFirstPage(queryClient);
 
 const Router = createRouter({
   routes: [

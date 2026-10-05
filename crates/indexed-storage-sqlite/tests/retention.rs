@@ -4,6 +4,7 @@ use std::fs;
 use std::num::NonZeroU16;
 use std::path::Path;
 
+use otelo_indexed_storage::query::PageRequest;
 use otelo_indexed_storage::{
     Attributes, Batch, Log, Metric, NumberPoint, Points, RangeQueries, Records, Resource, Severity,
     Span, SpanId, SpanKind, SpanStatus, TimeRange, TraceContext, TraceId,
@@ -172,7 +173,7 @@ fn a_deleted_log_no_longer_matches_a_full_text_search() {
     let search_bodies = || {
         let query = parse_query(r#"body ~ "payment""#, Signal::Logs).unwrap();
         reader_of_the_week(directory.path())
-            .list_logs(&query, 10)
+            .list_logs(&query, &PageRequest::first(10))
             .unwrap()
             .logs
             .into_iter()

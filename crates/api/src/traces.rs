@@ -1,18 +1,20 @@
 use axum::extract::{Path, Query, State};
 use otelo_indexed_storage::TraceId;
 use otelo_indexed_storage::query::{
-    GroupBuckets, RankOrder, SpanGroupRank, SpanGroupRanking, SpanGroupingField, SpanGroups,
-    SpanSort, Spans, Trace, Traces,
+    GroupBuckets, PageRequest, RankOrder, SpanGroupRank, SpanGroupRanking, SpanGroupingField,
+    SpanGroups, SpanSort, Spans, Trace, Traces,
 };
 use otelo_query::Signal;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::params::{LookupParams, parse_field_list, parse_query, parse_step_ns, resolve_step};
-use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
+use crate::params::{
+    LookupParams, parse_field_list, parse_page_cursor, parse_query, parse_step_ns, resolve_step,
+};
+use crate::{Api, DefaultSince, RangeSignals, RequestedRange, RowLimits};
 
-/// The range, the limit, the query, and the order of a list of spans or traces.
+/// The range, the page, the query, and the order of a list of spans or traces.
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct SpanListParams {
@@ -21,8 +23,11 @@ pub struct SpanListParams {
     since: Option<String>,
     /// The end of the range, in the form of `since`. Now when missing.
     until: Option<String>,
-    /// The most rows to return.
+    /// The most rows to return, from 1 to 1000.
     limit: Option<usize>,
+    /// The `next` of the page before, to return the page after it. The first
+    /// page when missing.
+    after: Option<String>,
     /// The spans to keep, such as `service = "api" duration > 500ms`. Every
     /// span when missing.
     #[serde(rename = "q")]
@@ -49,6 +54,7 @@ pub async fn list_spans(
 ) -> ApiResult<Spans> {
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
     let sort = params.sort.unwrap_or_default();
+    let after = parse_page_cursor(params.after.as_deref())?;
     api.run_limited_range_query(
         RequestedRange {
             signals: RangeSignals::One(Signal::Spans),
@@ -57,8 +63,12 @@ pub async fn list_spans(
             default_since: DefaultSince::HourBeforeNow,
         },
         params.limit,
-        100,
-        move |opened, limit| Ok(opened.queries.list_spans(&query, sort, limit)?),
+        RowLimits::up_to_max_page_rows(100),
+        move |opened, limit| {
+            Ok(opened
+                .queries
+                .list_spans(&query, sort, &PageRequest { after, limit })?)
+        },
     )
     .await
 }
@@ -135,7 +145,7 @@ pub async fn list_span_groups(
             default_since: DefaultSince::HourBeforeNow,
         },
         params.limit,
-        50,
+        RowLimits::up_to_max_rows(50),
         move |opened, limit| {
             let step_ns = resolve_step(opened.range, requested_step_ns, 120)?;
             Ok(opened.queries.list_span_groups(
@@ -168,6 +178,7 @@ pub async fn list_traces(
 ) -> ApiResult<Traces> {
     let query = parse_query(params.query.as_deref(), Signal::Spans)?;
     let sort = params.sort.unwrap_or_default();
+    let after = parse_page_cursor(params.after.as_deref())?;
     api.run_limited_range_query(
         RequestedRange {
             signals: RangeSignals::One(Signal::Spans),
@@ -176,8 +187,12 @@ pub async fn list_traces(
             default_since: DefaultSince::HourBeforeNow,
         },
         params.limit,
-        50,
-        move |opened, limit| Ok(opened.queries.list_traces(&query, sort, limit)?),
+        RowLimits::up_to_max_page_rows(50),
+        move |opened, limit| {
+            Ok(opened
+                .queries
+                .list_traces(&query, sort, &PageRequest { after, limit })?)
+        },
     )
     .await
 }
@@ -211,7 +226,7 @@ pub async fn get_trace(
             default_since: DefaultSince::OldestRetained,
         },
         params.limit,
-        1000,
+        RowLimits::up_to_max_rows(1000),
         move |opened, limit| {
             opened.queries.get_trace(trace_id, limit)?.ok_or_else(|| {
                 ApiError::not_found(format!("no spans or logs of trace {trace_id_hex}"))

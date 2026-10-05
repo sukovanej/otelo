@@ -56,6 +56,10 @@ export default function TracesPage() {
       key.view === "spans"
         ? { view: "spans", body: await getSpans(key, signal) }
         : { view: "traces", body: await getTraces(key, signal) },
+    pageJoining: {
+      readNextCursor: (result) => result.body.next ?? undefined,
+      joinPages: joinTracesPages,
+    },
   });
 
   // The span stays open when a reload or another query no longer brings it.
@@ -79,8 +83,8 @@ export default function TracesPage() {
   usePageKeys({ queryInput: () => queryInput, onEscape: () => setSelectedSpan(undefined) });
 
   const sort = () => list.sortOrder() ?? "newest";
-  const describeOrderOfTruncatedList = (truncated: boolean) =>
-    truncated ? `, ${SPAN_SORT_DESCRIPTIONS[sort()]}; more match` : "";
+  const describeMoreMatching = (next: string | null) =>
+    next === null ? "" : `, ${SPAN_SORT_DESCRIPTIONS[sort()]}; more match`;
 
   const traces = () => {
     const result = list.shownResult();
@@ -105,7 +109,7 @@ export default function TracesPage() {
             {(body) => (
               <>
                 {formatCount(body().traces.length, "trace")}
-                {describeOrderOfTruncatedList(body().truncated)}
+                {describeMoreMatching(body().next)}
               </>
             )}
           </Match>
@@ -113,7 +117,7 @@ export default function TracesPage() {
             {(body) => (
               <>
                 {formatCount(body().spans.length, "span")}
-                {describeOrderOfTruncatedList(body().truncated)}
+                {describeMoreMatching(body().next)}
               </>
             )}
           </Match>
@@ -190,4 +194,20 @@ export default function TracesPage() {
       </Show>
     </div>
   );
+}
+
+function joinTracesPages(shown: TracesResult, page: TracesResult): TracesResult {
+  if (shown.view === "spans" && page.view === "spans") {
+    return {
+      view: "spans",
+      body: { ...page.body, spans: [...shown.body.spans, ...page.body.spans] },
+    };
+  }
+  if (shown.view === "traces" && page.view === "traces") {
+    return {
+      view: "traces",
+      body: { ...page.body, traces: [...shown.body.traces, ...page.body.traces] },
+    };
+  }
+  return page;
 }

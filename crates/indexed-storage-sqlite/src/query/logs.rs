@@ -4,19 +4,25 @@ use std::ops::ControlFlow;
 use anyhow::ensure;
 use otelo_indexed_storage::Severity;
 use otelo_indexed_storage::query::{
-    LogGroup, LogGroups, LogLine, Logs, MAX_GROUPED_LOG_LINES, replace_values_in_message,
+    LogGroup, LogGroups, LogLine, Logs, MAX_GROUPED_LOG_LINES, PageRequest,
+    replace_values_in_message,
 };
 use otelo_query::{Query, Signal};
 use rusqlite::Row;
 
 use super::compile::{TableAliases, compile_query};
 use super::{
-    WhereClause, row_limit_with_one_more, span_id_from_blob, timestamp_from_nanos,
-    trace_id_from_blob, truncate_to_limit,
+    OrderColumn, PageOrder, SortDirection, WhereClause, row_limit_with_one_more, span_id_from_blob,
+    split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
 
 const MAX_SAMPLES_PER_GROUP: usize = 3;
+
+const NEWEST_LOGS_FIRST: PageOrder = PageOrder {
+    first_column: OrderColumn::new("log.logged_at", SortDirection::Descending),
+    later_columns: &[OrderColumn::new("log.rowid", SortDirection::Descending)],
+};
 
 pub(super) fn compile_log_query(
     reader: &Reader,
@@ -102,18 +108,34 @@ fn log_line_from_row(row: &Row) -> anyhow::Result<LogLine> {
     })
 }
 
-pub(super) fn read_logs(reader: &Reader, query: &Query, limit: usize) -> anyhow::Result<Logs> {
+pub(super) fn read_logs(
+    reader: &Reader,
+    query: &Query,
+    page: &PageRequest,
+) -> anyhow::Result<Logs> {
     let (mut where_clause, unindexed) = compile_log_query(reader, query)?;
-    where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
+    NEWEST_LOGS_FIRST.push_condition_after(&mut where_clause, page.after.as_ref())?;
+    where_clause.push_param(":limit", row_limit_with_one_more(page.limit)?);
     let sql = format!(
-        "{} ORDER BY log.logged_at DESC LIMIT :limit",
-        select_logs(LOG_LINE_COLUMNS, &where_clause)
+        "{}
+         ORDER BY {}
+         LIMIT :limit",
+        select_logs(
+            &format!(
+                "{LOG_LINE_COLUMNS}, {}",
+                NEWEST_LOGS_FIRST.cursor_columns_sql()
+            ),
+            &where_clause
+        ),
+        NEWEST_LOGS_FIRST.order_by_sql()
     );
-    let mut logs = reader.collect_rows(&sql, &where_clause, log_line_from_row)?;
-    let truncated = truncate_to_limit(&mut logs, limit);
+    let rows = reader.collect_rows(&sql, &where_clause, |row| {
+        Ok((NEWEST_LOGS_FIRST.read_cursor(row)?, log_line_from_row(row)?))
+    })?;
+    let (logs, next) = split_page(rows, page.limit);
     Ok(Logs {
         logs,
-        truncated,
+        next,
         unindexed,
     })
 }

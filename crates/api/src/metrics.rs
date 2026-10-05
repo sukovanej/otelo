@@ -10,7 +10,7 @@ use utoipa::IntoParams;
 
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{QueryParams, parse_field_list, parse_query, parse_step_ns, resolve_step};
-use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
+use crate::{Api, DefaultSince, RangeSignals, RequestedRange, RowLimits};
 
 /// The series that have points in the range and that the query keeps, by
 /// name. The query reads `name`, `service`, `kind`, `unit`, the attributes, and
@@ -37,7 +37,7 @@ pub async fn list_metrics(
             default_since: DefaultSince::HourBeforeNow,
         },
         params.limit,
-        100,
+        RowLimits::up_to_max_rows(100),
         move |opened, limit| {
             let resolution = Resolution::choose_for_range_length(opened.range);
             Ok(opened.queries.list_metrics(&query, resolution, limit)?)
@@ -119,7 +119,7 @@ pub async fn get_metric_series(
             default_since: DefaultSince::HourBeforeNow,
         },
         params.limit,
-        20,
+        RowLimits::up_to_max_rows(20),
         move |opened, limit| {
             let filter = MetricFilter {
                 name,

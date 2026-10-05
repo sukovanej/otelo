@@ -1,6 +1,7 @@
 mod catalog;
 mod logs;
 mod metrics;
+mod page;
 mod rank;
 mod services;
 mod span_groups;
@@ -17,6 +18,7 @@ pub use metrics::{
     MetricList, MetricSeries, Resolution, SeriesGroup, SeriesInfo, choose_default_step_ns,
     choose_round_step_ns,
 };
+pub use page::{MAX_PAGE_ROWS, PageCursor, PageRequest};
 pub use rank::RankOrder;
 pub use services::{Service, ServiceBucket, ServiceStats, ServiceSummary, Services};
 pub use span_groups::{

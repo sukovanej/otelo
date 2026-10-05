@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use otelo_indexed_storage::query::PageCursor;
 use otelo_indexed_storage::{TimeRange, query};
 use otelo_query::Signal;
 use serde::Deserialize;
@@ -37,6 +38,12 @@ pub struct LookupParams {
     pub until: Option<String>,
     /// The most spans, and the most logs, to return.
     pub limit: Option<usize>,
+}
+
+pub fn parse_page_cursor(text: Option<&str>) -> Result<Option<PageCursor>, ApiError> {
+    text.map(str::parse)
+        .transpose()
+        .map_err(|error: String| ApiError::bad_request(&error))
 }
 
 pub fn parse_step_ns(text: Option<&str>) -> Result<Option<i64>, ApiError> {

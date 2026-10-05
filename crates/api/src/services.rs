@@ -5,7 +5,7 @@ use utoipa::IntoParams;
 
 use crate::error::{ApiResult, ErrorBody};
 use crate::params::{parse_step_ns, resolve_step};
-use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
+use crate::{Api, DefaultSince, RangeSignals, RequestedRange, RowLimits};
 
 /// The range, the limit, and the step of the services.
 #[derive(Deserialize, IntoParams)]
@@ -63,7 +63,7 @@ pub async fn list_services(
             default_since: DefaultSince::HourBeforeNow,
         },
         params.limit,
-        100,
+        RowLimits::up_to_max_rows(100),
         move |opened, limit| {
             let step_ns = resolve_step(opened.range, requested_step_ns, 60)?;
             Ok(opened.queries.list_services(step_ns, limit)?)

@@ -1,13 +1,14 @@
 use anyhow::{Context, ensure};
 use jiff::{SpanRelativeTo, Timestamp};
 
-use crate::MAX_ROW_LIMIT;
+use crate::RowLimits;
 
-pub fn check_limit(limit: Option<usize>, default_limit: usize) -> anyhow::Result<usize> {
-    let limit = limit.unwrap_or(default_limit);
+pub fn check_limit(limit: Option<usize>, row_limits: RowLimits) -> anyhow::Result<usize> {
+    let limit = limit.unwrap_or(row_limits.default_rows);
+    let max_rows = row_limits.max_rows;
     ensure!(
-        (1..=MAX_ROW_LIMIT).contains(&limit),
-        "the limit is {limit}, and it has to be from 1 to {MAX_ROW_LIMIT}"
+        (1..=max_rows).contains(&limit),
+        "the limit is {limit}, and it has to be from 1 to {max_rows}"
     );
     Ok(limit)
 }

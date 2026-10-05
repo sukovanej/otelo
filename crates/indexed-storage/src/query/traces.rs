@@ -4,7 +4,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::LogLine;
+use super::{LogLine, PageCursor};
 use crate::{Attributes, SpanEvent, SpanId, SpanKind, SpanStatus, TraceId};
 
 /// The order of a list of spans, or of traces by their root span.
@@ -47,8 +47,10 @@ impl FromStr for SpanSort {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Traces {
     pub traces: Vec<TraceSummary>,
-    /// More traces match than the limit let through.
-    pub truncated: bool,
+    /// The `after` of the request for the next page. Null when no more traces
+    /// match.
+    #[schema(value_type = Option<String>, required = true)]
+    pub next: Option<PageCursor>,
     /// The attributes the query compares that have no index.
     pub unindexed: Vec<String>,
 }
@@ -80,8 +82,10 @@ pub struct TraceSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Spans {
     pub spans: Vec<TraceSpan>,
-    /// More spans match than the limit let through.
-    pub truncated: bool,
+    /// The `after` of the request for the next page. Null when no more spans
+    /// match.
+    #[schema(value_type = Option<String>, required = true)]
+    pub next: Option<PageCursor>,
     /// The attributes the query compares that have no index.
     pub unindexed: Vec<String>,
 }

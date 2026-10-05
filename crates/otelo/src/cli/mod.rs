@@ -10,7 +10,11 @@ mod span_groups;
 pub mod table;
 mod traces;
 
+use otelo_indexed_storage::query::{Logs, MAX_PAGE_ROWS, PageCursor, Spans, Traces};
 use otelo_query::Signal;
+use serde::de::DeserializeOwned;
+
+use client::Client;
 
 pub use catalog::{
     AttributesArgs, CompleteArgs, IndexArgs, change_and_print_indexes, print_attributes,
@@ -54,6 +58,88 @@ impl RangeArgs {
 
     fn to_range_params(&self) -> Vec<(&'static str, Option<String>)> {
         vec![("since", self.since.clone()), ("until", self.until.clone())]
+    }
+
+    // The daemon answers at most a page, so a larger --limit takes several requests.
+    fn fetch_pages<A: PagedAnswer>(
+        &self,
+        client: &Client,
+        path: &str,
+        params: &[(&'static str, Option<String>)],
+    ) -> anyhow::Result<A> {
+        let mut first_params = self.to_range_params();
+        first_params.extend_from_slice(params);
+        let Some(limit) = self.limit else {
+            return client.get(path, &first_params);
+        };
+        let page_limit = |remaining: usize| Some(remaining.min(MAX_PAGE_ROWS).to_string());
+        let mut answer: A = client.get(
+            path,
+            &[&first_params[..], &[("limit", page_limit(limit))]].concat(),
+        )?;
+        while let Some(after) = answer.next_cursor()
+            && answer.row_count() < limit
+        {
+            let page_params = [
+                ("limit", page_limit(limit - answer.row_count())),
+                ("after", Some(after.to_string())),
+            ];
+            answer.append_page(client.get(path, &[&first_params[..], &page_params].concat())?);
+        }
+        Ok(answer)
+    }
+}
+
+trait PagedAnswer: DeserializeOwned {
+    fn next_cursor(&self) -> Option<PageCursor>;
+
+    fn row_count(&self) -> usize;
+
+    fn append_page(&mut self, page: Self);
+}
+
+impl PagedAnswer for Spans {
+    fn next_cursor(&self) -> Option<PageCursor> {
+        self.next.clone()
+    }
+
+    fn row_count(&self) -> usize {
+        self.spans.len()
+    }
+
+    fn append_page(&mut self, page: Self) {
+        self.spans.extend(page.spans);
+        self.next = page.next;
+    }
+}
+
+impl PagedAnswer for Traces {
+    fn next_cursor(&self) -> Option<PageCursor> {
+        self.next.clone()
+    }
+
+    fn row_count(&self) -> usize {
+        self.traces.len()
+    }
+
+    fn append_page(&mut self, page: Self) {
+        self.traces.extend(page.traces);
+        self.next = page.next;
+    }
+}
+
+impl PagedAnswer for Logs {
+    fn next_cursor(&self) -> Option<PageCursor> {
+        self.next.clone()
+    }
+
+    fn row_count(&self) -> usize {
+        self.logs.len()
+    }
+
+    fn append_page(&mut self, page: Self) {
+        self.logs.extend(page.logs);
+        self.next = page.next;
     }
 }
 

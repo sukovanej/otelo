@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use otelo_indexed_storage::query::{Resolution, SpanSort};
+use otelo_indexed_storage::query::{PageRequest, Resolution, SpanSort};
 use otelo_indexed_storage::{
     Attributes, Batch, IndexedAttribute, IndexedSignal, Log, Metric, NumberPoint, PipelineMeters,
     Points, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind, SpanStatus,
@@ -109,13 +109,16 @@ fn answer_queries(data_directory: &Path) -> String {
     format!(
         "{:?}\n{:?}\n{:?}",
         reader
-            .list_logs(&parse_query("user.id = 7", Signal::Logs).unwrap(), 10)
+            .list_logs(
+                &parse_query("user.id = 7", Signal::Logs).unwrap(),
+                &PageRequest::first(10)
+            )
             .unwrap(),
         reader
             .list_spans(
                 &parse_query("", Signal::Spans).unwrap(),
                 SpanSort::Newest,
-                10
+                &PageRequest::first(10)
             )
             .unwrap(),
         reader
