@@ -48,3 +48,9 @@ Measured on mudro on 2026-10-04: 37,787 spans over the retention, about 19k a da
 | 20,000 | 36/36 | 35/38 | 93–116 ms |
 
 At 10,000 every key appears and the query stays under about 100 ms on the server. The cost of a context that matches few records does not depend on N, because SQLite scans the whole range: about 0.7 µs a span, 1.4 s for 2M spans. That is why the scan needs a time budget.
+
+## Comments
+
+### 2026-10-05T13:22:25Z by Milan Suk via claude-code
+
+> The hover card of a field in the query bar still asks with the field alone, so it follows the range but not the other terms. The field help of a completion follows the context.
