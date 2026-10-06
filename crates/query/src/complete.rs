@@ -1,8 +1,9 @@
 use std::ops::Range;
 
+use crate::context::{find_context_of_cursor, join_with_and};
 use crate::lexer::{Token, TokenType, is_keyword, lex_tokens, needs_no_backticks};
-use crate::parser::resolve_field;
-use crate::{BuiltinField, Field, Operator, Signal, Value, ValueType, quote_string};
+use crate::parser::{resolve_field, value_of_token};
+use crate::{BuiltinField, Expression, Field, Operator, Signal, Value, ValueType, quote_string};
 
 const MAX_SUGGESTIONS: usize = 50;
 
@@ -10,9 +11,25 @@ pub const MAX_HELP_VALUES: usize = 10;
 
 pub trait Catalog {
     // Both lists come most common first, since completion keeps only the first MAX_SUGGESTIONS.
-    fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo>;
+    // They hold only what the records that match the context have.
+    fn keys(&self, signal: Signal, resource: bool, context: Option<&Expression>) -> Vec<KeyInfo>;
 
-    fn values(&self, signal: Signal, field: &Field) -> FieldValues;
+    // The values may be only the ones that start with the prefix, ignoring case.
+    fn values(
+        &self,
+        signal: Signal,
+        field: &Field,
+        lowercase_value_prefix: &str,
+        context: Option<&Expression>,
+    ) -> FieldValues;
+
+    // Asked only of a built-in field that some records lack.
+    fn has_builtin_field(
+        &self,
+        signal: Signal,
+        builtin_field: BuiltinField,
+        context: Option<&Expression>,
+    ) -> bool;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,12 +54,16 @@ pub struct FieldValues {
 pub struct NoCatalog;
 
 impl Catalog for NoCatalog {
-    fn keys(&self, _: Signal, _: bool) -> Vec<KeyInfo> {
+    fn keys(&self, _: Signal, _: bool, _: Option<&Expression>) -> Vec<KeyInfo> {
         Vec::new()
     }
 
-    fn values(&self, _: Signal, _: &Field) -> FieldValues {
+    fn values(&self, _: Signal, _: &Field, _: &str, _: Option<&Expression>) -> FieldValues {
         FieldValues::default()
+    }
+
+    fn has_builtin_field(&self, _: Signal, _: BuiltinField, _: Option<&Expression>) -> bool {
+        true
     }
 }
 
@@ -124,6 +145,7 @@ pub fn complete_query(
     cursor: usize,
     signal: Signal,
     catalog: &dyn Catalog,
+    outer_context: Option<&Expression>,
 ) -> Completion {
     let cursor = floor_char_boundary(input, cursor);
     let tokens = lex_tokens(&input[..cursor]);
@@ -136,43 +158,60 @@ pub fn complete_query(
     let Some((expected, open_parens)) = expected_after_tokens(tokens_before_word, signal) else {
         return Completion::default();
     };
+    let context = join_with_and(
+        outer_context
+            .cloned()
+            .into_iter()
+            .chain(find_context_of_cursor(input, cursor, signal))
+            .collect(),
+    );
+    let context = context.as_ref();
     let field_at_cursor = field_of_term_at_cursor(&expected, word_at_cursor, signal);
     let known_field = field_at_cursor
         .as_ref()
-        .and_then(|field| find_known_field(field, signal, catalog));
-    let completes_value = matches!(expected, ExpectedNext::Value(_) | ExpectedNext::InValue(_));
-    let values = match &field_at_cursor {
-        Some(field) if completes_value || known_field.is_some() => catalog.values(signal, field),
-        _ => FieldValues::default(),
-    };
+        .and_then(|field| find_known_field(field, signal, catalog, context));
     let replaced_byte_range = byte_range_of_whole_token_at_cursor(input, word_at_cursor, cursor);
     let prefix = word_at_cursor.map_or(String::new(), |token| match &token.token_type {
         TokenType::Quoted { text, .. } | TokenType::Backticked { text, .. } => text.clone(),
         _ => input[token.byte_range.clone()].to_owned(),
     });
+    let lowercase_prefix = prefix.to_lowercase();
+    let completes_value = matches!(expected, ExpectedNext::Value(_) | ExpectedNext::InValue(_));
+    let values = match &field_at_cursor {
+        Some(field) if completes_value => catalog.values(signal, field, &lowercase_prefix, context),
+        Some(field) if known_field.is_some() => catalog.values(signal, field, "", context),
+        _ => FieldValues::default(),
+    };
     let mut matching = MatchingSuggestions {
         suggestions: Vec::new(),
-        lowercase_prefix: prefix.to_lowercase(),
+        lowercase_prefix,
         replaced_byte_range,
     };
     match expected {
         ExpectedNext::Term => {
-            matching.push_fields(signal, catalog, true);
+            matching.push_fields(signal, catalog, context, true);
             matching.push_keyword("not");
             matching.push_keyword("has(");
             matching.push_keyword("(");
         }
-        ExpectedNext::Operator(field) => matching.push_operators(&field),
-        ExpectedNext::Value(field) | ExpectedNext::InValue(field) => {
-            matching.push_values(signal, &field, &values.listed);
+        ExpectedNext::Operator(field) => {
+            matching.push_operators(
+                &field,
+                known_field.as_ref().map(|(value_type, _)| *value_type),
+            );
+        }
+        ExpectedNext::Value(field) => matching.push_values(signal, &field, &values.listed, &[]),
+        ExpectedNext::InValue(field) => {
+            let lowercase_written_values = list_values_written_in_open_list(tokens_before_word);
+            matching.push_values(signal, &field, &values.listed, &lowercase_written_values);
         }
         ExpectedNext::InOpen | ExpectedNext::HasOpen => matching.push_keyword("("),
         ExpectedNext::InNext => {
             matching.push_keyword(",");
             matching.push_keyword(")");
         }
-        // Every record has the built-in fields, so has() only makes sense on an attribute.
-        ExpectedNext::HasField => matching.push_fields(signal, catalog, false),
+        // The query compiler rejects has() of a built-in field.
+        ExpectedNext::HasField => matching.push_fields(signal, catalog, context, false),
         ExpectedNext::HasClose => matching.push_keyword(")"),
         ExpectedNext::AfterTerm => {
             matching.push_keyword("and");
@@ -181,7 +220,7 @@ pub fn complete_query(
                 matching.push_keyword(")");
             }
             if !matching.lowercase_prefix.is_empty() {
-                matching.push_fields(signal, catalog, true);
+                matching.push_fields(signal, catalog, context, true);
             }
         }
     }
@@ -233,10 +272,11 @@ fn find_known_field(
     field: &Field,
     signal: Signal,
     catalog: &dyn Catalog,
+    context: Option<&Expression>,
 ) -> Option<(ValueType, FieldOrigin)> {
     let find_key = |wanted: &str, resource: bool| {
         catalog
-            .keys(signal, resource)
+            .keys(signal, resource, context)
             .into_iter()
             .find(|info| info.key == wanted)
     };
@@ -432,6 +472,26 @@ const fn is_value_token(token_type: &TokenType) -> bool {
     )
 }
 
+fn list_values_written_in_open_list(tokens: &[Token]) -> Vec<String> {
+    let open_paren_index = tokens
+        .iter()
+        .rposition(|token| token.token_type == TokenType::OpenParen);
+    open_paren_index
+        .map(|index| &tokens[index + 1..])
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|token| value_of_token(&token.token_type))
+        .map(|value| lowercase_unquoted_text(&value))
+        .collect()
+}
+
+fn lowercase_unquoted_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.to_lowercase(),
+        value => value_as_written(value).to_lowercase(),
+    }
+}
+
 fn field_of_open_in_list(tokens: &[Token], signal: Signal) -> Option<Field> {
     let in_keyword_index = tokens.iter().rposition(|token| {
         matches!(&token.token_type, TokenType::Word(word) if word.eq_ignore_ascii_case("in"))
@@ -471,9 +531,21 @@ impl MatchingSuggestions {
         self.push_suggestion(keyword.into(), SuggestionKind::Keyword, None);
     }
 
-    fn push_fields(&mut self, signal: Signal, catalog: &dyn Catalog, include_builtin_fields: bool) {
+    fn push_fields(
+        &mut self,
+        signal: Signal,
+        catalog: &dyn Catalog,
+        context: Option<&Expression>,
+        include_builtin_fields: bool,
+    ) {
         if include_builtin_fields {
-            for builtin_field in signal.builtin_fields() {
+            for &builtin_field in signal.builtin_fields() {
+                let can_be_suggested = builtin_field.name().starts_with(&self.lowercase_prefix)
+                    && (builtin_field.is_on_every_record(signal)
+                        || catalog.has_builtin_field(signal, builtin_field, context));
+                if !can_be_suggested {
+                    continue;
+                }
                 self.push_suggestion(
                     builtin_field.name().into(),
                     SuggestionKind::Field,
@@ -481,7 +553,7 @@ impl MatchingSuggestions {
                 );
             }
         }
-        for info in catalog.keys(signal, false) {
+        for info in catalog.keys(signal, false, context) {
             let detail = describe_key(info.value_type, info.count);
             self.push_suggestion(
                 Field::Attribute(info.key).to_string(),
@@ -490,7 +562,7 @@ impl MatchingSuggestions {
             );
         }
         // A resource key has no backtick form, so one that needs backticks cannot be written.
-        for info in catalog.keys(signal, true) {
+        for info in catalog.keys(signal, true, context) {
             if needs_no_backticks(&info.key) {
                 let detail = describe_key(info.value_type, info.count);
                 self.push_suggestion(
@@ -502,10 +574,15 @@ impl MatchingSuggestions {
         }
     }
 
-    fn push_operators(&mut self, field: &Field) {
-        let (is_ordered, is_text) = match field {
-            Field::Builtin(builtin_field) => (builtin_field.is_ordered(), builtin_field.is_text()),
-            _ => (true, true),
+    fn push_operators(&mut self, field: &Field, known_value_type: Option<ValueType>) {
+        let (is_ordered, is_text) = match (field, known_value_type) {
+            (Field::Builtin(builtin_field), _) => {
+                (builtin_field.is_ordered(), builtin_field.is_text())
+            }
+            (_, Some(ValueType::Int | ValueType::Float)) => (true, false),
+            (_, Some(ValueType::String)) => (false, true),
+            (_, Some(ValueType::Mixed) | None) => (true, true),
+            (_, Some(_)) => (false, false),
         };
         let mut operators = vec![Operator::Eq, Operator::Ne];
         if is_ordered {
@@ -520,10 +597,18 @@ impl MatchingSuggestions {
         self.push_suggestion("in".into(), SuggestionKind::Operator, None);
     }
 
-    fn push_values(&mut self, signal: Signal, field: &Field, listed_values: &[ValueInfo]) {
+    fn push_values(
+        &mut self,
+        signal: Signal,
+        field: &Field,
+        listed_values: &[ValueInfo],
+        lowercase_written_values: &[String],
+    ) {
         if let Field::Builtin(builtin_field) = field {
             for value in builtin_field.fixed_values(signal) {
-                self.push_suggestion((*value).into(), SuggestionKind::Value, None);
+                if !lowercase_written_values.contains(&value.to_lowercase()) {
+                    self.push_suggestion((*value).into(), SuggestionKind::Value, None);
+                }
             }
             if matches!(builtin_field, BuiltinField::Duration) {
                 return;
@@ -531,11 +616,9 @@ impl MatchingSuggestions {
         }
         for info in listed_values {
             let text = value_as_written(&info.value);
-            let unquoted_text = match &info.value {
-                Value::String(text) => text.to_lowercase(),
-                _ => text.to_lowercase(),
-            };
+            let unquoted_text = lowercase_unquoted_text(&info.value);
             if unquoted_text.starts_with(&self.lowercase_prefix)
+                && !lowercase_written_values.contains(&unquoted_text)
                 && !self
                     .suggestions
                     .iter()

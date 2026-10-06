@@ -1,12 +1,29 @@
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::path::Path;
 
 use otelo_query::{
-    BuiltinField, Catalog, Field, FieldHelp, FieldOrigin, FieldValues, KeyInfo, Signal, Value,
-    ValueInfo, ValueType, complete_query,
+    BuiltinField, Catalog, Expression, Field, FieldHelp, FieldOrigin, FieldValues, KeyInfo, Signal,
+    Value, ValueInfo, ValueType, complete_query, parse_query,
 };
 
-struct SmallAppCatalog;
+#[derive(Default)]
+struct SmallAppCatalog {
+    asked_contexts: RefCell<BTreeSet<String>>,
+}
+
+impl SmallAppCatalog {
+    fn note_context(&self, context: Option<&Expression>) -> bool {
+        let Some(context) = context else {
+            return false;
+        };
+        let text = context.to_string();
+        let is_caddy = text.contains("service = \"caddy\"");
+        self.asked_contexts.borrow_mut().insert(text);
+        is_caddy
+    }
+}
 
 fn key_info(key: &str, value_type: ValueType, count: u64) -> KeyInfo {
     KeyInfo {
@@ -21,7 +38,18 @@ const fn value_info(value: Value, count: u64) -> ValueInfo {
 }
 
 impl Catalog for SmallAppCatalog {
-    fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo> {
+    fn has_builtin_field(&self, _: Signal, _: BuiltinField, context: Option<&Expression>) -> bool {
+        !self.note_context(context)
+    }
+
+    fn keys(&self, signal: Signal, resource: bool, context: Option<&Expression>) -> Vec<KeyInfo> {
+        if self.note_context(context) {
+            return if resource {
+                vec![key_info("service.name", ValueType::String, 1)]
+            } else {
+                vec![key_info("http.route", ValueType::String, 2)]
+            };
+        }
         if resource {
             return vec![
                 key_info("service.name", ValueType::String, 4),
@@ -44,8 +72,25 @@ impl Catalog for SmallAppCatalog {
         }
     }
 
-    fn values(&self, signal: Signal, field: &Field) -> FieldValues {
+    fn values(
+        &self,
+        signal: Signal,
+        field: &Field,
+        _: &str,
+        context: Option<&Expression>,
+    ) -> FieldValues {
         let string_value = |text: &str| Value::String(text.into());
+        if self.note_context(context) {
+            return FieldValues {
+                listed: match field {
+                    Field::Attribute(key) if key == "http.route" => {
+                        vec![value_info(string_value("/login"), 2)]
+                    }
+                    _ => Vec::new(),
+                },
+                has_more_values_than_listed: false,
+            };
+        }
         let listed = match field {
             Field::Attribute(key) if key == "http.route" => vec![
                 value_info(string_value("/matches"), 50),
@@ -139,7 +184,11 @@ fn suggestions() {
                 .unwrap_or_else(|| panic!("{}: {line:?} has no |", path.display()));
             let input = line.replacen('|', "", 1);
             writeln!(out, "> {line}").unwrap();
-            let completion = complete_query(&input, cursor, signal, &SmallAppCatalog);
+            let catalog = SmallAppCatalog::default();
+            let completion = complete_query(&input, cursor, signal, &catalog, None);
+            for context in catalog.asked_contexts.borrow().iter() {
+                writeln!(out, "context: {context}").unwrap();
+            }
             if completion.suggestions.is_empty() {
                 writeln!(out, "(none)").unwrap();
             }
@@ -164,4 +213,24 @@ fn suggestions() {
         }
         insta::assert_snapshot!(out);
     });
+}
+
+#[test]
+fn outer_context_joins_the_context_of_the_cursor() {
+    let catalog = SmallAppCatalog::default();
+    let outer_context = parse_query("name = \"http.server.request.duration\"", Signal::Metrics)
+        .unwrap()
+        .expression;
+    let input = "state = idle and ";
+    let _ = complete_query(
+        input,
+        input.len(),
+        Signal::Metrics,
+        &catalog,
+        outer_context.as_ref(),
+    );
+    assert_eq!(
+        catalog.asked_contexts.into_inner(),
+        BTreeSet::from(["name = \"http.server.request.duration\" AND state = \"idle\"".into()])
+    );
 }

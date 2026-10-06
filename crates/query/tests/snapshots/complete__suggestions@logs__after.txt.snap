@@ -1,5 +1,6 @@
 ---
 source: crates/query/tests/complete.rs
+assertion_line: 210
 expression: out
 input_file: crates/query/tests/complete/logs/after.txt
 ---
@@ -13,9 +14,11 @@ or                             keyword                     replaces "" at 13..13
 )                              keyword                     replaces "" at 13..13
 
 > user.id = 7 o|
+context: user.id = 7
 or                             keyword                     replaces "o" at 12..13
 
 > user.id = 7 us|
+context: user.id = 7
 user.id                        field    mixed, 40          replaces "us" at 12..14
 
 > http.route in (1, /l|

@@ -1,0 +1,30 @@
+---
+source: crates/query/tests/complete.rs
+assertion_line: 210
+expression: out
+input_file: crates/query/tests/complete/logs/written.txt
+---
+> http.route in ("/matches", |
+"/languages"                   value    40                 replaces "" at 27..27
+"/login"                       value    1                  replaces "" at 27..27
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
+
+> http.route in (/matches, "/LOGIN", |
+"/languages"                   value    40                 replaces "" at 35..35
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
+
+> level in (warn, |
+trace                          value                       replaces "" at 16..16
+debug                          value                       replaces "" at 16..16
+info                           value                       replaces "" at 16..16
+error                          value                       replaces "" at 16..16
+fatal                          value                       replaces "" at 16..16
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal
+
+> level in (warn, error, f|
+fatal                          value                       replaces "f" at 23..24
+field level: string, built-in: The severity of the log line. Levels compare in order, so level >= warn also finds error and fatal.
+  6 values: trace, debug, info, warn, error, fatal

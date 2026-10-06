@@ -1,4 +1,5 @@
 mod complete;
+mod context;
 mod highlight;
 mod lexer;
 mod parser;
@@ -175,6 +176,12 @@ impl BuiltinField {
     #[must_use]
     pub const fn is_text(self) -> bool {
         matches!(self, Self::Body | Self::Name | Self::Service)
+    }
+
+    // A log written outside a span has no trace or span.
+    #[must_use]
+    pub const fn is_on_every_record(self, signal: Signal) -> bool {
+        !matches!((self, signal), (Self::TraceId | Self::SpanId, Signal::Logs))
     }
 }
 

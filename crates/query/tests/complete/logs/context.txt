@@ -1,0 +1,14 @@
+service = "caddy" and |
+service = "caddy" and http.|
+service = "caddy" http.route = |
+service = "caddy" or |
+(service = "caddy" or level = warn) and |
+service = "caddy" and (level = warn or |
+service = "caddy" and (level = warn |
+service = "caddy" and not (level = warn and |
+http.route = "/matches" and ht|tp.route = 1 and service = "caddy"
+service = |"caddy" and level = warn
+user.id = and service = "caddy" and |
+level = warn and http.route in ("/matches", |
+service = "caddy" and t|
+level = warn and t|

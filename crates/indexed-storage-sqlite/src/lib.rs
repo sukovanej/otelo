@@ -1,4 +1,5 @@
 mod catalog;
+mod completion_cache;
 mod day;
 mod indexer;
 mod indexes;
@@ -13,6 +14,7 @@ mod sqlite;
 mod telemetry_file;
 mod version;
 
+pub use completion_cache::CompletionCache;
 pub use day::Day;
 pub use indexer::{Config, FrameMapper, Indexer, index_journal_until_caught_up};
 pub use indexes::Indexes;

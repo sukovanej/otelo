@@ -6,9 +6,9 @@ use otelo_query::{FieldHelp, FieldOrigin, Signal, SuggestionKind, ValueType};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::Api;
 use crate::error::{ApiResult, ErrorBody};
-use crate::params::parse_signal;
+use crate::params::{parse_query, parse_signal};
+use crate::{Api, DefaultSince, RangeSignals, RequestedRange};
 
 /// The kind of record a query reads, as the API names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -83,6 +83,16 @@ pub struct CompleteParams {
     /// The position of the cursor in the query, in characters. The end of the
     /// query when missing.
     cursor: Option<usize>,
+    /// The start of the range the suggestions come from: a duration before
+    /// now, such as `1h`, or an RFC 3339 timestamp. The whole retention when
+    /// missing.
+    since: Option<String>,
+    /// The end of the range, in the form of `since`. Now when missing.
+    until: Option<String>,
+    /// Terms that the records the suggestions come from match too, besides
+    /// the terms of `q` joined by AND with the one at the cursor, such as
+    /// `name = "http.server.request.duration"`.
+    context: Option<String>,
 }
 
 /// What can go at the cursor of a query, and what the field there holds.
@@ -230,8 +240,10 @@ impl fmt::Display for CompletionKind {
 }
 
 /// Suggests the fields, operators, values, and keywords that can go at the
-/// cursor of a query, from the attributes and values of the retention, and
-/// describes the field of the term the cursor is in.
+/// cursor of a query, and describes the field of the term the cursor is in.
+/// The fields and the values come from the records of the range that match
+/// the context: the other terms joined by AND with the term at the cursor,
+/// and `context`. When those records are many, from the newest of them.
 #[utoipa::path(
     get,
     path = "/api/complete",
@@ -246,6 +258,7 @@ pub async fn complete_query(
     Query(params): Query<CompleteParams>,
 ) -> ApiResult<Completions> {
     let signal = parse_signal(&params.signal)?;
+    let outer_context = parse_query(params.context.as_deref(), signal)?.expression;
     let query_text = params.query.unwrap_or_default();
     let cursor_byte_offset = params
         .cursor
@@ -255,10 +268,21 @@ pub async fn complete_query(
                 .nth(cursor_char_offset)
                 .map_or(query_text.len(), |(byte_offset, _)| byte_offset)
         });
-    api.run_retention_query(signal, move |opened| {
+    let requested_range = RequestedRange {
+        signals: RangeSignals::One(signal),
+        since: params.since,
+        until: params.until,
+        default_since: DefaultSince::OldestRetained,
+    };
+    api.run_range_query(requested_range, move |opened| {
         let count_chars_before = |byte_offset: usize| query_text[..byte_offset].chars().count();
-        let completion =
-            otelo_query::complete_query(&query_text, cursor_byte_offset, signal, &*opened.queries);
+        let completion = otelo_query::complete_query(
+            &query_text,
+            cursor_byte_offset,
+            signal,
+            &*opened.queries,
+            outer_context.as_ref(),
+        );
         let suggestions = completion
             .suggestions
             .into_iter()

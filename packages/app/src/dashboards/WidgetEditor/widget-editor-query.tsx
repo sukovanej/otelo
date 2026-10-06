@@ -13,6 +13,7 @@ import { fieldLabel } from "../../classes";
 import { createFetch, freezeDeeply } from "../../fetch";
 import { highlightQuery } from "../../highlight";
 import { listGroupingOptions, summarizeMetricNames } from "../../metrics/metric";
+import { quoteString } from "../../query";
 import { createRangeFetch, type RangeState } from "../../services/range";
 import {
   changeQuerySignal,
@@ -140,11 +141,20 @@ export default function WidgetEditorQuery(props: WidgetEditorQueryProps) {
           label="Filter"
           value={draftFilter()}
           highlight={highlightQuery}
-          complete={(text, cursorInChars, abort) =>
-            completeQuery(query().signal, text, cursorInChars, abort).then(
-              (completions) => completions.suggestions,
-            )
-          }
+          complete={(text, cursorInChars, abort) => {
+            const metricName = metricQuery()?.name;
+            return completeQuery(
+              {
+                signal: query().signal,
+                q: text,
+                cursor: cursorInChars,
+                since: props.range.since(),
+                until: props.range.until(),
+                ...(metricName ? { context: `name = ${quoteString(metricName)}` } : {}),
+              },
+              abort,
+            ).then((completions) => completions.suggestions);
+          }}
           help={() => Promise.resolve(undefined)}
           onInput={setDraftFilter}
           onSubmit={commitFilter}

@@ -1,15 +1,12 @@
 ---
 source: crates/query/tests/complete.rs
+assertion_line: 210
 expression: out
 input_file: crates/query/tests/complete/logs/operators.txt
 ---
 > http.route |
 =                              operator                    replaces "" at 11..11
 !=                             operator                    replaces "" at 11..11
-<                              operator                    replaces "" at 11..11
-<=                             operator                    replaces "" at 11..11
->                              operator                    replaces "" at 11..11
->=                             operator                    replaces "" at 11..11
 ~                              operator                    replaces "" at 11..11
 in                             operator                    replaces "" at 11..11
 field http.route: string, attribute of 90 records
