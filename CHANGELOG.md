@@ -7,6 +7,12 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.4...main)
 
+### Added
+
+- The `otelo` agent skill tells a coding agent how to investigate an app with
+  the CLI: which command to run first, how to narrow a query, and how to go
+  from a log line to its trace. `npx skills add sukovanej/otelo` installs it.
+
 ## [0.0.4](https://github.com/sukovanej/otelo/compare/v0.0.3...v0.0.4) - 2026-10-04
 
 ### Added

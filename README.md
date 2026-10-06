@@ -19,6 +19,14 @@ otelo update --canary   # the newest build of main
 
 A running daemon keeps the old version until it restarts. [CHANGELOG.md](CHANGELOG.md) lists the changes of each release.
 
+## Agent skill
+
+The `otelo` skill teaches a coding agent to investigate an app from its telemetry with the CLI. [skills](https://github.com/vercel-labs/skills) installs it into the agents of a project, or of the user with `-g`:
+
+```sh
+npx skills add sukovanej/otelo
+```
+
 ## License
 
 [MIT](LICENSE)

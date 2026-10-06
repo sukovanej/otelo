@@ -1,6 +1,8 @@
 ---
 name: openplan-docs
-description: Docs in this repo are "docs" kept by the `openplan doc` CLI, NOT markdown files in the checkout or documents of another docs tool or connector. Invoke this skill whenever the user mentions a doc or docs, by name or not: to read, list, find, write, create, edit, nest, rename, or delete a doc, or to base work on one.
+description: 'Docs in this repo are "docs" kept by the `openplan doc` CLI, NOT markdown files in the checkout or documents of another docs tool or connector. Invoke this skill whenever the user mentions a doc or docs, by name or not: to read, list, find, write, create, edit, nest, rename, or delete a doc, or to base work on one.'
+metadata:
+  internal: true
 ---
 
 # Docs

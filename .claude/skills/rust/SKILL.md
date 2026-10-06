@@ -1,6 +1,8 @@
 ---
 name: rust
 description: How otelo writes Rust. Invalid states are unrepresentable, names say what a thing is, and there are no comments. Invoke before creating or editing any .rs file under crates/, and before reviewing Rust.
+metadata:
+  internal: true
 ---
 
 # Writing the Rust

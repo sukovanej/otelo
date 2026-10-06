@@ -1,6 +1,8 @@
 ---
 name: openplan
-description: Work items in this repo are called "tasks" (kept by the `openplan` CLI, not as files in the checkout), NOT the TODO list or subagent tools. Invoke this skill when the user names a task key (OPP-42) or says "the plan"; when the user asks in these words to create a task, list/show/get tasks, work on a task, set a status/parent/dependency/tag, block, reparent, cancel, or delete a task; when the user asks to merge a task's work ("merge OPP-42", "merge this branch", "merge the PR", "land it", "ship it"); and when the user asks to comment on a task or to read its comments. A request to do work is not a request to track it: do the work, and create no task.
+description: 'Work items in this repo are called "tasks" (kept by the `openplan` CLI, not as files in the checkout), NOT the TODO list or subagent tools. Invoke this skill when the user names a task key (OPP-42) or says "the plan"; when the user asks in these words to create a task, list/show/get tasks, work on a task, set a status/parent/dependency/tag, block, reparent, cancel, or delete a task; when the user asks to merge a task''s work ("merge OPP-42", "merge this branch", "merge the PR", "land it", "ship it"); and when the user asks to comment on a task or to read its comments. A request to do work is not a request to track it: do the work, and create no task.'
+metadata:
+  internal: true
 ---
 
 # Task management
