@@ -5,13 +5,42 @@ All notable changes to otelo are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.4...main)
+## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.5...main)
+
+## [0.0.5](https://github.com/sukovanej/otelo/compare/v0.0.4...v0.0.5) - 2026-10-06
 
 ### Added
 
 - The `otelo` agent skill tells a coding agent how to investigate an app with
   the CLI: which command to run first, how to narrow a query, and how to go
   from a log line to its trace. `npx skills add sukovanej/otelo` installs it.
+- `/api/spans`, `/api/traces`, and `/api/logs` return `next`, and take it back
+  as `after` for the page after it. A page reads only its own rows. `otelo
+  spans`, `otelo traces`, and `otelo logs --raw` follow `next` until they have
+  `--limit` rows.
+- A "wait for a blocking thread" span covers the time an API request waits
+  for one of the two threads that run queries. It showed as a gap before
+  `open reader`.
+- `/api/complete` and `otelo complete` take `since`, `until`, and `context`.
+
+### Changed
+
+- Completion suggests only the fields and values that the rest of the query
+  can match in the time range. `service = "caddy" and http.route = ` lists the
+  routes of caddy, and a widget's filter lists the attributes of its metric.
+  Operators follow the type of the attribute, and an `in` list leaves out the
+  values it already has.
+- The `limit` of `/api/spans`, `/api/traces`, and `/api/logs` goes up to 1000.
+  The UI loads 200 more spans or log lines, or 50 more traces, as the end of a
+  list scrolls into reach, where it read the whole list again with twice the
+  limit.
+
+### Fixed
+
+- Reading four days of spans in pages of 10,000 grew the daemon's heap from
+  46 to 155 MB in four minutes. Pages of at most 1000 rows keep it down.
+- A chart's tooltip draws above the page and stays inside the window. A long
+  series label in a widget's right half cut off its start.
 
 ## [0.0.4](https://github.com/sukovanej/otelo/compare/v0.0.3...v0.0.4) - 2026-10-04
 
