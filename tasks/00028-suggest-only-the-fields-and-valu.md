@@ -3,6 +3,8 @@ status: in_review
 created: 2026-10-05T08:42:39Z
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/59
 ---
 # Suggest only the fields and values that the rest of the query can match
 
