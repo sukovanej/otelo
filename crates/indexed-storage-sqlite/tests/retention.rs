@@ -214,7 +214,7 @@ fn the_catalog_drops_a_key_whose_last_day_passed_the_retention() {
     );
     let log_keys = || {
         let mut keys: Vec<(String, u64)> = reader_of_the_week(directory.path())
-            .keys(Signal::Logs, false)
+            .keys(Signal::Logs, false, None)
             .into_iter()
             .map(|key_info| (key_info.key, key_info.count))
             .collect();

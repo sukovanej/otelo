@@ -25,7 +25,7 @@ pub const BASELINE_LOOKBACK_NS: i64 = 5 * 60 * 1_000_000_000;
 // A group needs every series of the metric, so the query cannot stop at the limit of the answer.
 const MAX_SERIES_IN_A_METRIC_QUERY: usize = 2_000;
 
-const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
+pub(super) const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
     record: "metric_series",
     resource: "resource",
 };

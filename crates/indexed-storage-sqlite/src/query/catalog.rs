@@ -1,15 +1,22 @@
 use otelo_indexed_storage::AttributeValue;
 use otelo_indexed_storage::query::{Attribute, AttributeKeys};
 use otelo_query::{
-    BuiltinField, Catalog, Field, FieldValues, KeyInfo, Signal, Value, ValueInfo, ValueType,
+    BuiltinField, Catalog, Expression, Field, FieldValues, KeyInfo, Signal, Value, ValueInfo,
+    ValueType,
 };
 use rusqlite::params;
 
+use super::sample::{
+    RecordSample, ValueColumn, ValuePrefixFilter, find_column_of_builtin_field_some_records_lack,
+    read_sampled_keys, read_sampled_values, read_whether_range_has_column,
+    read_whether_sample_has_column, sample_records,
+};
 use crate::Reader;
 use crate::catalog::{AttributeOwner, MAX_SPAN_NAMES_PER_DAY, json_type_from_stored_name};
+use crate::completion_cache::ContextOfRange;
 use crate::day::Day;
 
-const MAX_CATALOG_ROWS: usize = 500;
+pub const MAX_CATALOG_ROWS: usize = 500;
 
 #[derive(Clone, Copy)]
 enum ListedColumn {
@@ -84,17 +91,12 @@ impl Reader {
         let mut values = Vec::new();
         for row in rows {
             let (json, count) = row?;
-            let value = match serde_json::from_str(&json)? {
-                AttributeValue::String(text) => Value::String(text),
-                AttributeValue::Bool(flag) => Value::Bool(flag),
-                AttributeValue::Int(integer) => Value::Int(integer),
-                AttributeValue::Double(real) => Value::Float(real),
-                _ => continue,
-            };
-            values.push(ValueInfo {
-                value,
-                count: count.cast_unsigned(),
-            });
+            if let Some(value) = value_of_attribute_json(&json)? {
+                values.push(ValueInfo {
+                    value,
+                    count: count.cast_unsigned(),
+                });
+            }
         }
         let has_more_values_than_listed = self.connection().query_row(
             "SELECT coalesce(max(has_more_values_than_listed), 0)
@@ -170,25 +172,13 @@ impl Reader {
     }
 }
 
-fn read_or_warn<T: Default>(result: anyhow::Result<T>) -> T {
-    result.unwrap_or_else(|error| {
-        tracing::warn!("read the attribute catalog: {error:#}");
-        T::default()
-    })
-}
-
-impl Catalog for Reader {
-    fn keys(&self, signal: Signal, resource: bool) -> Vec<KeyInfo> {
-        let owner = if resource {
-            AttributeOwner::Resource
-        } else {
-            AttributeOwner::from(signal)
-        };
-        read_or_warn(self.read_catalog_keys(owner))
-    }
-
-    fn values(&self, signal: Signal, field: &Field) -> FieldValues {
-        read_or_warn(match field {
+impl Reader {
+    fn read_catalog_field_values(
+        &self,
+        signal: Signal,
+        field: &Field,
+    ) -> anyhow::Result<FieldValues> {
+        match field {
             Field::Attribute(key) => self.read_catalog_values(AttributeOwner::from(signal), key),
             Field::Resource(key) => self.read_catalog_values(AttributeOwner::Resource, key),
             Field::Builtin(BuiltinField::Service) => {
@@ -198,7 +188,217 @@ impl Catalog for Reader {
             Field::Builtin(BuiltinField::Name) => self.read_column_values(ListedColumn::SeriesName),
             Field::Builtin(BuiltinField::Unit) => self.read_column_values(ListedColumn::SeriesUnit),
             Field::Builtin(_) => Ok(FieldValues::default()),
-        })
+        }
+    }
+
+    fn context_of_range(&self, signal: Signal, context: &Expression) -> ContextOfRange {
+        ContextOfRange {
+            signal,
+            context: context.to_string(),
+            range: self.range(),
+        }
+    }
+
+    fn sample_context(
+        &self,
+        context_of_range: &ContextOfRange,
+        context: &Expression,
+    ) -> anyhow::Result<RecordSample> {
+        if let Some(sample) = self.completion_cache().find_sample(context_of_range) {
+            return Ok(sample);
+        }
+        let sample = sample_records(self, context_of_range.signal, context, None)?;
+        self.completion_cache()
+            .keep_sample(context_of_range.clone(), sample.clone());
+        Ok(sample)
+    }
+
+    fn read_keys_in_context(
+        &self,
+        signal: Signal,
+        resource: bool,
+        context: &Expression,
+    ) -> anyhow::Result<Vec<KeyInfo>> {
+        let owner = attribute_owner(signal, resource);
+        let context_of_range = self.context_of_range(signal, context);
+        if let Some(keys) = self.completion_cache().find_keys(&context_of_range, owner) {
+            return Ok(keys);
+        }
+        let keys = match self.sample_context(&context_of_range, context)? {
+            RecordSample::NothingFoundInTime => self.read_catalog_keys(owner)?,
+            RecordSample::EveryMatch(rowids) | RecordSample::NewestMatches(rowids) => {
+                read_sampled_keys(self, signal, resource, &rowids)?
+            }
+        };
+        self.completion_cache()
+            .keep_keys(&context_of_range, owner, keys.clone());
+        Ok(keys)
+    }
+
+    fn read_every_value_in_sample(
+        &self,
+        context_of_range: &ContextOfRange,
+        sample: &RecordSample,
+        field: &Field,
+        value_column: &ValueColumn,
+    ) -> anyhow::Result<FieldValues> {
+        let cache = self.completion_cache();
+        if let Some(values) = cache.find_values(context_of_range, field, "") {
+            return Ok(values);
+        }
+        let signal = context_of_range.signal;
+        let values = match sample {
+            RecordSample::NothingFoundInTime => self.read_catalog_field_values(signal, field)?,
+            sample => read_sampled_values(self, signal, value_column, sample)?,
+        };
+        cache.keep_values(context_of_range, field, "", values.clone());
+        Ok(values)
+    }
+
+    fn read_whether_context_has_builtin_field(
+        &self,
+        signal: Signal,
+        builtin_field: BuiltinField,
+        context: Option<&Expression>,
+    ) -> anyhow::Result<bool> {
+        let Some(column) = find_column_of_builtin_field_some_records_lack(signal, builtin_field)
+        else {
+            return Ok(true);
+        };
+        let Some(context) = context else {
+            return read_whether_range_has_column(self, signal, column);
+        };
+        let context_of_range = self.context_of_range(signal, context);
+        let cache = self.completion_cache();
+        if let Some(has_field) =
+            cache.find_whether_has_builtin_field(&context_of_range, builtin_field)
+        {
+            return Ok(has_field);
+        }
+        let has_field = match self.sample_context(&context_of_range, context)? {
+            RecordSample::NothingFoundInTime => {
+                read_whether_range_has_column(self, signal, column)?
+            }
+            RecordSample::EveryMatch(rowids) | RecordSample::NewestMatches(rowids) => {
+                read_whether_sample_has_column(self, signal, column, &rowids)?
+            }
+        };
+        cache.keep_whether_has_builtin_field(&context_of_range, builtin_field, has_field);
+        Ok(has_field)
+    }
+
+    fn read_values_in_context(
+        &self,
+        signal: Signal,
+        field: &Field,
+        lowercase_value_prefix: &str,
+        context: &Expression,
+    ) -> anyhow::Result<FieldValues> {
+        let Some(value_column) = ValueColumn::of_field(signal, field) else {
+            return Ok(FieldValues::default());
+        };
+        let context_of_range = self.context_of_range(signal, context);
+        let sample = self.sample_context(&context_of_range, context)?;
+        let values_of_context =
+            self.read_every_value_in_sample(&context_of_range, &sample, field, &value_column)?;
+        let needs_values_of_prefix = !lowercase_value_prefix.is_empty()
+            && values_of_context.has_more_values_than_listed
+            && !matches!(sample, RecordSample::NothingFoundInTime);
+        if !needs_values_of_prefix {
+            return Ok(values_of_context);
+        }
+        if let Some(values) =
+            self.completion_cache()
+                .find_values(&context_of_range, field, lowercase_value_prefix)
+        {
+            return Ok(values);
+        }
+        let sample_of_prefix = sample_records(
+            self,
+            signal,
+            context,
+            Some(&ValuePrefixFilter {
+                value_column: &value_column,
+                lowercase_value_prefix,
+            }),
+        )?;
+        let values = match sample_of_prefix {
+            RecordSample::NothingFoundInTime => values_of_context,
+            sample_of_prefix => {
+                read_sampled_values(self, signal, &value_column, &sample_of_prefix)?
+            }
+        };
+        self.completion_cache().keep_values(
+            &context_of_range,
+            field,
+            lowercase_value_prefix,
+            values.clone(),
+        );
+        Ok(values)
+    }
+}
+
+const fn attribute_owner(signal: Signal, resource: bool) -> AttributeOwner {
+    if resource {
+        AttributeOwner::Resource
+    } else {
+        match signal {
+            Signal::Logs => AttributeOwner::Log,
+            Signal::Spans => AttributeOwner::Span,
+            Signal::Metrics => AttributeOwner::MetricSeries,
+        }
+    }
+}
+
+pub fn value_of_attribute_json(json: &str) -> anyhow::Result<Option<Value>> {
+    Ok(match serde_json::from_str(json)? {
+        AttributeValue::String(text) => Some(Value::String(text)),
+        AttributeValue::Bool(flag) => Some(Value::Bool(flag)),
+        AttributeValue::Int(integer) => Some(Value::Int(integer)),
+        AttributeValue::Double(real) => Some(Value::Float(real)),
+        _ => None,
+    })
+}
+
+fn read_or_warn<T: Default>(result: anyhow::Result<T>) -> T {
+    result.unwrap_or_else(|error| {
+        tracing::warn!("read the attribute catalog: {error:#}");
+        T::default()
+    })
+}
+
+impl Catalog for Reader {
+    fn keys(&self, signal: Signal, resource: bool, context: Option<&Expression>) -> Vec<KeyInfo> {
+        read_or_warn(context.map_or_else(
+            || self.read_catalog_keys(attribute_owner(signal, resource)),
+            |context| self.read_keys_in_context(signal, resource, context),
+        ))
+    }
+
+    fn values(
+        &self,
+        signal: Signal,
+        field: &Field,
+        lowercase_value_prefix: &str,
+        context: Option<&Expression>,
+    ) -> FieldValues {
+        read_or_warn(context.map_or_else(
+            || self.read_catalog_field_values(signal, field),
+            |context| self.read_values_in_context(signal, field, lowercase_value_prefix, context),
+        ))
+    }
+
+    fn has_builtin_field(
+        &self,
+        signal: Signal,
+        builtin_field: BuiltinField,
+        context: Option<&Expression>,
+    ) -> bool {
+        self.read_whether_context_has_builtin_field(signal, builtin_field, context)
+            .unwrap_or_else(|error| {
+                tracing::warn!("read the attribute catalog: {error:#}");
+                true
+            })
     }
 }
 

@@ -66,6 +66,21 @@ pub struct CompleteArgs {
     #[arg(long)]
     cursor: Option<usize>,
 
+    /// Start of the range the suggestions come from: a duration before now,
+    /// such as 1h, 30m, or 2d, or an RFC 3339 timestamp [default: the whole
+    /// retention]
+    #[arg(long)]
+    since: Option<String>,
+
+    /// End of the range, in the form of --since [default: now]
+    #[arg(long)]
+    until: Option<String>,
+
+    /// Terms that the records the suggestions come from match too, such as
+    /// 'name = "http.server.request.duration"'
+    #[arg(long)]
+    context: Option<String>,
+
     #[command(flatten)]
     client: Client,
 }
@@ -77,6 +92,9 @@ pub fn print_completions(args: &CompleteArgs) -> anyhow::Result<()> {
             ("signal", Some(args.signal.to_string())),
             ("q", Some(args.query.clone())),
             ("cursor", args.cursor.map(|cursor| cursor.to_string())),
+            ("since", args.since.clone()),
+            ("until", args.until.clone()),
+            ("context", args.context.clone()),
         ],
     )?;
     match args.client.choose_output_format() {

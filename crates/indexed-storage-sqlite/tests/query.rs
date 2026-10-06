@@ -722,7 +722,7 @@ fn the_catalog_knows_the_attributes_and_their_values() {
     assert_eq!(resource, ["service.name", "host.name"]);
 
     let suggestions_at_end = |signal: Signal, input: &str| -> Vec<String> {
-        complete_query(input, input.len(), signal, &reader)
+        complete_query(input, input.len(), signal, &reader, None)
             .suggestions
             .into_iter()
             .map(|suggestion| suggestion.text)
@@ -755,7 +755,7 @@ fn the_catalog_knows_the_attributes_and_their_values() {
         [r#""process.memory.usage""#]
     );
 
-    let route = complete_query("http.route", 10, Signal::Logs, &reader)
+    let route = complete_query("http.route", 10, Signal::Logs, &reader, None)
         .help_for_field_at_cursor
         .unwrap();
     assert_eq!(route.value_type, ValueType::String);
@@ -768,6 +768,96 @@ fn the_catalog_knows_the_attributes_and_their_values() {
     assert_eq!(values, [r#""/login""#, r#""/matches""#, r#""/languages""#]);
     assert_eq!(route.distinct_value_count, 3);
     assert!(!route.has_more_values_than_listed);
+}
+
+#[test]
+fn the_catalog_suggests_only_what_the_context_matches() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader_around_midnight();
+    let suggestions_at_end = |signal: Signal, input: &str| -> Vec<String> {
+        complete_query(input, input.len(), signal, &reader, None)
+            .suggestions
+            .into_iter()
+            .map(|suggestion| suggestion.text)
+            .collect()
+    };
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = caddy and http.route = "),
+        [r#""/languages""#]
+    );
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = api http.route = \"/m"),
+        [r#""/matches""#]
+    );
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "http.route = \"/login\" and http."),
+        ["http.route"]
+    );
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = caddy and resource."),
+        ["resource.service.name"]
+    );
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = caddy or http.route = "),
+        [r#""/login""#, r#""/matches""#, r#""/languages""#]
+    );
+    assert!(suggestions_at_end(Signal::Logs, "service = caddy and trace").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = api and trace"),
+        ["trace_id"]
+    );
+    assert_eq!(suggestions_at_end(Signal::Logs, "trace"), ["trace_id"]);
+    assert!(suggestions_at_end(Signal::Logs, "service = nothing and http.").is_empty());
+    assert!(suggestions_at_end(Signal::Logs, "service = nothing and http.route = ").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Spans, "name = \"POST /matches\" and u"),
+        ["user.id"]
+    );
+    assert!(suggestions_at_end(Signal::Spans, "db.system = sqlite and u").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Metrics, "name = process.memory.usage and st"),
+        ["state"]
+    );
+    assert!(suggestions_at_end(Signal::Metrics, "name = nothing and st").is_empty());
+
+    let user_in_matches_input = "http.route = \"/matches\" and user.id";
+    let user_in_matches = complete_query(
+        user_in_matches_input,
+        user_in_matches_input.len(),
+        Signal::Logs,
+        &reader,
+        None,
+    )
+    .help_for_field_at_cursor
+    .unwrap();
+    assert_eq!(user_in_matches.value_type, ValueType::Int);
+    assert_eq!(
+        user_in_matches.origin,
+        FieldOrigin::Attribute { record_count: 2 }
+    );
+    let values: Vec<&str> = user_in_matches
+        .most_common_values
+        .iter()
+        .map(|value| value.text.as_str())
+        .collect();
+    assert_eq!(values, ["7", "9"]);
+    assert!(!user_in_matches.has_more_values_than_listed);
+
+    let memory_usage = parse_query("name = process.memory.usage", Signal::Metrics)
+        .unwrap()
+        .expression;
+    let states: Vec<String> = complete_query(
+        "state = ",
+        8,
+        Signal::Metrics,
+        &reader,
+        memory_usage.as_ref(),
+    )
+    .suggestions
+    .into_iter()
+    .map(|suggestion| suggestion.text)
+    .collect();
+    assert_eq!(states, [r#""used""#]);
 }
 
 #[test]
@@ -908,6 +998,87 @@ fn a_histogram_returns_the_bucket_counts_of_each_step() {
     assert_eq!(second.counts, [6, 0, 0]);
 }
 
+struct ManyLogs {
+    directory: tempfile::TempDir,
+    logged_at: i64,
+}
+
+impl ManyLogs {
+    fn write() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let logged_at = Day::today().start_at() + 60 * SECOND;
+        let mut api = records("api", &json!({"service.name": "api"}));
+        api.logs = std::iter::once(log(
+            logged_at - SECOND,
+            Severity::INFO,
+            "served",
+            &json!({"http.route": "/billing"}),
+        ))
+        .chain((0..10_000).map(|_| {
+            log(
+                logged_at,
+                Severity::INFO,
+                "served",
+                &json!({"http.route": "/matches"}),
+            )
+        }))
+        .collect();
+        write_batch(directory.path(), vec![api], &Indexes::default());
+        Self {
+            directory,
+            logged_at,
+        }
+    }
+
+    fn open_reader(&self) -> Reader {
+        Reader::open(
+            self.directory.path(),
+            TimeRange::new(self.logged_at - 60 * SECOND, self.logged_at + SECOND).unwrap(),
+        )
+        .unwrap()
+    }
+}
+
+fn list_suggestions_at_end(reader: &Reader, input: &str) -> Vec<String> {
+    complete_query(input, input.len(), Signal::Logs, reader, None)
+        .suggestions
+        .into_iter()
+        .map(|suggestion| suggestion.text)
+        .collect()
+}
+
+#[test]
+fn a_context_with_more_records_than_the_sample_finds_older_values_by_their_prefix() {
+    let many_logs = ManyLogs::write();
+    let reader = many_logs.open_reader();
+    assert_eq!(
+        list_suggestions_at_end(&reader, "service = api and http.route = "),
+        [r#""/matches""#]
+    );
+    assert_eq!(
+        list_suggestions_at_end(&reader, "service = api and http.route = \"/b"),
+        [r#""/billing""#]
+    );
+}
+
+#[test]
+fn a_context_without_a_match_within_the_time_budget_falls_back_to_the_day_catalog() {
+    let many_logs = ManyLogs::write();
+    let reader = many_logs.open_reader();
+    assert!(list_suggestions_at_end(&reader, "user.id = 1 and http.").is_empty());
+
+    let mut reader_out_of_time = many_logs.open_reader();
+    reader_out_of_time.set_completion_time_budget(Duration::ZERO);
+    assert_eq!(
+        list_suggestions_at_end(&reader_out_of_time, "user.id = 1 and http."),
+        ["http.route"]
+    );
+    assert_eq!(
+        list_suggestions_at_end(&reader_out_of_time, "user.id = 1 and http.route = "),
+        [r#""/matches""#, r#""/billing""#]
+    );
+}
+
 #[test]
 fn the_catalog_stops_keeping_values_of_a_key_with_many() {
     let directory = tempfile::tempdir().unwrap();
@@ -972,7 +1143,7 @@ fn the_catalog_stops_keeping_values_of_a_key_with_many() {
         ),
         2
     );
-    let user = complete_query("user.id", 7, Signal::Logs, &reader)
+    let user = complete_query("user.id", 7, Signal::Logs, &reader, None)
         .help_for_field_at_cursor
         .unwrap();
     assert_eq!(user.distinct_value_count, 200);
@@ -1006,7 +1177,7 @@ fn the_catalog_marks_a_key_with_a_value_too_long_to_list() {
     )
     .unwrap();
 
-    let question = complete_query("question", 8, Signal::Logs, &reader)
+    let question = complete_query("question", 8, Signal::Logs, &reader, None)
         .help_for_field_at_cursor
         .unwrap();
     assert_eq!(question.distinct_value_count, 1);

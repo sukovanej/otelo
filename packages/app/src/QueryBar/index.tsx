@@ -44,12 +44,25 @@ export default function QueryBar<V extends string, R extends ListResult<V>, S ex
             value={latest(list().draftQuery)}
             highlight={highlightQuery}
             complete={(query, cursorInChars, abort) =>
-              completeQuery(props.signal, query, cursorInChars, abort).then(
-                (completions) => completions.suggestions,
-              )
+              completeQuery(
+                {
+                  signal: props.signal,
+                  q: query,
+                  cursor: cursorInChars,
+                  since: list().since(),
+                  until: list().until(),
+                },
+                abort,
+              ).then((completions) => completions.suggestions)
             }
             help={(query, token, abort) =>
-              describeFieldOfToken(props.signal, query, token, abort).then(
+              describeFieldOfToken(
+                props.signal,
+                { since: list().since(), until: list().until() },
+                query,
+                token,
+                abort,
+              ).then(
                 (field) =>
                   field && (() => <QueryBarFieldCard field={field} signal={props.signal} />),
               )

@@ -307,6 +307,78 @@ fn the_cli_reads_what_the_api_serves() {
     stop_daemon(daemon, StopSignal::Term);
 }
 
+fn check_completions_in_a_context_and_a_range(daemon: &Daemon) {
+    let list_suggestion_texts = |args: &[&str]| -> Vec<String> {
+        let (completions, _) = run_otelo_and_parse_json(daemon, args);
+        completions["suggestions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|suggestion| suggestion["text"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert!(
+        list_suggestion_texts(&[
+            "complete",
+            "logs",
+            "user.id = ",
+            "--context",
+            "level = error"
+        ])
+        .is_empty()
+    );
+    assert_eq!(
+        list_suggestion_texts(&[
+            "complete",
+            "metrics",
+            "queue = ",
+            "--context",
+            "name = \"queue.depth\""
+        ]),
+        [r#""email""#, r#""push""#, r#""sms""#]
+    );
+    assert!(
+        list_suggestion_texts(&[
+            "complete",
+            "metrics",
+            "queue = ",
+            "--context",
+            "name = missing"
+        ])
+        .is_empty()
+    );
+    assert_eq!(
+        list_suggestion_texts(&[
+            "complete",
+            "logs",
+            "level = info and user.id = ",
+            "--since",
+            "1h"
+        ]),
+        ["7", "8"]
+    );
+    assert!(
+        list_suggestion_texts(&[
+            "complete",
+            "logs",
+            "level = info and user.id = ",
+            "--until",
+            "10m"
+        ])
+        .is_empty()
+    );
+    let broken_context = run_otelo(
+        daemon,
+        &["complete", "logs", "user.id = ", "--context", "level ="],
+    );
+    assert!(!broken_context.status.success());
+    assert!(
+        String::from_utf8_lossy(&broken_context.stderr).contains("expected a value"),
+        "{}",
+        String::from_utf8_lossy(&broken_context.stderr)
+    );
+}
+
 #[test]
 fn the_cli_completes_queries_and_lists_attributes() {
     let dir = tempfile::tempdir().unwrap();
@@ -317,7 +389,7 @@ fn the_cli_completes_queries_and_lists_attributes() {
         run_otelo_and_parse_json(&daemon, &["complete", "logs", "user.id = 7 AND http.r"]);
     assert_eq!(
         completions["suggestions"],
-        json!([{"text": "http.route", "start": 16, "end": 22, "kind": "field", "detail": "string, 2"}])
+        json!([{"text": "http.route", "start": 16, "end": 22, "kind": "field", "detail": "string, 1"}])
     );
     let (values, _) = run_otelo_and_parse_json(&daemon, &["complete", "logs", "user.id = "]);
     let texts: Vec<&str> = values["suggestions"]
@@ -327,6 +399,7 @@ fn the_cli_completes_queries_and_lists_attributes() {
         .map(|suggestion| suggestion["text"].as_str().unwrap())
         .collect();
     assert_eq!(texts, ["7", "8"]);
+    check_completions_in_a_context_and_a_range(&daemon);
     // The cursor counts characters, and a suggestion replaces the word at it.
     let (completions_at_cursor, _) = run_otelo_and_parse_json(
         &daemon,

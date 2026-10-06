@@ -1,5 +1,6 @@
 ---
 source: crates/query/tests/complete.rs
+assertion_line: 210
 expression: out
 input_file: crates/query/tests/complete/logs/values.txt
 ---
@@ -22,7 +23,6 @@ field http.route: string, attribute of 90 records
   3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
 
 > http.route in (/matches, |
-"/matches"                     value    50                 replaces "" at 25..25
 "/languages"                   value    40                 replaces "" at 25..25
 "/login"                       value    1                  replaces "" at 25..25
 field http.route: string, attribute of 90 records

@@ -39,6 +39,17 @@ pub fn parse_query(input: &str, signal: Signal) -> Result<Query, ParseError> {
     })
 }
 
+pub fn parse_conjunct_tokens(input: &str, tokens: &[Token], signal: Signal) -> Option<Expression> {
+    let mut parser = Parser {
+        input,
+        tokens,
+        next_token_index: 0,
+        signal,
+    };
+    let expression = parser.parse_not().ok()?;
+    (parser.next_token_index == tokens.len()).then_some(expression)
+}
+
 struct Parser<'a> {
     input: &'a str,
     tokens: &'a [Token],

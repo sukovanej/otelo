@@ -10,6 +10,7 @@ use otelo_indexed_storage::{
 use otelo_journal::{Hour, Journal, SyncedEndInbox};
 use otelo_query::Signal;
 
+use crate::completion_cache::CompletionCache;
 use crate::day::Day;
 use crate::indexes::Indexes;
 use crate::lock::TelemetryLock;
@@ -30,6 +31,7 @@ pub enum ReindexProgress {
 
 pub struct Sqlite {
     config: Config,
+    completion_cache: Arc<CompletionCache>,
     _telemetry_lock: TelemetryLock,
 }
 
@@ -45,6 +47,7 @@ impl Sqlite {
         TelemetryFile::open(&config.directory)?;
         Ok(Self {
             config,
+            completion_cache: Arc::default(),
             _telemetry_lock: telemetry_lock,
         })
     }
@@ -118,6 +121,7 @@ impl Storage for Sqlite {
         let mut reader = Reader::open(&self.config.directory, range)?;
         reader.set_time_limit(time_limit)?;
         reader.set_indexed_attributes(self.config.indexes.attributes());
+        reader.share_completion_cache(Arc::clone(&self.completion_cache));
         Ok(Box::new(reader))
     }
 

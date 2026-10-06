@@ -1,5 +1,6 @@
 ---
 source: crates/query/tests/complete.rs
+assertion_line: 210
 expression: out
 input_file: crates/query/tests/complete/logs/fields.txt
 ---
@@ -38,6 +39,7 @@ resource.host.name             field    string, 3          replaces "resource.h"
 attr.level                     field    string, 2          replaces "attr." at 0..5
 
 > a = 1 AND (us|
+context: a = 1
 user.id                        field    mixed, 40          replaces "us" at 11..13
 
 > not |

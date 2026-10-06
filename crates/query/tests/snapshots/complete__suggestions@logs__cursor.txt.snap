@@ -1,5 +1,6 @@
 ---
 source: crates/query/tests/complete.rs
+assertion_line: 210
 expression: out
 input_file: crates/query/tests/complete/logs/cursor.txt
 ---
@@ -7,6 +8,7 @@ input_file: crates/query/tests/complete/logs/cursor.txt
 http.route                     field    string, 90         replaces "http.route" at 0..10
 
 > user.id = 7 AND ht|tp.route = 1
+context: user.id = 7
 http.route                     field    string, 90         replaces "http.route" at 16..26
 http.response.status_code      field    int, 80            replaces "http.route" at 16..26
 

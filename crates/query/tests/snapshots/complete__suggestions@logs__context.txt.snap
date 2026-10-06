@@ -1,0 +1,118 @@
+---
+source: crates/query/tests/complete.rs
+assertion_line: 214
+expression: out
+input_file: crates/query/tests/complete/logs/context.txt
+---
+> service = "caddy" and |
+context: service = "caddy"
+service                        field    built-in, string   replaces "" at 22..22
+level                          field    built-in, string   replaces "" at 22..22
+body                           field    built-in, string   replaces "" at 22..22
+http.route                     field    string, 2          replaces "" at 22..22
+resource.service.name          field    string, 1          replaces "" at 22..22
+not                            keyword                     replaces "" at 22..22
+has(                           keyword                     replaces "" at 22..22
+(                              keyword                     replaces "" at 22..22
+
+> service = "caddy" and http.|
+context: service = "caddy"
+http.route                     field    string, 2          replaces "http." at 22..27
+
+> service = "caddy" http.route = |
+context: service = "caddy"
+"/login"                       value    2                  replaces "" at 31..31
+field http.route: string, attribute of 2 records
+  1 values: "/login" in 2
+
+> service = "caddy" or |
+service                        field    built-in, string   replaces "" at 21..21
+level                          field    built-in, string   replaces "" at 21..21
+body                           field    built-in, string   replaces "" at 21..21
+trace_id                       field    built-in, string   replaces "" at 21..21
+span_id                        field    built-in, string   replaces "" at 21..21
+http.route                     field    string, 90         replaces "" at 21..21
+http.response.status_code      field    int, 80            replaces "" at 21..21
+user.id                        field    mixed, 40          replaces "" at 21..21
+attr.level                     field    string, 2          replaces "" at 21..21
+`odd key`                      field    string, 1          replaces "" at 21..21
+resource.service.name          field    string, 4          replaces "" at 21..21
+resource.host.name             field    string, 3          replaces "" at 21..21
+not                            keyword                     replaces "" at 21..21
+has(                           keyword                     replaces "" at 21..21
+(                              keyword                     replaces "" at 21..21
+
+> (service = "caddy" or level = warn) and |
+context: service = "caddy" OR level = "warn"
+service                        field    built-in, string   replaces "" at 40..40
+level                          field    built-in, string   replaces "" at 40..40
+body                           field    built-in, string   replaces "" at 40..40
+http.route                     field    string, 2          replaces "" at 40..40
+resource.service.name          field    string, 1          replaces "" at 40..40
+not                            keyword                     replaces "" at 40..40
+has(                           keyword                     replaces "" at 40..40
+(                              keyword                     replaces "" at 40..40
+
+> service = "caddy" and (level = warn or |
+context: service = "caddy"
+service                        field    built-in, string   replaces "" at 39..39
+level                          field    built-in, string   replaces "" at 39..39
+body                           field    built-in, string   replaces "" at 39..39
+http.route                     field    string, 2          replaces "" at 39..39
+resource.service.name          field    string, 1          replaces "" at 39..39
+not                            keyword                     replaces "" at 39..39
+has(                           keyword                     replaces "" at 39..39
+(                              keyword                     replaces "" at 39..39
+
+> service = "caddy" and (level = warn |
+and                            keyword                     replaces "" at 36..36
+or                             keyword                     replaces "" at 36..36
+)                              keyword                     replaces "" at 36..36
+
+> service = "caddy" and not (level = warn and |
+context: service = "caddy" AND level = "warn"
+service                        field    built-in, string   replaces "" at 44..44
+level                          field    built-in, string   replaces "" at 44..44
+body                           field    built-in, string   replaces "" at 44..44
+http.route                     field    string, 2          replaces "" at 44..44
+resource.service.name          field    string, 1          replaces "" at 44..44
+not                            keyword                     replaces "" at 44..44
+has(                           keyword                     replaces "" at 44..44
+(                              keyword                     replaces "" at 44..44
+
+> http.route = "/matches" and ht|tp.route = 1 and service = "caddy"
+context: http.route = "/matches" AND service = "caddy"
+http.route                     field    string, 2          replaces "http.route" at 28..38
+
+> service = |"caddy" and level = warn
+context: level = "warn"
+"mudro"                        value    9                  replaces "" at 10..10
+"caddy"                        value    2                  replaces "" at 10..10
+field service: string, built-in: The service that sent it, taken from service.name of its resource.
+  2 values: "mudro" in 9, "caddy" in 2
+
+> user.id = and service = "caddy" and |
+context: service = "caddy"
+service                        field    built-in, string   replaces "" at 36..36
+level                          field    built-in, string   replaces "" at 36..36
+body                           field    built-in, string   replaces "" at 36..36
+http.route                     field    string, 2          replaces "" at 36..36
+resource.service.name          field    string, 1          replaces "" at 36..36
+not                            keyword                     replaces "" at 36..36
+has(                           keyword                     replaces "" at 36..36
+(                              keyword                     replaces "" at 36..36
+
+> level = warn and http.route in ("/matches", |
+context: level = "warn"
+"/languages"                   value    40                 replaces "" at 44..44
+"/login"                       value    1                  replaces "" at 44..44
+field http.route: string, attribute of 90 records
+  3 values: "/matches" in 50, "/languages" in 40, "/login" in 1
+
+> service = "caddy" and t|
+context: service = "caddy"
+(none)
+
+> level = warn and t|
+context: level = "warn"
+trace_id                       field    built-in, string   replaces "t" at 17..18

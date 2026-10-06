@@ -154,16 +154,11 @@ export const getAttributeKeys = (signal: Signal, abortSignal?: AbortSignal) =>
     abortSignal,
   );
 
-export const completeQuery = (
-  signal: Signal,
-  query: string,
-  cursorInChars: number,
-  abortSignal?: AbortSignal,
-) =>
+export const completeQuery = (query: GetQuery<"/api/complete">, signal?: AbortSignal) =>
   requestJson<OkBody<"/api/complete", "get">>(
     "GET",
-    `/api/complete${toQueryString({ signal, q: query, cursor: cursorInChars })}`,
-    abortSignal,
+    `/api/complete${toQueryString(query)}`,
+    signal,
   );
 
 export const listDashboards = (signal?: AbortSignal) =>

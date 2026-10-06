@@ -1,0 +1,46 @@
+---
+source: crates/query/tests/complete.rs
+assertion_line: 210
+expression: out
+input_file: crates/query/tests/complete/logs/typed-operators.txt
+---
+> http.response.status_code |
+=                              operator                    replaces "" at 26..26
+!=                             operator                    replaces "" at 26..26
+<                              operator                    replaces "" at 26..26
+<=                             operator                    replaces "" at 26..26
+>                              operator                    replaces "" at 26..26
+>=                             operator                    replaces "" at 26..26
+in                             operator                    replaces "" at 26..26
+field http.response.status_code: int, attribute of 80 records
+  2 values: 200 in 70, 500 in 10
+
+> user.id |
+=                              operator                    replaces "" at 8..8
+!=                             operator                    replaces "" at 8..8
+<                              operator                    replaces "" at 8..8
+<=                             operator                    replaces "" at 8..8
+>                              operator                    replaces "" at 8..8
+>=                             operator                    replaces "" at 8..8
+~                              operator                    replaces "" at 8..8
+in                             operator                    replaces "" at 8..8
+field user.id: mixed, attribute of 40 records
+  2+ values: 7 in 30, "8" in 10
+
+> `odd key` |
+=                              operator                    replaces "" at 10..10
+!=                             operator                    replaces "" at 10..10
+~                              operator                    replaces "" at 10..10
+in                             operator                    replaces "" at 10..10
+field `odd key`: string, attribute of 1 records
+  0 values: 
+
+> missing |
+=                              operator                    replaces "" at 8..8
+!=                             operator                    replaces "" at 8..8
+<                              operator                    replaces "" at 8..8
+<=                             operator                    replaces "" at 8..8
+>                              operator                    replaces "" at 8..8
+>=                             operator                    replaces "" at 8..8
+~                              operator                    replaces "" at 8..8
+in                             operator                    replaces "" at 8..8

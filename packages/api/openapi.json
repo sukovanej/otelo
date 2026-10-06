@@ -50,7 +50,7 @@
     },
     "/api/complete": {
       "get": {
-        "summary": "Suggests the fields, operators, values, and keywords that can go at the\ncursor of a query, from the attributes and values of the retention, and\ndescribes the field of the term the cursor is in.",
+        "summary": "Suggests the fields, operators, values, and keywords that can go at the\ncursor of a query, and describes the field of the term the cursor is in.\nThe fields and the values come from the records of the range that match\nthe context: the other terms joined by AND with the term at the cursor,\nand `context`. When those records are many, from the newest of them.",
         "operationId": "complete_query",
         "parameters": [
           {
@@ -78,6 +78,33 @@
             "schema": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "The start of the range the suggestions come from: a duration before\nnow, such as `1h`, or an RFC 3339 timestamp. The whole retention when\nmissing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "description": "The end of the range, in the form of `since`. Now when missing.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "context",
+            "in": "query",
+            "description": "Terms that the records the suggestions come from match too, besides\nthe terms of `q` joined by AND with the one at the cursor, such as\n`name = \"http.server.request.duration\"`.",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],

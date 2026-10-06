@@ -31,8 +31,10 @@ export interface paths {
         };
         /**
          * Suggests the fields, operators, values, and keywords that can go at the
-         *     cursor of a query, from the attributes and values of the retention, and
-         *     describes the field of the term the cursor is in.
+         *     cursor of a query, and describes the field of the term the cursor is in.
+         *     The fields and the values come from the records of the range that match
+         *     the context: the other terms joined by AND with the term at the cursor,
+         *     and `context`. When those records are many, from the newest of them.
          */
         get: operations["complete_query"];
         put?: never;
@@ -1335,6 +1337,20 @@ export interface operations {
                  *     query when missing.
                  */
                 cursor?: number;
+                /**
+                 * @description The start of the range the suggestions come from: a duration before
+                 *     now, such as `1h`, or an RFC 3339 timestamp. The whole retention when
+                 *     missing.
+                 */
+                since?: string;
+                /** @description The end of the range, in the form of `since`. Now when missing. */
+                until?: string;
+                /**
+                 * @description Terms that the records the suggestions come from match too, besides
+                 *     the terms of `q` joined by AND with the one at the cursor, such as
+                 *     `name = "http.server.request.duration"`.
+                 */
+                context?: string;
             };
             header?: never;
             path?: never;

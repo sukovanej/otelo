@@ -1,4 +1,5 @@
 mod complete;
+mod context;
 mod highlight;
 mod lexer;
 mod parser;
@@ -12,6 +13,7 @@ pub use complete::{
     Catalog, Completion, FieldHelp, FieldOrigin, FieldValues, HelpValue, KeyInfo, MAX_HELP_VALUES,
     NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete_query,
 };
+pub use context::find_context_of_cursor;
 pub use highlight::{Highlight, HighlightKind, highlight_tokens};
 pub use parser::{ParseError, parse_query, resolve_field};
 
@@ -175,6 +177,12 @@ impl BuiltinField {
     #[must_use]
     pub const fn is_text(self) -> bool {
         matches!(self, Self::Body | Self::Name | Self::Service)
+    }
+
+    // A log written outside a span has no trace or span.
+    #[must_use]
+    pub const fn is_on_every_record(self, signal: Signal) -> bool {
+        !matches!((self, signal), (Self::TraceId | Self::SpanId, Signal::Logs))
     }
 }
 
