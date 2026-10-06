@@ -1,6 +1,8 @@
 ---
 name: sql
 description: How otelo writes SQL. A column has the name of the Rust field that holds it, a value is a bound parameter, and the schema changes freely while otelo is in development. Invoke before creating or editing any .sql file under crates/, before writing SQL in a .rs file, and before reviewing either.
+metadata:
+  internal: true
 ---
 
 # Writing the SQL

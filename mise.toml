@@ -36,6 +36,12 @@ run = "pnpm exec vite"
 description = "Run the daemon on :7070 without a password, with its data in target/dev, where it sends its own logs and traces"
 run = "cargo run -q -- serve --data target/dev --unsafe-no-auth"
 
+# `npx skills update` skips a skill installed from a local path, so a change to skills/ reaches
+# this checkout only through a new `add`.
+[tasks.skills]
+description = "Install the skills of skills/ into this checkout for Claude Code and Codex"
+run = "npx -y skills add . -a claude-code -a codex -y"
+
 [tasks."api:generate"]
 description = "Write the OpenAPI spec of the daemon to packages/api, and the TypeScript types of it"
 depends = ["web:install"]

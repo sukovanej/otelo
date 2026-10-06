@@ -1,6 +1,8 @@
 ---
 name: frontend-typescript
 description: How otelo writes frontend TypeScript on Solid 2. Where a component lives, what its file is called, what it exports, the order inside the file, how its types are shaped, how everything is named, and where Solid 2 differs from Solid 1. Invoke before creating or editing any .ts or .tsx file under packages/, and before reviewing frontend code.
+metadata:
+  internal: true
 ---
 
 # Writing the frontend TypeScript
