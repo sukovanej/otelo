@@ -34,6 +34,23 @@ pub struct TableAliases {
     pub resource: &'static str,
 }
 
+pub fn builtin_column(aliases: TableAliases, builtin_field: BuiltinField) -> String {
+    let (record, resource) = (aliases.record, aliases.resource);
+    match builtin_field {
+        BuiltinField::Service => format!("{resource}.service"),
+        BuiltinField::Level => format!("{record}.severity_number"),
+        BuiltinField::Body => format!("{record}.body"),
+        BuiltinField::TraceId => format!("{record}.trace_id"),
+        BuiltinField::SpanId => format!("{record}.span_id"),
+        BuiltinField::Name => format!("{record}.name"),
+        BuiltinField::Kind => format!("{record}.kind"),
+        BuiltinField::Status | BuiltinField::Error => format!("{record}.status_code"),
+        BuiltinField::Duration => format!("{record}.duration_ns"),
+        BuiltinField::Root => format!("{record}.parent_span_id"),
+        BuiltinField::Unit => format!("{record}.unit"),
+    }
+}
+
 pub fn compile_query(
     query: &Query,
     aliases: TableAliases,
@@ -200,7 +217,7 @@ impl Compiler<'_> {
                 ));
             }
             Field::Builtin(builtin_field) if builtin_field.is_text() => {
-                self.builtin_column(*builtin_field)
+                builtin_column(self.aliases, *builtin_field)
             }
             Field::Builtin(builtin_field) => {
                 return invalid_query(format!(
@@ -214,30 +231,13 @@ impl Compiler<'_> {
         Ok(format!("instr({column}, {param}) > 0"))
     }
 
-    fn builtin_column(&self, builtin_field: BuiltinField) -> String {
-        let (record, resource) = (self.aliases.record, self.aliases.resource);
-        match builtin_field {
-            BuiltinField::Service => format!("{resource}.service"),
-            BuiltinField::Level => format!("{record}.severity_number"),
-            BuiltinField::Body => format!("{record}.body"),
-            BuiltinField::TraceId => format!("{record}.trace_id"),
-            BuiltinField::SpanId => format!("{record}.span_id"),
-            BuiltinField::Name => format!("{record}.name"),
-            BuiltinField::Kind => format!("{record}.kind"),
-            BuiltinField::Status | BuiltinField::Error => format!("{record}.status_code"),
-            BuiltinField::Duration => format!("{record}.duration_ns"),
-            BuiltinField::Root => format!("{record}.parent_span_id"),
-            BuiltinField::Unit => format!("{record}.unit"),
-        }
-    }
-
     fn compile_builtin_comparison(
         &mut self,
         builtin_field: BuiltinField,
         operator: Operator,
         value: &Value,
     ) -> Result<String> {
-        let column = self.builtin_column(builtin_field);
+        let column = builtin_column(self.aliases, builtin_field);
         let name = builtin_field.name();
         let ensure_equality_operator = |operator: Operator| -> Result<()> {
             if matches!(operator, Operator::Eq | Operator::Ne) {

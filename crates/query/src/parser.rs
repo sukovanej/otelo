@@ -248,19 +248,28 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value(&mut self) -> Result<Value, ParseError> {
-        let value = match self.peek_token().map(|token| &token.token_type) {
-            Some(TokenType::Quoted { text, closed: true }) => Value::String(text.clone()),
-            Some(TokenType::Word(word)) if word == "true" => Value::Bool(true),
-            Some(TokenType::Word(word)) if word == "false" => Value::Bool(false),
-            Some(TokenType::Word(word)) if !is_keyword(word) => Value::String(word.clone()),
-            Some(TokenType::Int(integer)) => Value::Int(*integer),
-            Some(TokenType::Float(float)) => Value::Float(*float),
-            Some(TokenType::DurationNanos(nanos)) => Value::Duration(*nanos),
-            _ => return Err(self.error_at_next_token("expected a value")),
+        let Some(value) = self
+            .peek_token()
+            .and_then(|token| value_of_token(&token.token_type))
+        else {
+            return Err(self.error_at_next_token("expected a value"));
         };
         self.take_token();
         Ok(value)
     }
+}
+
+pub fn value_of_token(token_type: &TokenType) -> Option<Value> {
+    Some(match token_type {
+        TokenType::Quoted { text, closed: true } => Value::String(text.clone()),
+        TokenType::Word(word) if word == "true" => Value::Bool(true),
+        TokenType::Word(word) if word == "false" => Value::Bool(false),
+        TokenType::Word(word) if !is_keyword(word) => Value::String(word.clone()),
+        TokenType::Int(integer) => Value::Int(*integer),
+        TokenType::Float(float) => Value::Float(*float),
+        TokenType::DurationNanos(nanos) => Value::Duration(*nanos),
+        _ => return None,
+    })
 }
 
 pub fn resolve_field(signal: Signal, word: &str) -> Field {

@@ -21,7 +21,7 @@ pub struct CompletionCache {
 #[derive(Clone)]
 pub struct ContextOfRange {
     pub signal: Signal,
-    pub context: String,
+    pub context_text: String,
     pub range: TimeRange,
 }
 
@@ -31,7 +31,7 @@ impl ContextOfRange {
         let is_within_max_age =
             |shift_ns: u64| u128::from(shift_ns) <= MAX_AGE_OF_CACHED_CONTEXT.as_nanos();
         self.signal == other.signal
-            && self.context == other.context
+            && self.context_text == other.context_text
             && is_within_max_age(self.range.start_at().abs_diff(other.range.start_at()))
             && is_within_max_age(self.range.end_at().abs_diff(other.range.end_at()))
     }

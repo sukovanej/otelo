@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
+use otelo_indexed_storage::query::Resolution;
 use otelo_query::{
     BuiltinField, Expression, Field, FieldValues, KeyInfo, Query, Signal, ValueInfo, ValueType,
 };
+use serde::Serialize;
 
 use super::catalog::{MAX_CATALOG_ROWS, value_of_attribute_json};
-use super::compile::compile_query;
+use super::compile::{TableAliases, builtin_column, compile_query};
 use super::logs::compile_log_query;
-use super::metrics::SERIES_TABLE_ALIASES;
+use super::metrics::{SERIES_TABLE_ALIASES, where_series_have_points_in_range};
 use super::traces::compile_span_query;
 use super::{WhereClause, row_limit_with_one_more};
 use crate::Reader;
@@ -18,10 +20,14 @@ use crate::reader::timed_out;
 // attributes takes about 50 ms.
 pub const MAX_SAMPLED_RECORDS: usize = 10_000;
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(transparent)]
+pub struct SampledRowid(i64);
+
 #[derive(Clone, Debug)]
 pub enum RecordSample {
-    EveryMatch(Vec<i64>),
-    NewestMatches(Vec<i64>),
+    EveryMatch(Vec<SampledRowid>),
+    NewestMatches(Vec<SampledRowid>),
     NothingFoundInTime,
 }
 
@@ -55,7 +61,7 @@ const fn sampled_table_of_signal(signal: Signal) -> SampledTable {
 pub enum ValueColumn {
     RecordAttribute(String),
     ResourceAttribute(String),
-    Column(&'static str),
+    BuiltinColumn(String),
 }
 
 impl ValueColumn {
@@ -63,36 +69,36 @@ impl ValueColumn {
         Some(match (field, signal) {
             (Field::Attribute(key), _) if !key.contains('"') => Self::RecordAttribute(key.clone()),
             (Field::Resource(key), _) if !key.contains('"') => Self::ResourceAttribute(key.clone()),
-            (Field::Builtin(BuiltinField::Service), _) => Self::Column("resource.service"),
-            (Field::Builtin(BuiltinField::Name), Signal::Spans) => Self::Column("span.name"),
-            (Field::Builtin(BuiltinField::Name), Signal::Metrics) => {
-                Self::Column("metric_series.name")
-            }
-            (Field::Builtin(BuiltinField::Unit), Signal::Metrics) => {
-                Self::Column("metric_series.unit")
-            }
+            (
+                Field::Builtin(
+                    builtin_field @ (BuiltinField::Service
+                    | BuiltinField::Name
+                    | BuiltinField::Unit),
+                ),
+                _,
+            ) => Self::BuiltinColumn(column_of_builtin_field(signal, *builtin_field)),
             _ => return None,
         })
     }
 
-    fn json_sql(&self, record: &str) -> String {
+    fn sql_reading_json(&self, record: &str) -> String {
         match self {
             Self::RecordAttribute(_) => format!("{record}.attributes -> :value_path"),
             Self::ResourceAttribute(_) => "resource.attributes -> :value_path".into(),
-            Self::Column(column) => (*column).into(),
+            Self::BuiltinColumn(column) => column.clone(),
         }
     }
 
-    fn text_sql(&self, record: &str) -> String {
+    fn sql_reading_text(&self, record: &str) -> String {
         match self {
             Self::RecordAttribute(_) => format!("{record}.attributes ->> :value_path"),
             Self::ResourceAttribute(_) => "resource.attributes ->> :value_path".into(),
-            Self::Column(column) => (*column).into(),
+            Self::BuiltinColumn(column) => column.clone(),
         }
     }
 
     const fn holds_json(&self) -> bool {
-        !matches!(self, Self::Column(_))
+        !matches!(self, Self::BuiltinColumn(_))
     }
 
     fn push_path_param(&self, where_clause: &mut WhereClause) {
@@ -127,7 +133,7 @@ pub fn sample_records(
         where_clause.push_condition_with_param(
             &format!(
                 "{} LIKE :value_prefix ESCAPE '\\'",
-                value_column.text_sql(record)
+                value_column.sql_reading_text(record)
             ),
             ":value_prefix",
             format!("{}%", escape_like_pattern(lowercase_value_prefix)),
@@ -147,7 +153,7 @@ pub fn sample_records(
     let mut rowids = Vec::new();
     let scanned = reader.run_within_completion_time_budget(|| {
         reader.scan_rows(&sql, &where_clause, |row| {
-            rowids.push(row.get(0)?);
+            rowids.push(SampledRowid(row.get(0)?));
             Ok(ControlFlow::Continue(()))
         })
     })?;
@@ -173,17 +179,7 @@ fn compile_context(
         Signal::Logs => compile_log_query(reader, &query)?.0,
         Signal::Spans => compile_span_query(reader, &query)?.0,
         Signal::Metrics => {
-            let mut where_clause = WhereClause::new();
-            where_clause.push_condition(
-                "EXISTS (SELECT 1
-                         FROM metric_points metric_point
-                         WHERE metric_point.metric_series_id = metric_series.id
-                           AND metric_point.recorded_at >= :since
-                           AND metric_point.recorded_at < :until)"
-                    .into(),
-            );
-            where_clause.push_param(":since", reader.range().start_at());
-            where_clause.push_param(":until", reader.range().end_at());
+            let mut where_clause = where_series_have_points_in_range(reader, Resolution::Raw);
             compile_query(
                 &query,
                 SERIES_TABLE_ALIASES,
@@ -207,7 +203,7 @@ fn escape_like_pattern(text: &str) -> String {
     escaped
 }
 
-fn where_rowids_are(rowids: &[i64]) -> anyhow::Result<WhereClause> {
+fn where_rowids_are(rowids: &[SampledRowid]) -> anyhow::Result<WhereClause> {
     let mut where_clause = WhereClause::new();
     where_clause.push_param(":rowids", serde_json::to_string(rowids)?);
     Ok(where_clause)
@@ -217,7 +213,7 @@ pub fn read_sampled_keys(
     reader: &Reader,
     signal: Signal,
     resource: bool,
-    rowids: &[i64],
+    rowids: &[SampledRowid],
 ) -> anyhow::Result<Vec<KeyInfo>> {
     let SampledTable {
         table_with_alias,
@@ -315,7 +311,7 @@ pub fn read_sampled_values(
          HAVING field_value IS NOT NULL
          ORDER BY record_count DESC, field_value
          LIMIT :limit",
-        value_column.json_sql(record)
+        value_column.sql_reading_json(record)
     );
     let mut where_clause = where_rowids_are(rowids)?;
     value_column.push_path_param(&mut where_clause);
@@ -345,22 +341,19 @@ pub fn read_sampled_values(
     })
 }
 
-pub const fn find_column_of_builtin_field_some_records_lack(
-    signal: Signal,
-    builtin_field: BuiltinField,
-) -> Option<&'static str> {
-    match (builtin_field, signal) {
-        (BuiltinField::TraceId, Signal::Logs) => Some("log.trace_id"),
-        (BuiltinField::SpanId, Signal::Logs) => Some("log.span_id"),
-        _ => None,
-    }
+pub fn column_of_builtin_field(signal: Signal, builtin_field: BuiltinField) -> String {
+    let aliases = TableAliases {
+        record: sampled_table_of_signal(signal).record,
+        resource: "resource",
+    };
+    builtin_column(aliases, builtin_field)
 }
 
 pub fn read_whether_sample_has_column(
     reader: &Reader,
     signal: Signal,
     column: &str,
-    rowids: &[i64],
+    rowids: &[SampledRowid],
 ) -> anyhow::Result<bool> {
     let SampledTable {
         table_with_alias,

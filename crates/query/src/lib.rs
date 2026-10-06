@@ -13,7 +13,6 @@ pub use complete::{
     Catalog, Completion, FieldHelp, FieldOrigin, FieldValues, HelpValue, KeyInfo, MAX_HELP_VALUES,
     NoCatalog, Suggestion, SuggestionKind, ValueInfo, complete_query,
 };
-pub use context::find_context_of_cursor;
 pub use highlight::{Highlight, HighlightKind, highlight_tokens};
 pub use parser::{ParseError, parse_query, resolve_field};
 

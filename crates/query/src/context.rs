@@ -33,7 +33,7 @@ struct Group {
 }
 
 struct Branch {
-    start: usize,
+    start_byte: usize,
     conjuncts: Vec<Conjunct>,
 }
 
@@ -49,7 +49,7 @@ impl Group {
             .branches
             .iter()
             .rev()
-            .find(|branch| branch.start <= cursor)
+            .find(|branch| branch.start_byte <= cursor)
         else {
             return;
         };
@@ -93,9 +93,9 @@ impl ConjunctReader<'_> {
         skipped
     }
 
-    fn read_group(&mut self, start: usize, inside_parentheses: bool) -> Group {
+    fn read_group(&mut self, start_byte: usize, inside_parentheses: bool) -> Group {
         let mut branches = vec![Branch {
-            start,
+            start_byte,
             conjuncts: Vec::new(),
         }];
         while let Some(token) = self.tokens.get(self.next_token_index) {
@@ -104,7 +104,7 @@ impl ConjunctReader<'_> {
                 TokenType::Word(word) if word.eq_ignore_ascii_case("or") => {
                     self.next_token_index += 1;
                     branches.push(Branch {
-                        start: token.byte_range.end,
+                        start_byte: token.byte_range.end,
                         conjuncts: Vec::new(),
                     });
                 }

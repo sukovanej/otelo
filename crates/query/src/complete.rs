@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::context::{find_context_of_cursor, join_with_and};
 use crate::lexer::{Token, TokenType, is_keyword, lex_tokens, needs_no_backticks};
-use crate::parser::resolve_field;
+use crate::parser::{resolve_field, value_of_token};
 use crate::{BuiltinField, Expression, Field, Operator, Signal, Value, ValueType, quote_string};
 
 const MAX_SUGGESTIONS: usize = 50;
@@ -490,19 +490,6 @@ fn lowercase_unquoted_text(value: &Value) -> String {
         Value::String(text) => text.to_lowercase(),
         value => value_as_written(value).to_lowercase(),
     }
-}
-
-fn value_of_token(token_type: &TokenType) -> Option<Value> {
-    Some(match token_type {
-        TokenType::Quoted { text, closed: true } => Value::String(text.clone()),
-        TokenType::Word(word) if word == "true" => Value::Bool(true),
-        TokenType::Word(word) if word == "false" => Value::Bool(false),
-        TokenType::Word(word) if !is_keyword(word) => Value::String(word.clone()),
-        TokenType::Int(integer) => Value::Int(*integer),
-        TokenType::Float(float) => Value::Float(*float),
-        TokenType::DurationNanos(nanos) => Value::Duration(*nanos),
-        _ => return None,
-    })
 }
 
 fn field_of_open_in_list(tokens: &[Token], signal: Signal) -> Option<Field> {

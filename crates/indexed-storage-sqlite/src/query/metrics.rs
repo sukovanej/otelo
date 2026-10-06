@@ -136,13 +136,10 @@ const fn round_step_up_to_whole_summaries(step_ns: i64, table: SummaryTable) -> 
     (step_ns + table.step_ns() - 1).div_euclid(table.step_ns()) * table.step_ns()
 }
 
-pub(super) fn list_metrics(
+pub(super) fn where_series_have_points_in_range(
     reader: &Reader,
-    query: &Query,
     resolution: Resolution,
-    limit: usize,
-) -> anyhow::Result<MetricList> {
-    ensure_metrics_query(query)?;
+) -> WhereClause {
     let summary_table = SummaryTable::from_resolution(resolution);
     let (points_table, point_alias, instant_column) = summary_table
         .map_or(("metric_points", "metric_point", "recorded_at"), |table| {
@@ -164,6 +161,18 @@ pub(super) fn list_metrics(
         ),
     );
     where_clause.push_param(":until", reader.range().end_at());
+    where_clause
+}
+
+pub(super) fn list_metrics(
+    reader: &Reader,
+    query: &Query,
+    resolution: Resolution,
+    limit: usize,
+) -> anyhow::Result<MetricList> {
+    ensure_metrics_query(query)?;
+    let summary_table = SummaryTable::from_resolution(resolution);
+    let mut where_clause = where_series_have_points_in_range(reader, resolution);
     compile_query(
         query,
         SERIES_TABLE_ALIASES,

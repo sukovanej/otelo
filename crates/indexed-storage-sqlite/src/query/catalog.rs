@@ -7,9 +7,9 @@ use otelo_query::{
 use rusqlite::params;
 
 use super::sample::{
-    RecordSample, ValueColumn, ValuePrefixFilter, find_column_of_builtin_field_some_records_lack,
-    read_sampled_keys, read_sampled_values, read_whether_range_has_column,
-    read_whether_sample_has_column, sample_records,
+    RecordSample, ValueColumn, ValuePrefixFilter, column_of_builtin_field, read_sampled_keys,
+    read_sampled_values, read_whether_range_has_column, read_whether_sample_has_column,
+    sample_records,
 };
 use crate::Reader;
 use crate::catalog::{AttributeOwner, MAX_SPAN_NAMES_PER_DAY, json_type_from_stored_name};
@@ -194,7 +194,7 @@ impl Reader {
     fn context_of_range(&self, signal: Signal, context: &Expression) -> ContextOfRange {
         ContextOfRange {
             signal,
-            context: context.to_string(),
+            context_text: context.to_string(),
             range: self.range(),
         }
     }
@@ -235,7 +235,7 @@ impl Reader {
         Ok(keys)
     }
 
-    fn read_every_value_in_sample(
+    fn read_values_of_context(
         &self,
         context_of_range: &ContextOfRange,
         sample: &RecordSample,
@@ -261,12 +261,12 @@ impl Reader {
         builtin_field: BuiltinField,
         context: Option<&Expression>,
     ) -> anyhow::Result<bool> {
-        let Some(column) = find_column_of_builtin_field_some_records_lack(signal, builtin_field)
-        else {
+        if builtin_field.is_on_every_record(signal) {
             return Ok(true);
-        };
+        }
+        let column = column_of_builtin_field(signal, builtin_field);
         let Some(context) = context else {
-            return read_whether_range_has_column(self, signal, column);
+            return read_whether_range_has_column(self, signal, &column);
         };
         let context_of_range = self.context_of_range(signal, context);
         let cache = self.completion_cache();
@@ -277,10 +277,10 @@ impl Reader {
         }
         let has_field = match self.sample_context(&context_of_range, context)? {
             RecordSample::NothingFoundInTime => {
-                read_whether_range_has_column(self, signal, column)?
+                read_whether_range_has_column(self, signal, &column)?
             }
             RecordSample::EveryMatch(rowids) | RecordSample::NewestMatches(rowids) => {
-                read_whether_sample_has_column(self, signal, column, &rowids)?
+                read_whether_sample_has_column(self, signal, &column, &rowids)?
             }
         };
         cache.keep_whether_has_builtin_field(&context_of_range, builtin_field, has_field);
@@ -300,7 +300,7 @@ impl Reader {
         let context_of_range = self.context_of_range(signal, context);
         let sample = self.sample_context(&context_of_range, context)?;
         let values_of_context =
-            self.read_every_value_in_sample(&context_of_range, &sample, field, &value_column)?;
+            self.read_values_of_context(&context_of_range, &sample, field, &value_column)?;
         let needs_values_of_prefix = !lowercase_value_prefix.is_empty()
             && values_of_context.has_more_values_than_listed
             && !matches!(sample, RecordSample::NothingFoundInTime);
@@ -338,15 +338,11 @@ impl Reader {
     }
 }
 
-const fn attribute_owner(signal: Signal, resource: bool) -> AttributeOwner {
+fn attribute_owner(signal: Signal, resource: bool) -> AttributeOwner {
     if resource {
         AttributeOwner::Resource
     } else {
-        match signal {
-            Signal::Logs => AttributeOwner::Log,
-            Signal::Spans => AttributeOwner::Span,
-            Signal::Metrics => AttributeOwner::MetricSeries,
-        }
+        AttributeOwner::from(signal)
     }
 }
 
