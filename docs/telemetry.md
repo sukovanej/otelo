@@ -212,6 +212,7 @@ erDiagram
 - A name says what a table or a column holds without its comment, and takes the OpenTelemetry name where OpenTelemetry has one: `severity_number`, `status_code`, `aggregation_temporality`.
 - `metric_points`, the two summary tables, and the three count tables are `WITHOUT ROWID`. A trigger keeps `log_body_search` in step with `logs`, on an insert and on a delete.
 - The file is made with `auto_vacuum = INCREMENTAL`, so it can give pages back to the disk.
+- `resources` has an index on `service`, and `logs` and `spans` one on `resource_id` and the time. A query of one service finds its resources first and reads only their rows of the range. Without the index on `service`, SQLite reads every row of the range through the index on the time, and checks the service of each.
 
 The `attributes` columns hold JSON objects. In Rust they are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. The JSON of the columns is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes.
 
