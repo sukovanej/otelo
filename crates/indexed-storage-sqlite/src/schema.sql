@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS resources (
   -- A JSON object.
   attributes TEXT NOT NULL
 );
+-- Without it SQLite reads every span or log of the range to find those of one service.
+CREATE INDEX IF NOT EXISTS resources_service ON resources (service);
 
 CREATE TABLE IF NOT EXISTS logs (
   -- Unix nanoseconds.
