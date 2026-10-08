@@ -74,6 +74,7 @@ const HOUR_NS: i64 = 3_600_000_000_000;
 // SpanGroupRank schemas, and no body holds one, so only this list puts them in the spec.
 #[derive(OpenApi)]
 #[openapi(
+    version = "3.2.0",
     info(
         title = "otelo",
         description = "Query the logs, traces, and metrics that otelo keeps. Every path but \

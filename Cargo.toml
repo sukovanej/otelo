@@ -12,14 +12,14 @@ repository = "https://github.com/sukovanej/otelo"
 [workspace.dependencies]
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "matched-path", "query", "tokio"] }
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
 crc32c = "0.6.8"
 data-encoding = "2.11"
 flate2 = "1"
 getrandom = "0.4"
-insta = { version = "1.48", features = ["glob"] }
-jiff = "0.2.37"
+insta = { version = "1.49", features = ["glob"] }
+jiff = "0.2.38"
 keyring = "4.2.0"
 opentelemetry = "0.33"
 opentelemetry-appender-tracing = "0.33"
@@ -30,8 +30,8 @@ prost = "0.14"
 rpassword = "7.5.4"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 semver = "1.0.28"
-rust-embed = { version = "8.12.0", features = ["mime-guess"] }
-serde = { version = "1.0.228", features = ["derive"] }
+rust-embed = { version = "8.13.0", features = ["mime-guess"] }
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"
 tar = "0.4"
@@ -47,17 +47,17 @@ otelo-indexed-storage = { path = "crates/indexed-storage" }
 otelo-indexed-storage-sqlite = { path = "crates/indexed-storage-sqlite" }
 otelo-update = { path = "crates/update" }
 tempfile = "3.27.0"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-util = "0.7.19"
 tonic = { version = "0.14", default-features = false, features = ["server", "router", "gzip"] }
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-ureq = { version = "3.1.4", features = ["json"] }
-utoipa = "5.5.0"
-utoipa-axum = "0.2.0"
+ureq = { version = "3.4.2", features = ["json"] }
+utoipa = "6.0.0"
+utoipa-axum = "0.3.0"
 zstd = "0.14.0"
-twox-hash = { version = "2.1.2", default-features = false, features = ["xxhash3_64"] }
+twox-hash = { version = "2.1.5", default-features = false, features = ["xxhash3_64"] }
 
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }

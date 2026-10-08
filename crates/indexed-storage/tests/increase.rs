@@ -77,7 +77,10 @@ fn the_rate_divides_by_the_time_between_the_points_not_by_the_step() {
 
 #[test]
 fn a_step_with_only_the_first_point_has_no_rate() {
-    assert!(increases(Temporality::Cumulative, 60, &[(0, 100.0)]).is_empty());
+    assert_eq!(
+        increases(Temporality::Cumulative, 60, &[(0, 100.0)]),
+        Vec::<(i64, Increase)>::new()
+    );
     let delta = increases(Temporality::Delta, 60, &[(0, 100.0)]);
     assert_eq!(delta[0].1.rate_per_second(), None);
 }

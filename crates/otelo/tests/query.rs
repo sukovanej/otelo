@@ -321,12 +321,7 @@ fn the_cli_reads_what_the_api_serves() {
     let (services, _) =
         run_otelo_and_parse_json(&daemon, &["services", "--buckets", "--step", "10m"]);
     assert_eq!(services["step_ns"], 600 * SECOND_NS);
-    assert!(
-        !services["services"][0]["buckets"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert_ne!(services["services"][0]["buckets"], json!([]));
 
     check_the_routes_and_the_queries_of_a_service(&daemon);
     check_the_groups_of_spans(&daemon);
@@ -346,15 +341,15 @@ fn check_completions_in_a_context_and_a_range(daemon: &Daemon) {
             .map(|suggestion| suggestion["text"].as_str().unwrap().to_owned())
             .collect()
     };
-    assert!(
+    assert_eq!(
         list_suggestion_texts(&[
             "complete",
             "logs",
             "user.id = ",
             "--context",
             "level = error"
-        ])
-        .is_empty()
+        ]),
+        Vec::<String>::new()
     );
     assert_eq!(
         list_suggestion_texts(&[
@@ -366,15 +361,15 @@ fn check_completions_in_a_context_and_a_range(daemon: &Daemon) {
         ]),
         [r#""email""#, r#""push""#, r#""sms""#]
     );
-    assert!(
+    assert_eq!(
         list_suggestion_texts(&[
             "complete",
             "metrics",
             "queue = ",
             "--context",
             "name = missing"
-        ])
-        .is_empty()
+        ]),
+        Vec::<String>::new()
     );
     assert_eq!(
         list_suggestion_texts(&[
@@ -386,15 +381,15 @@ fn check_completions_in_a_context_and_a_range(daemon: &Daemon) {
         ]),
         ["7", "8"]
     );
-    assert!(
+    assert_eq!(
         list_suggestion_texts(&[
             "complete",
             "logs",
             "level = info and user.id = ",
             "--until",
             "10m"
-        ])
-        .is_empty()
+        ]),
+        Vec::<String>::new()
     );
     let broken_context = run_otelo(
         daemon,

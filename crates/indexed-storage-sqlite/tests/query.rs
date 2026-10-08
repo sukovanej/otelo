@@ -757,7 +757,10 @@ fn metrics_filter_series_by_attributes_and_resource() {
         metric_names_matching("name = process.memory.usage resource.host.name = droplet"),
         ["process.memory.usage"]
     );
-    assert!(metric_names_matching("service = caddy").is_empty());
+    assert_eq!(
+        metric_names_matching("service = caddy"),
+        Vec::<String>::new()
+    );
 
     let filter = MetricFilter {
         name: "process.memory.usage".into(),
@@ -914,24 +917,39 @@ fn the_catalog_suggests_only_what_the_context_matches() {
         suggestions_at_end(Signal::Logs, "service = caddy or http.route = "),
         [r#""/login""#, r#""/matches""#, r#""/languages""#]
     );
-    assert!(suggestions_at_end(Signal::Logs, "service = caddy and trace").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = caddy and trace"),
+        Vec::<String>::new()
+    );
     assert_eq!(
         suggestions_at_end(Signal::Logs, "service = api and trace"),
         ["trace_id"]
     );
     assert_eq!(suggestions_at_end(Signal::Logs, "trace"), ["trace_id"]);
-    assert!(suggestions_at_end(Signal::Logs, "service = nothing and http.").is_empty());
-    assert!(suggestions_at_end(Signal::Logs, "service = nothing and http.route = ").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = nothing and http."),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        suggestions_at_end(Signal::Logs, "service = nothing and http.route = "),
+        Vec::<String>::new()
+    );
     assert_eq!(
         suggestions_at_end(Signal::Spans, "name = \"POST /matches\" and u"),
         ["user.id"]
     );
-    assert!(suggestions_at_end(Signal::Spans, "db.system = sqlite and u").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Spans, "db.system = sqlite and u"),
+        Vec::<String>::new()
+    );
     assert_eq!(
         suggestions_at_end(Signal::Metrics, "name = process.memory.usage and st"),
         ["state"]
     );
-    assert!(suggestions_at_end(Signal::Metrics, "name = nothing and st").is_empty());
+    assert_eq!(
+        suggestions_at_end(Signal::Metrics, "name = nothing and st"),
+        Vec::<String>::new()
+    );
 
     let user_in_matches_input = "http.route = \"/matches\" and user.id";
     let user_in_matches = complete_query(
@@ -1049,7 +1067,7 @@ fn an_indexed_attribute_has_an_index_on_its_table() {
 
     indexes.replace_attributes(BTreeSet::new());
     write_batch(fixture.directory.path(), Vec::new(), &indexes);
-    assert!(index_names().is_empty());
+    assert_eq!(index_names(), Vec::<String>::new());
 }
 
 #[test]
@@ -1199,7 +1217,10 @@ fn a_context_with_more_records_than_the_sample_finds_older_values_by_their_prefi
 fn a_context_without_a_match_within_the_time_budget_falls_back_to_the_day_catalog() {
     let many_logs = ManyLogs::write();
     let reader = many_logs.open_reader();
-    assert!(list_suggestions_at_end(&reader, "user.id = 1 and http.").is_empty());
+    assert_eq!(
+        list_suggestions_at_end(&reader, "user.id = 1 and http."),
+        Vec::<String>::new()
+    );
 
     let mut reader_out_of_time = many_logs.open_reader();
     reader_out_of_time.set_completion_time_budget(Duration::ZERO);
