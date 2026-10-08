@@ -1,0 +1,188 @@
+---
+status: backlog
+created: 2026-10-08T22:05:18Z
+tags:
+- draft
+---
+# Store the attributes of logs and spans by how often their values repeat
+
+Span attributes are most of `telemetry.sqlite`, and they repeat. On a copy of mudro's file (445 MB, 4.7 days, 242,270 spans), the `attributes` JSON of the spans is 188 MB, about 810 B a span. There are only 67k distinct attribute objects. Within one span name most keys hold one value or a few. On the 146,941 `SELECT` spans, `busy_ns` is always 0.
+
+The indexer profiles each attribute key within a group of similar records, and stores it in one of three encodings. A prototype of this layout on the mudro spans took the spans and their indexes from 260 MB to 46 MB.
+
+## Encodings
+
+A group is a resource and a span name, or a resource and the instrumentation scope of a log.
+
+| Encoding | Where the value lives | Keys on mudro |
+|---|---|---|
+| stable | once in a template, which the row points to | `code.file.path`, `code.line.number`, `http.route`, `thread.name`, `busy_ns` on SQL spans |
+| interned | once in `attribute_values`, and the row holds its id | `db.query.text`, `db.statement`, `url.path`, `client.address` |
+| literal | on the row | `busy_ns` on `match woke` spans, `db.sqlite.vm_steps`, `http.response.body.size` |
+
+The resource and the name are part of the template, so a span row carries neither, and `spans_resource_id_started_at` goes.
+
+## The profiler
+
+For each group and key, the indexer keeps an exact set of up to 64 value hashes and a 64-byte HyperLogLog. On mudro that is about 200 groups of 20 keys, under 3 MB.
+
+- Stable: at most 64 distinct values, each on at least 20 records on average. The product of the value counts of the stable keys of a group stays at most 4,096, so the templates of a group cannot multiply without bound.
+- Interned: a string, array, or map whose values repeat at least twice on average.
+- Literal: the rest. A number is stable or literal, never interned: an interned number costs a value row and its index entry, about 30 B, to save 2 to 4 B on the row.
+- A key the group has not seen yet: interned for a string, literal for a number, until the next classification.
+
+The indexer classifies a group at 32 records, again each time its count doubles, and then at least every 4,096 records or every hour of records. It also classifies at once when a stable key passes 64 distinct values since the last classification, or when the templates of the group pass the cap. The counts start over at each classification, so a profile describes recent records. A key turns stable only at 64 distinct values or fewer and stops being stable only past 128, so a key near the limit does not flip back and forth.
+
+The profiler measures time by the `received_at` of the frames, not the clock, so `otelo reindex` makes the same choices from the same journal.
+
+The encoding only decides where a new record puts a value. Templates and values never change once written, so a reclassification rewrites no row, and rows of one key in different encodings sit side by side. A wrong or missing profile makes records larger, never wrong.
+
+## Schema
+
+```mermaid
+erDiagram
+  resources ||--o{ attribute_templates : "resource_id"
+  attribute_templates ||--o{ spans : "attribute_template_id"
+  attribute_templates ||--o{ logs : "attribute_template_id"
+  attribute_keys ||--o{ attribute_profiles : "attribute_key_id"
+  resources ||--o{ attribute_profiles : "resource_id"
+
+  attribute_keys {
+    INTEGER id PK
+    TEXT key "UNIQUE"
+  }
+  attribute_values {
+    INTEGER id PK
+    INTEGER identity_hash "xxh3 of the value, UNIQUE"
+    TEXT value "JSON"
+    TEXT last_used_day "UTC date of the newest record that has it"
+  }
+  attribute_templates {
+    INTEGER id PK
+    INTEGER identity_hash "xxh3 of owner, resource, name, attributes, UNIQUE"
+    TEXT attribute_owner "log or span"
+    INTEGER resource_id FK
+    TEXT name "span name, or the scope of a log"
+    TEXT attributes "JSON object of the stable attributes"
+    TEXT last_used_day "UTC date of the newest record that has it"
+  }
+  attribute_profiles {
+    TEXT attribute_owner PK "log or span"
+    INTEGER resource_id PK,FK
+    TEXT name PK
+    INTEGER attribute_key_id PK,FK
+    TEXT encoding "stable, interned, or literal"
+    INTEGER record_count "since the classification before"
+    INTEGER distinct_value_count "HyperLogLog estimate"
+    INTEGER classified_at "Unix ns"
+  }
+  spans {
+    BLOB trace_id
+    BLOB span_id
+    BLOB parent_span_id
+    INTEGER attribute_template_id FK
+    INTEGER kind
+    INTEGER started_at "Unix ns"
+    INTEGER duration_ns
+    INTEGER status_code
+    TEXT interned_attributes "JSON: attribute_keys id to attribute_values id"
+    TEXT literal_attributes "JSON: attribute_keys id to the value"
+    TEXT events "JSON array"
+  }
+  logs {
+    INTEGER logged_at "Unix ns"
+    INTEGER attribute_template_id FK
+    INTEGER severity_number
+    TEXT body
+    BLOB trace_id
+    BLOB span_id
+    TEXT interned_attributes "as in spans"
+    TEXT literal_attributes "as in spans"
+  }
+```
+
+- `spans` and `logs` lose `resource_id`, `spans` loses `name`, and both lose `attributes`. Their index on the resource and the time becomes one on `attribute_template_id` and the time.
+- `attribute_key_counts` gains `has_stable_values`, `has_interned_values`, and `has_literal_values`: 1 once a record of the day kept the key in that encoding.
+- `attribute_templates` has an index on `resource_id`, so a query of a service finds its templates first.
+- Span events keep their JSON. They are 0.5 MB on mudro.
+
+## Queries
+
+The compiler ORs the flags of the days of the range in `attribute_key_counts`, and writes one branch for each encoding the key had. A key that was only ever stable reads no JSON of the rows.
+
+| Encoding | First | Then the rows |
+|---|---|---|
+| stable | the templates whose attributes match | `attribute_template_id IN (…)` |
+| interned | the value by `identity_hash`, or the values that match `~` or `>` | `interned_attributes ->> '$."<key id>"'` = the id, or `IN (…)` |
+| literal | | `literal_attributes ->> '$."<key id>"'` compared to the value |
+
+```sql
+SELECT …
+FROM spans span
+WHERE span.started_at BETWEEN :since AND :until
+  AND (
+    span.attribute_template_id IN (
+      SELECT id
+      FROM attribute_templates
+      WHERE attribute_owner = 'span'
+        AND attributes ->> '$."db.query.text"' = :value
+    )
+    OR span.interned_attributes ->> '$."12"' = (
+      SELECT id
+      FROM attribute_values
+      WHERE identity_hash = :value_hash
+    )
+  )
+```
+
+- A number still matches the same number sent as a string: the lookup takes the hashes of both.
+- `!=` and `NOT` negate the whole OR, so they keep the records that lack the key, as today.
+- `has(key)` checks for the key in the templates and in the two row columns.
+- A service or a span name filters the templates.
+- Grouping by an attribute groups by the template, the value id, and the literal, and reads the text of the values only for the groups the limit keeps.
+- A record reads back as its template, its interned values, and its literals, merged in Rust. The daemon keeps the keys and the templates in memory (44 and 1,306 rows on mudro) and reads the values of a page with `json_each(:ids)`.
+
+## Indexed attributes
+
+A stable key needs no index of its own: `spans_attribute_template_id_started_at` covers it, and the UI counts it as indexed. `otelo index add` makes a partial expression index on each of the two row columns:
+
+```sql
+CREATE INDEX "spans_attribute_<hash>_interned" ON spans (json_extract(interned_attributes, '$."12"'))
+  WHERE json_extract(interned_attributes, '$."12"') IS NOT NULL;
+CREATE INDEX "spans_attribute_<hash>_literal" ON spans (json_extract(literal_attributes, '$."12"'))
+  WHERE json_extract(literal_attributes, '$."12"') IS NOT NULL;
+```
+
+The index holds only the rows that have the key in that encoding, and SQLite uses it for `=`, `<`, and `>`, which imply `IS NOT NULL`. Both are made when the key is added, so a key that changes encoding later finds its index waiting.
+
+## Retention
+
+The indexer sets `last_used_day` of a template or a value to the day of the newest record that uses it, once a day for each, from a set in memory. Retention deletes the templates and the values whose `last_used_day` is past the longer of the retentions of logs and spans, after it deletes the rows. `attribute_profiles` rows of a group with no records in the retention go too.
+
+## Measured on the mudro spans
+
+A Python prototype built the layout from the spans of the copy. It used the rules above, except that it also interned numbers, and it classified only when the count of a group doubled. The sizes are after a VACUUM.
+
+| Layout | Spans and their indexes |
+|---|---|
+| Today | 260 MB |
+| One `attribute_sets` row for the strings of a span | 84 MB |
+| `attributes` and a `span_attributes` link per attribute | 122 MB |
+| Adaptive, one profile for all spans | 68 MB |
+| Adaptive, a profile per group | 46 MB |
+
+| Query | Today | Adaptive |
+|---|---|---|
+| A key filter that reads the templates only | 140 ms | under 10 ms |
+| Group by `db.query.text`, interned branch only | 800 ms | 130 ms |
+| Delete the oldest day | 430 ms | 100 ms |
+
+## Open questions
+
+- How to group logs. The instrumentation scope is coarse for an app that logs through `tracing`. `code.file.path` and `code.line.number`, when the log has them, name a call site.
+- Whether `otelo attributes <signal>` shows the encoding of each key, so a reader sees why one filter is fast and another reads the range.
+
+## Out of scope
+
+- `metric_points` (112 MB on mudro, 32 B a point) and `metric_minute_summaries` (48 MB). Points in hourly chunks of a series would take about 4 B a point. That is a task of its own.
+- mudro sends `db.statement` next to an equal `db.query.text` on every database span. Interning stores the text once, and mudro's instrumentation is where to drop the old name.
