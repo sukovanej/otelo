@@ -34,7 +34,7 @@ export default function LoginPage(props: LoginPageProps) {
         onSubmit={(e) => void submitPassword(e)}
       >
         <div class="mb-2 flex items-center gap-2 font-mono text-[17px] font-semibold text-ink">
-          <LogoIcon size={20} class="text-accent" />
+          <LogoIcon size={24} />
           otelo
         </div>
         <label class="flex flex-col gap-1 text-muted">

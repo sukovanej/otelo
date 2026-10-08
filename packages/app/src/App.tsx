@@ -35,7 +35,7 @@ export default function App(props: RouteSectionProps) {
     <div class="flex h-dvh flex-col">
       <header class="flex h-12 shrink-0 items-center gap-4 border-b border-line bg-surface px-4 md:gap-6">
         <a href="/" class="flex items-center gap-2 font-mono text-[17px] font-semibold text-ink">
-          <LogoIcon size={20} class="text-accent" />
+          <LogoIcon size={24} />
           <span class="hidden sm:inline">otelo</span>
         </a>
         <nav class="flex min-w-0 gap-4 md:gap-5">
