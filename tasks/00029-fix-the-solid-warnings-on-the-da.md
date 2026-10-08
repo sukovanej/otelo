@@ -1,5 +1,5 @@
 ---
-status: in_review
+status: done
 created: 2026-10-05T14:40:03Z
 tags:
 - bug
