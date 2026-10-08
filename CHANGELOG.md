@@ -5,7 +5,33 @@ All notable changes to otelo are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.5...main)
+## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.6...main)
+
+## [0.0.6](https://github.com/sukovanej/otelo/compare/v0.0.5...v0.0.6) - 2026-10-08
+
+The storage version goes up to 2. After the update, stop the daemon and run
+`otelo reindex` before `otelo serve` starts again.
+
+### Changed
+
+- A query of one service reads only the rows of that service, through a new
+  index on the service of a resource. It read every span or log line of the
+  time range and checked the service of each. On 217k spans, counting the
+  spans of a small service went from 36 ms to 1 ms.
+- The query suggestions open only where an expression can start: in an empty
+  input, or after a space, `(`, or `,`. They opened on every keystroke, click,
+  and caret move. Taking a suggestion inserts its text and closes the list,
+  and Arrow Down still opens it at the caret.
+- `/api/openapi.json` is OpenAPI 3.2. Tools that read only 3.1 may refuse it.
+- An otter is the logo and the favicon.
+
+### Fixed
+
+- A dashboard widget that changed from an unnamed metric to a named one kept
+  "Pick a metric to see its numbers." while its title changed.
+- A dashboard page copied its fetched definition a flush late, and Solid
+  warned about it. A refetch now keeps a draft with edits and replaces one
+  without.
 
 ## [0.0.5](https://github.com/sukovanej/otelo/compare/v0.0.4...v0.0.5) - 2026-10-06
 
