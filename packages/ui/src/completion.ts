@@ -29,9 +29,8 @@ interface AppliedSuggestion {
 export function applySuggestion(text: string, suggestion: Suggestion): AppliedSuggestion {
   const start = toUtf16(text, suggestion.start);
   const end = toUtf16(text, suggestion.end);
-  const after = text.slice(end);
-  // A space follows unless one is there, so the next completion can start.
-  const space = /^[\s),]/.test(after) ? "" : " ";
-  const inserted = suggestion.text + space;
-  return { text: text.slice(0, start) + inserted + after, cursor: start + inserted.length };
+  return {
+    text: text.slice(0, start) + suggestion.text + text.slice(end),
+    cursor: start + suggestion.text.length,
+  };
 }
