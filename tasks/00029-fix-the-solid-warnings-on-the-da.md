@@ -3,6 +3,8 @@ status: in_progress
 created: 2026-10-05T14:40:03Z
 tags:
 - bug
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/63
 ---
 # Fix the Solid warnings on the dashboard page
 
