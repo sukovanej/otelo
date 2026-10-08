@@ -46,7 +46,7 @@ fn record_statement_texts(run_queries: impl FnOnce()) -> Vec<String> {
     let subscriber = Registry::default().with(texts.clone());
     tracing::subscriber::with_default(subscriber, run_queries);
     let recorded = texts.0.lock().unwrap().clone();
-    assert!(!recorded.is_empty());
+    assert_ne!(recorded, Vec::<String>::new());
     recorded
 }
 

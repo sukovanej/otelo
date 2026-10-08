@@ -507,5 +507,8 @@ fn lists_the_series_that_have_summaries_in_the_range() {
         list_series_of_hour(ten_tomorrow(), "kind = gauge service = api"),
         ["queue.lag gauge"]
     );
-    assert!(list_series_of_hour(ten_tomorrow() + 2 * HOUR, "").is_empty());
+    assert_eq!(
+        list_series_of_hour(ten_tomorrow() + 2 * HOUR, ""),
+        Vec::<String>::new()
+    );
 }

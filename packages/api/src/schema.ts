@@ -478,7 +478,7 @@ export interface components {
         CompletionKind: "field" | "operator" | "value" | "keyword";
         /** @description What can go at the cursor of a query, and what the field there holds. */
         Completions: {
-            field: null | components["schemas"]["FieldBody"];
+            field: components["schemas"]["FieldBody"] | null;
             suggestions: components["schemas"]["SuggestionBody"][];
         };
         /** @description A saved dashboard. */
@@ -537,7 +537,7 @@ export interface components {
             /** Format: int64 */
             count: number;
             counts: number[];
-            percentiles: null | components["schemas"]["Percentiles"];
+            percentiles: components["schemas"]["Percentiles"] | null;
             /** Format: double */
             sum: number | null;
         };
@@ -1091,7 +1091,7 @@ export interface components {
              * @description The failed ones.
              */
             errors: number;
-            latency: null | components["schemas"]["Latency"];
+            latency: components["schemas"]["Latency"] | null;
             /**
              * Format: int64
              * @description Their durations added up.

@@ -3,8 +3,8 @@ use std::num::NonZeroU8;
 use otelo_indexed_storage::query::RankOrder;
 
 use otelo_state::{
-    ChartKind, DashboardDefinition, DashboardId, GroupedQuery, SpanMeasure, StateFile, Widget,
-    WidgetDisplay, WidgetLayout, WidgetQuery,
+    ChartKind, DashboardDefinition, DashboardId, DashboardSummary, GroupedQuery, SpanMeasure,
+    StateFile, Widget, WidgetDisplay, WidgetLayout, WidgetQuery,
 };
 
 fn requests_dashboard(name: &str) -> DashboardDefinition {
@@ -49,7 +49,10 @@ fn requests_dashboard(name: &str) -> DashboardDefinition {
 fn a_dashboard_outlives_the_state_file_until_it_is_deleted() {
     let directory = tempfile::tempdir().unwrap();
     let state = StateFile::open(directory.path()).unwrap();
-    assert!(state.list_dashboards().unwrap().dashboards.is_empty());
+    assert_eq!(
+        state.list_dashboards().unwrap().dashboards,
+        Vec::<DashboardSummary>::new()
+    );
     let created = state.create_dashboard(&requests_dashboard("API")).unwrap();
     let other = state
         .create_dashboard(&requests_dashboard("Workers"))
