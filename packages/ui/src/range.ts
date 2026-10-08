@@ -51,7 +51,7 @@ interface RangePreset {
   readonly label: string;
 }
 
-interface RangeLabelPart {
+export interface RangeLabelPart {
   readonly text: string;
   readonly dim: boolean;
 }

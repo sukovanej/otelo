@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import type { Accessor } from "solid-js";
+import { type Accessor, createMemo } from "solid-js";
 
 import { toQueryString } from "@otelo/api";
 
@@ -23,12 +23,12 @@ interface RangeSearchParams extends SearchParams {
 
 export function useRange(): RangeState {
   const [params, setParams] = useSearchParams<RangeSearchParams>();
-  const since = () => params.since || DEFAULT_SINCE;
-  const until = () => params.until ?? "";
+  const since = createMemo(() => params.since || DEFAULT_SINCE);
+  const until = createMemo(() => params.until ?? "");
   return {
     since,
     until,
-    live: () => params.live === "1" && until() === "",
+    live: createMemo(() => params.live === "1" && until() === ""),
     setRange: (newSince, newUntil) =>
       setParams({
         since: newSince === DEFAULT_SINCE ? undefined : newSince,

@@ -12,6 +12,7 @@ import {
   formatRangeLabel,
   moveRangeToNow,
   type Range,
+  type RangeLabelPart,
   RANGE_PRESETS,
   resizeRange,
   resolveRange,
@@ -132,7 +133,10 @@ export default function RangePicker(props: RangePickerProps) {
           onClick={() => (pickerPopover.open() ? pickerPopover.hide() : openPicker())}
         >
           <span class="flex gap-1.5 whitespace-nowrap">
-            <For each={splitRangeLabel(range(), Date.now())} keyed={false}>
+            <For
+              each={keyLabelParts(splitRangeLabel(range(), Date.now()))}
+              keyed={(part) => part.key}
+            >
               {(part) => (
                 <span class={part().dim ? "text-muted" : "font-medium tabular-nums"}>
                   {part().text}
@@ -236,4 +240,12 @@ export default function RangePicker(props: RangePickerProps) {
       </Show>
     </div>
   );
+}
+
+interface KeyedLabelPart extends RangeLabelPart {
+  readonly key: string;
+}
+
+function keyLabelParts(parts: ReadonlyArray<RangeLabelPart>): KeyedLabelPart[] {
+  return parts.map((part, index) => ({ ...part, key: `${index}:${part.dim}:${part.text}` }));
 }

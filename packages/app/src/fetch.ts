@@ -1,6 +1,7 @@
 import {
   hashKey,
   type InfiniteData,
+  type Query,
   type QueryClient,
   replaceEqualDeep,
   useInfiniteQuery,
@@ -52,6 +53,7 @@ export function createFetch<K, T>(
       structuralSharing: (oldData: unknown, newData: unknown) =>
         Object.isFrozen(newData) ? newData : replaceEqualDeep(oldData, newData),
       refetchInterval: live() ? LIVE_RELOAD_MS : false,
+      refetchOnMount: hasOneReader,
     };
   });
   const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
@@ -154,6 +156,11 @@ export function freezeDeeply<T>(value: T): T {
 
 function memoizeKeyByContent<K>(key: Accessor<K>): Accessor<K> {
   return createMemo(key, { equals: (shown, next) => hashKey([shown]) === hashKey([next]) });
+}
+
+// A second reader takes the answer as shown, since its reload would hold whatever mounted it.
+function hasOneReader<T>(query: Query<T, Error, T>): boolean {
+  return query.getObserversCount() === 1;
 }
 
 function isInfiniteData(data: unknown): data is InfiniteData<unknown> {

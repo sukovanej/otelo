@@ -1,0 +1,85 @@
+diff --git a/build/dev.cjs b/build/dev.cjs
+index 8184d4c1111f627232f808b26fc10d1172671ce2..09dc51d1584a77c358fb92c9c2ce2502a1689087 100644
+--- a/build/dev.cjs
++++ b/build/dev.cjs
+@@ -238,10 +238,10 @@ function useBaseQueryLayer(options, Observer, queryClient) {
+     }
+     solidJs.onCleanup(() => {
+       disposed = true;
+-      observerSub?.();
+-      observerSub = null;
+       cacheSub?.();
+       cacheSub = null;
++      observerSub?.();
++      observerSub = null;
+     });
+   }
+   const lookupQuery = () => {
+diff --git a/build/dev.js b/build/dev.js
+index 2ce38f1c5174c81466be1d2bd820e216cab55696..0f32e16bd63612ab9c8a644e76b3c6bc6b1b72dd 100644
+--- a/build/dev.js
++++ b/build/dev.js
+@@ -237,10 +237,10 @@ function useBaseQueryLayer(options, Observer, queryClient) {
+     }
+     onCleanup(() => {
+       disposed = true;
+-      observerSub?.();
+-      observerSub = null;
+       cacheSub?.();
+       cacheSub = null;
++      observerSub?.();
++      observerSub = null;
+     });
+   }
+   const lookupQuery = () => {
+diff --git a/build/index.cjs b/build/index.cjs
+index 8184d4c1111f627232f808b26fc10d1172671ce2..09dc51d1584a77c358fb92c9c2ce2502a1689087 100644
+--- a/build/index.cjs
++++ b/build/index.cjs
+@@ -238,10 +238,10 @@ function useBaseQueryLayer(options, Observer, queryClient) {
+     }
+     solidJs.onCleanup(() => {
+       disposed = true;
+-      observerSub?.();
+-      observerSub = null;
+       cacheSub?.();
+       cacheSub = null;
++      observerSub?.();
++      observerSub = null;
+     });
+   }
+   const lookupQuery = () => {
+diff --git a/build/index.js b/build/index.js
+index 2ce38f1c5174c81466be1d2bd820e216cab55696..0f32e16bd63612ab9c8a644e76b3c6bc6b1b72dd 100644
+--- a/build/index.js
++++ b/build/index.js
+@@ -237,10 +237,10 @@ function useBaseQueryLayer(options, Observer, queryClient) {
+     }
+     onCleanup(() => {
+       disposed = true;
+-      observerSub?.();
+-      observerSub = null;
+       cacheSub?.();
+       cacheSub = null;
++      observerSub?.();
++      observerSub = null;
+     });
+   }
+   const lookupQuery = () => {
+diff --git a/src/useBaseQuery.ts b/src/useBaseQuery.ts
+index c6b213a11a6a2268a8a94b62c30868af2d9d7f55..43f8429923e3c47c91dbaf3c7b73012287be4d36 100644
+--- a/src/useBaseQuery.ts
++++ b/src/useBaseQuery.ts
+@@ -359,10 +359,10 @@ export function useBaseQueryLayer<
+     }
+     onCleanup(() => {
+       disposed = true
+-      observerSub?.()
+-      observerSub = null
+       cacheSub?.()
+       cacheSub = null
++      observerSub?.()
++      observerSub = null
+     })
+   }
+ 
