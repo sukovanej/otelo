@@ -59,6 +59,11 @@ interface ExistingWidgetEditor {
   readonly widget: Widget;
 }
 
+interface DashboardDraft {
+  readonly saved: DashboardDefinition;
+  readonly edited: DashboardDefinition;
+}
+
 interface PendingRemoval {
   readonly index: number;
   readonly title: string;
@@ -79,12 +84,18 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
     () => ({ id: props.id }),
     ({ id }, signal) => getDashboard(id, signal).then(freezeDeeply),
   );
+  const savedDefinition = createMemo(() => {
+    const saved = fetched.data();
+    return saved && snapshot(saved.definition);
+  });
   // The page edits its own copy, so a refetch never takes back a change that
   // is not saved yet. A refetch with no change pending replaces the copy.
-  const [savedDefinition, setSavedDefinition] = createSignal<DashboardDefinition>();
-  const [definition, setDefinition] = createSignal<DashboardDefinition>();
-  let editedDefinition: DashboardDefinition | undefined;
-  let lastSavedDefinition: DashboardDefinition | undefined;
+  const [draft, setDraft] = createSignal<DashboardDraft | undefined>((previous) => {
+    const saved = savedDefinition();
+    if (!saved) return previous;
+    return previous && hasEdits(previous) ? previous : { saved, edited: saved };
+  });
+  const definition = () => draft()?.edited;
   let isLeavingOnPurpose = false;
   let hasSelectedName = false;
   const [openEditor, setOpenEditor] = createSignal<OpenEditor>();
@@ -94,20 +105,9 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
   const [pendingLeave, setPendingLeave] = createSignal<BeforeLeaveEventArgs>();
   const [deleting, setDeleting] = createSignal(false);
 
-  const changeDefinition = (change: (current: DashboardDefinition) => DashboardDefinition) => {
-    if (!editedDefinition) return;
-    editedDefinition = change(editedDefinition);
-    setDefinition(editedDefinition);
-  };
-  const adoptSavedDefinition = (saved: DashboardDefinition) => {
-    editedDefinition = saved;
-    lastSavedDefinition = saved;
-    setDefinition(saved);
-    setSavedDefinition(saved);
-  };
-  const hasChanges = createMemo(
-    () => JSON.stringify(definition()) !== JSON.stringify(savedDefinition()),
-  );
+  const changeDefinition = (change: (current: DashboardDefinition) => DashboardDefinition) =>
+    setDraft((current) => current && { ...current, edited: change(current.edited) });
+  const hasChanges = createMemo(() => !isSameDefinition(definition(), savedDefinition()));
   const runAction = async (kind: PendingAction, action: () => Promise<void>) => {
     setPendingAction(kind);
     setActionError(undefined);
@@ -123,17 +123,16 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
   };
   const saveChanges = () =>
     runAction("save", async () => {
-      if (!editedDefinition) return;
-      const sent = editedDefinition;
-      fetched.replaceData(freezeDeeply(await replaceDashboard(props.id, sent)));
-      lastSavedDefinition = sent;
-      setSavedDefinition(sent);
+      const sent = definition();
+      if (!sent) return;
+      const answer = freezeDeeply(await replaceDashboard(props.id, sent));
+      setDraft((current) => current && { saved: sent, edited: current.edited });
+      fetched.replaceData(answer);
     });
   const discardChanges = () => {
     const saved = savedDefinition();
     if (!saved) return;
-    editedDefinition = saved;
-    setDefinition(saved);
+    setDraft({ saved, edited: saved });
     setActionError(undefined);
   };
   const changeWidgets = (change: (widgets: ReadonlyArray<Widget>) => Widget[]) =>
@@ -164,11 +163,9 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
   };
   const cloneDashboard = () =>
     runAction("clone", async () => {
-      if (!editedDefinition) return;
-      const clone = await createDashboard({
-        ...editedDefinition,
-        name: `${editedDefinition.name} (copy)`,
-      });
+      const cloned = definition();
+      if (!cloned) return;
+      const clone = await createDashboard({ ...cloned, name: `${cloned.name} (copy)` });
       isLeavingOnPurpose = true;
       navigate(`/dashboards/${clone.id}${range.toSearch()}`);
     });
@@ -200,19 +197,6 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
     },
   ];
 
-  createEffect(
-    () => {
-      const saved = fetched.data();
-      return saved && snapshot(saved.definition);
-    },
-    (fetchedDefinition) => {
-      if (!fetchedDefinition) return;
-      const isFirst = editedDefinition === undefined;
-      const isUnchanged = JSON.stringify(editedDefinition) === JSON.stringify(lastSavedDefinition);
-      if (!isFirst && !isUnchanged) return;
-      adoptSavedDefinition(fetchedDefinition);
-    },
-  );
   createEffect(
     () => definition() !== undefined,
     (isLoaded) => {
@@ -434,6 +418,17 @@ function settleWidgets(widgets: ReadonlyArray<Widget>, pinnedIndex: number | und
 
 function pickEditedWidget(editor: OpenEditor): Widget {
   return editor.kind === "existing" ? editor.widget : createDefaultWidget();
+}
+
+function hasEdits(draft: DashboardDraft): boolean {
+  return !isSameDefinition(draft.edited, draft.saved);
+}
+
+function isSameDefinition(
+  first: DashboardDefinition | undefined,
+  second: DashboardDefinition | undefined,
+): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
 }
 
 function warnAboutUnsavedChanges(e: BeforeUnloadEvent) {

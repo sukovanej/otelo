@@ -14,8 +14,18 @@ export default defineConfig({
   build: {
     target: "es2022",
   },
-  // The tests cover modules without the DOM.
+  // The .ts tests cover modules without the DOM. The .tsx tests render
+  // components with the dev build of Solid, which reports reactivity mistakes.
   test: {
-    environment: "node",
+    projects: [
+      {
+        extends: true,
+        test: { name: "modules", environment: "node", include: ["tests/**/*.test.ts"] },
+      },
+      {
+        extends: true,
+        test: { name: "components", environment: "jsdom", include: ["tests/**/*.test.tsx"] },
+      },
+    ],
   },
 });

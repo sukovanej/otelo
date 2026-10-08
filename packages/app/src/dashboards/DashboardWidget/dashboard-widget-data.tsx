@@ -86,7 +86,9 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
             </Panel>
           )}
         </Match>
-        <Match when={readReason(fetched.data())}>{(reason) => drawMessage(reason())}</Match>
+        <Match when={readReason(fetched.data())} keyed>
+          {(reason) => drawMessage(reason)}
+        </Match>
       </Switch>
     </Errored>
   );

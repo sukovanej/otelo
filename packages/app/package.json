@@ -13,8 +13,10 @@
     "solid-js": "catalog:"
   },
   "devDependencies": {
+    "@solidjs/diagnostics": "catalog:",
     "@solidjs/vite-plugin": "catalog:",
     "@tailwindcss/vite": "catalog:",
+    "jsdom": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
