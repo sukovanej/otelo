@@ -1,10 +1,11 @@
 import type { JSX } from "@solidjs/web";
-import { Errored, Match, Show, Switch } from "solid-js";
+import { Errored, Match, Show, Switch, useContext } from "solid-js";
 
 import type { Widget } from "@otelo/api";
 import { Callout } from "@otelo/ui";
 import { ChartPanel, Panel } from "@otelo/viz";
 
+import { ApiContext } from "../../api";
 import { describeError, freezeDeeply } from "../../fetch";
 import { createRangeFetch, type RangeState } from "../../services/range";
 import { type FetchedDisplay, fetchWidgetData, type WidgetData } from "../fetch-widget";
@@ -23,12 +24,13 @@ interface DashboardWidgetDataProps {
 }
 
 export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
+  const api = useContext(ApiContext);
   const fetched = createRangeFetch(
     props.range,
     "dashboard-widget",
     () => ({ display: props.display }),
     ({ display, since, until }, signal) =>
-      fetchWidgetData(display, { since, until }, signal).then(freezeDeeply),
+      fetchWidgetData(api, display, { since, until }, signal).then(freezeDeeply),
   );
   const title = () => describeWidgetTitle(props.widget);
   const chartKind = () =>
@@ -37,7 +39,15 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
     props.range.setRange(new Date(startMs).toISOString(), new Date(endMs).toISOString());
   const drawMessage = (message: JSX.Element) => (
     <Panel title={title()} actions={props.actions} fill singleLineHeader actionsOnHover>
-      <div class={`${WIDGET_BODY_CLASSES} justify-center text-center text-muted`}>{message}</div>
+      <div
+        class={[
+          WIDGET_BODY_CLASSES,
+          "justify-center text-center text-muted",
+          { "opacity-60": fetched.loading() },
+        ]}
+      >
+        {message}
+      </div>
     </Panel>
   );
 

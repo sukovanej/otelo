@@ -1,16 +1,11 @@
 import { useNavigate } from "@solidjs/router";
-import { createMemo, Errored, For, Show } from "solid-js";
+import { createMemo, Errored, For, Show, useContext } from "solid-js";
 
-import {
-  getSpanGroups,
-  getSpans,
-  type SpanGroups,
-  toQueryString,
-  type TraceSpan,
-} from "@otelo/api";
+import { type SpanGroups, toQueryString, type TraceSpan } from "@otelo/api";
 import { Callout, CloseButton, EmptyMessage, Modal } from "@otelo/ui";
 import { ChartPanel, formatValue, Panel, Stat } from "@otelo/viz";
 
+import { ApiContext } from "../../api";
 import { link, pageContent } from "../../classes";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import SpanList from "../../traces/SpanList";
@@ -47,6 +42,7 @@ interface ServicePageSpanGroupModalProps {
 }
 
 export default function ServicePageSpanGroupModal(props: ServicePageSpanGroupModalProps) {
+  const api = useContext(ApiContext);
   const navigate = useNavigate();
   const labels = () => GROUPING_LABELS[props.kind];
   const fetched = createRangeFetch(
@@ -55,8 +51,8 @@ export default function ServicePageSpanGroupModal(props: ServicePageSpanGroupMod
     () => ({ q: props.filter }),
     async ({ q, since, until }, signal): Promise<SpanGroupResult> => {
       const [groups, list] = await Promise.all([
-        getSpanGroups({ q, since, until }, signal),
-        getSpans({ q, limit: LISTED_SPAN_LIMIT, since, until }, signal),
+        api.getSpanGroups({ q, since, until }, signal),
+        api.getSpans({ q, limit: LISTED_SPAN_LIMIT, since, until }, signal),
       ]);
       return { groups, spans: list.spans };
     },
@@ -92,11 +88,9 @@ export default function ServicePageSpanGroupModal(props: ServicePageSpanGroupMod
           </Errored>
         </h1>
         <span class="flex-1" />
-        <Show when={fetched.loading()}>
-          <span class="shrink-0 whitespace-nowrap text-muted" aria-live="polite">
-            Loading…
-          </span>
-        </Show>
+        <span class="shrink-0 whitespace-nowrap text-muted" aria-live="polite">
+          {fetched.loading() ? "Loading…" : ""}
+        </span>
         <a
           href={tracesHref()}
           class={`shrink-0 whitespace-nowrap ${link}`}

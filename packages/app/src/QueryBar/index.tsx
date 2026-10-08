@@ -1,9 +1,10 @@
 import type { JSX } from "@solidjs/web";
-import { Errored, latest, Show } from "solid-js";
+import { Errored, latest, Show, useContext } from "solid-js";
 
-import { completeQuery, type Signal } from "@otelo/api";
+import type { Signal } from "@otelo/api";
 import { Button, QueryInput, RangePicker, Tabs } from "@otelo/ui";
 
+import { ApiContext } from "../api";
 import { describeFieldOfToken } from "../fieldHelp";
 import { highlightQuery } from "../highlight";
 import type { ListResult, ListState } from "../list";
@@ -28,6 +29,7 @@ interface QueryBarProps<V extends string, R extends ListResult<V>, S extends str
 export default function QueryBar<V extends string, R extends ListResult<V>, S extends string>(
   props: QueryBarProps<V, R, S>,
 ) {
+  const api = useContext(ApiContext);
   const list = () => props.list;
   return (
     <PageBar
@@ -44,19 +46,22 @@ export default function QueryBar<V extends string, R extends ListResult<V>, S ex
             value={latest(list().draftQuery)}
             highlight={highlightQuery}
             complete={(query, cursorInChars, abort) =>
-              completeQuery(
-                {
-                  signal: props.signal,
-                  q: query,
-                  cursor: cursorInChars,
-                  since: list().since(),
-                  until: list().until(),
-                },
-                abort,
-              ).then((completions) => completions.suggestions)
+              api
+                .completeQuery(
+                  {
+                    signal: props.signal,
+                    q: query,
+                    cursor: cursorInChars,
+                    since: list().since(),
+                    until: list().until(),
+                  },
+                  abort,
+                )
+                .then((completions) => completions.suggestions)
             }
             help={(query, token, abort) =>
               describeFieldOfToken(
+                api,
                 props.signal,
                 { since: list().since(), until: list().until() },
                 query,

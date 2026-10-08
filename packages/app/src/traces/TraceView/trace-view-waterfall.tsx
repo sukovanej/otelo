@@ -1,4 +1,4 @@
-import { createProjection, createSignal, For, Show } from "solid-js";
+import { createMemo, createProjection, createSignal, For, Show } from "solid-js";
 
 import type { TraceSpan } from "@otelo/api";
 import { ChevronIcon } from "@otelo/icons";
@@ -33,7 +33,7 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
     () => Object.fromEntries([...collapsedSpanIds()].map((spanId) => [spanId, true])),
     {},
   );
-  const traceNanos = () => Math.max(1, measureTraceNanos(props.rows));
+  const traceNanos = createMemo(() => Math.max(1, measureTraceNanos(props.rows)));
   const toPercentOfTrace = (nanos: number) => `${(100 * nanos) / traceNanos()}%`;
   const toggleFold = (spanId: string) =>
     setCollapsedSpanIds((spanIds) => {

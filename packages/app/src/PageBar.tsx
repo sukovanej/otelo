@@ -26,9 +26,7 @@ export default function PageBar(props: PageBarProps) {
       >
         {props.children}
         <span class="flex-1" />
-        <Show when={props.fetched.loading()}>
-          <span aria-live="polite">Loading…</span>
-        </Show>
+        <span aria-live="polite">{props.fetched.loading() ? "Loading…" : ""}</span>
         <Show when={props.fetched.updatedAt()}>
           {(updatedAt) => <span>Updated {formatTime(updatedAt())}</span>}
         </Show>

@@ -33,6 +33,7 @@ export type SpanMeasure = Schemas["SpanMeasure"];
 export type SpanSort = Schemas["SpanSort"];
 export type SpanStats = Schemas["SpanStats"];
 export type Spans = Schemas["Spans"];
+export type Trace = Schemas["Trace"];
 export type TraceSpan = Schemas["TraceSpan"];
 export type TraceSummary = Schemas["TraceSummary"];
 export type Traces = Schemas["Traces"];
@@ -74,125 +75,134 @@ export function toQueryString(
   return text ? `?${text}` : "";
 }
 
-export const getLogs = (query: ListQuery, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/logs", "get">>("GET", `/api/logs${toQueryString(query)}`, signal);
+export interface Api {
+  readonly getLogs: (query: ListQuery, signal?: AbortSignal) => Promise<OkBody<"/api/logs", "get">>;
+  readonly getLogGroups: (
+    query: GetQuery<"/api/logs/groups">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/logs/groups", "get">>;
+  readonly getLogCounts: (
+    query: GetQuery<"/api/logs/counts">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/logs/counts", "get">>;
+  readonly getSpans: (
+    query: GetQuery<"/api/spans">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/spans", "get">>;
+  readonly getSpanGroups: (
+    query: GetQuery<"/api/spans/groups">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/spans/groups", "get">>;
+  readonly getTraces: (
+    query: GetQuery<"/api/traces">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/traces", "get">>;
+  readonly getTrace: (
+    id: string,
+    query: GetQuery<"/api/traces/{trace_id}">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/traces/{trace_id}", "get">>;
+  readonly getMetrics: (
+    query: GetQuery<"/api/metrics">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/metrics", "get">>;
+  readonly getMetricSeries: (
+    name: string,
+    query: GetQuery<"/api/metrics/{name}">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/metrics/{name}", "get">>;
+  readonly getServices: (
+    query: GetQuery<"/api/services">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/services", "get">>;
+  readonly getService: (
+    name: string,
+    query: GetQuery<"/api/services/{name}">,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/services/{name}", "get">>;
+  readonly getAttributeKeys: (
+    signal: Signal,
+    abortSignal?: AbortSignal,
+  ) => Promise<OkBody<"/api/attributes", "get">>;
+  readonly completeQuery: (
+    query: GetQuery<"/api/complete">,
+    abortSignal?: AbortSignal,
+  ) => Promise<OkBody<"/api/complete", "get">>;
+  readonly listDashboards: (signal?: AbortSignal) => Promise<OkBody<"/api/dashboards", "get">>;
+  readonly getDashboard: (
+    id: number,
+    signal?: AbortSignal,
+  ) => Promise<OkBody<"/api/dashboards/{id}", "get">>;
+  readonly createDashboard: (
+    definition: DashboardDefinition,
+  ) => Promise<OkBody<"/api/dashboards", "post">>;
+  readonly replaceDashboard: (
+    id: number,
+    definition: DashboardDefinition,
+  ) => Promise<OkBody<"/api/dashboards/{id}", "put">>;
+  readonly deleteDashboard: (id: number) => Promise<OkBody<"/api/dashboards/{id}", "delete">>;
+  readonly addIndex: (
+    signal: IndexedSignal,
+    key: string,
+  ) => Promise<OkBody<"/api/indexes/{signal}/{key}", "put">>;
+  readonly logIn: (password: string) => Promise<void>;
+  readonly logOut: () => Promise<void>;
+}
 
-export const getLogGroups = (query: GetQuery<"/api/logs/groups">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/logs/groups", "get">>(
-    "GET",
-    `/api/logs/groups${toQueryString(query)}`,
-    signal,
-  );
-
-export const getLogCounts = (query: GetQuery<"/api/logs/counts">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/logs/counts", "get">>(
-    "GET",
-    `/api/logs/counts${toQueryString(query)}`,
-    signal,
-  );
-
-export const getSpans = (query: GetQuery<"/api/spans">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/spans", "get">>("GET", `/api/spans${toQueryString(query)}`, signal);
-
-export const getSpanGroups = (query: GetQuery<"/api/spans/groups">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/spans/groups", "get">>(
-    "GET",
-    `/api/spans/groups${toQueryString(query)}`,
-    signal,
-  );
-
-export const getTraces = (query: GetQuery<"/api/traces">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/traces", "get">>("GET", `/api/traces${toQueryString(query)}`, signal);
-
-export const getTrace = (
-  id: string,
-  query: GetQuery<"/api/traces/{trace_id}">,
-  signal?: AbortSignal,
-) =>
-  requestJson<OkBody<"/api/traces/{trace_id}", "get">>(
-    "GET",
-    `/api/traces/${encodeURIComponent(id)}${toQueryString(query)}`,
-    signal,
-  );
-
-export const getMetrics = (query: GetQuery<"/api/metrics">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/metrics", "get">>("GET", `/api/metrics${toQueryString(query)}`, signal);
-
-export const getMetricSeries = (
-  name: string,
-  query: GetQuery<"/api/metrics/{name}">,
-  signal?: AbortSignal,
-) =>
-  requestJson<OkBody<"/api/metrics/{name}", "get">>(
-    "GET",
-    `/api/metrics/${encodeURIComponent(name)}${toQueryString(query)}`,
-    signal,
-  );
-
-export const getServices = (query: GetQuery<"/api/services">, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/services", "get">>(
-    "GET",
-    `/api/services${toQueryString(query)}`,
-    signal,
-  );
-
-export const getService = (
-  name: string,
-  query: GetQuery<"/api/services/{name}">,
-  signal?: AbortSignal,
-) =>
-  requestJson<OkBody<"/api/services/{name}", "get">>(
-    "GET",
-    `/api/services/${encodeURIComponent(name)}${toQueryString(query)}`,
-    signal,
-  );
-
-export const getAttributeKeys = (signal: Signal, abortSignal?: AbortSignal) =>
-  requestJson<OkBody<"/api/attributes", "get">>(
-    "GET",
-    `/api/attributes${toQueryString({ signal })}`,
-    abortSignal,
-  );
-
-export const completeQuery = (query: GetQuery<"/api/complete">, abortSignal?: AbortSignal) =>
-  requestJson<OkBody<"/api/complete", "get">>(
-    "GET",
-    `/api/complete${toQueryString(query)}`,
-    abortSignal,
-  );
-
-export const listDashboards = (signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/dashboards", "get">>("GET", "/api/dashboards", signal);
-
-export const getDashboard = (id: number, signal?: AbortSignal) =>
-  requestJson<OkBody<"/api/dashboards/{id}", "get">>("GET", `/api/dashboards/${id}`, signal);
-
-export const createDashboard = (definition: DashboardDefinition) =>
-  requestJson<OkBody<"/api/dashboards", "post">>("POST", "/api/dashboards", undefined, definition);
-
-export const replaceDashboard = (id: number, definition: DashboardDefinition) =>
-  requestJson<OkBody<"/api/dashboards/{id}", "put">>(
-    "PUT",
-    `/api/dashboards/${id}`,
-    undefined,
-    definition,
-  );
-
-export const deleteDashboard = (id: number) =>
-  requestJson<OkBody<"/api/dashboards/{id}", "delete">>("DELETE", `/api/dashboards/${id}`);
-
-export const addIndex = (signal: IndexedSignal, key: string) =>
-  requestJson<OkBody<"/api/indexes/{signal}/{key}", "put">>(
-    "PUT",
-    `/api/indexes/${signal}/${encodeURIComponent(key)}`,
-  );
-
-export const logIn = (password: string) =>
-  sendRequest("POST", "/api/login", undefined, { password } satisfies LoginBody).then(
-    () => undefined,
-  );
-
-export const logOut = () => sendRequest("POST", "/api/logout").then(() => undefined);
+export function createApi(fetchFromDaemon: typeof fetch): Api {
+  const requestJson = async <T>(
+    method: string,
+    path: string,
+    signal?: AbortSignal,
+    requestBody?: object,
+  ): Promise<T> => {
+    const response = await sendRequest(fetchFromDaemon, method, path, signal, requestBody);
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the spec names the type of each path
+    return (await response.json()) as T;
+  };
+  return {
+    getLogs: (query, signal) => requestJson("GET", `/api/logs${toQueryString(query)}`, signal),
+    getLogGroups: (query, signal) =>
+      requestJson("GET", `/api/logs/groups${toQueryString(query)}`, signal),
+    getLogCounts: (query, signal) =>
+      requestJson("GET", `/api/logs/counts${toQueryString(query)}`, signal),
+    getSpans: (query, signal) => requestJson("GET", `/api/spans${toQueryString(query)}`, signal),
+    getSpanGroups: (query, signal) =>
+      requestJson("GET", `/api/spans/groups${toQueryString(query)}`, signal),
+    getTraces: (query, signal) => requestJson("GET", `/api/traces${toQueryString(query)}`, signal),
+    getTrace: (id, query, signal) =>
+      requestJson("GET", `/api/traces/${encodeURIComponent(id)}${toQueryString(query)}`, signal),
+    getMetrics: (query, signal) =>
+      requestJson("GET", `/api/metrics${toQueryString(query)}`, signal),
+    getMetricSeries: (name, query, signal) =>
+      requestJson("GET", `/api/metrics/${encodeURIComponent(name)}${toQueryString(query)}`, signal),
+    getServices: (query, signal) =>
+      requestJson("GET", `/api/services${toQueryString(query)}`, signal),
+    getService: (name, query, signal) =>
+      requestJson(
+        "GET",
+        `/api/services/${encodeURIComponent(name)}${toQueryString(query)}`,
+        signal,
+      ),
+    getAttributeKeys: (signal, abortSignal) =>
+      requestJson("GET", `/api/attributes${toQueryString({ signal })}`, abortSignal),
+    completeQuery: (query, abortSignal) =>
+      requestJson("GET", `/api/complete${toQueryString(query)}`, abortSignal),
+    listDashboards: (signal) => requestJson("GET", "/api/dashboards", signal),
+    getDashboard: (id, signal) => requestJson("GET", `/api/dashboards/${id}`, signal),
+    createDashboard: (definition) => requestJson("POST", "/api/dashboards", undefined, definition),
+    replaceDashboard: (id, definition) =>
+      requestJson("PUT", `/api/dashboards/${id}`, undefined, definition),
+    deleteDashboard: (id) => requestJson("DELETE", `/api/dashboards/${id}`),
+    addIndex: (signal, key) =>
+      requestJson("PUT", `/api/indexes/${signal}/${encodeURIComponent(key)}`),
+    logIn: (password) =>
+      sendRequest(fetchFromDaemon, "POST", "/api/login", undefined, {
+        password,
+      } satisfies LoginBody).then(() => undefined),
+    logOut: () => sendRequest(fetchFromDaemon, "POST", "/api/logout").then(() => undefined),
+  };
+}
 
 export const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
@@ -209,24 +219,14 @@ class ApiError extends Error {
   }
 }
 
-async function requestJson<T>(
-  method: string,
-  path: string,
-  signal?: AbortSignal,
-  requestBody?: object,
-): Promise<T> {
-  const response = await sendRequest(method, path, signal, requestBody);
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the spec names the type of each path
-  return (await response.json()) as T;
-}
-
 async function sendRequest(
+  fetchFromDaemon: typeof fetch,
   method: string,
   path: string,
   signal?: AbortSignal,
   requestBody?: object,
 ): Promise<Response> {
-  const response = await fetch(path, {
+  const response = await fetchFromDaemon(path, {
     method,
     signal: signal ?? null,
     headers:

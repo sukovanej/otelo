@@ -5,12 +5,13 @@ import {
   useParams,
   useSearchParams,
 } from "@solidjs/router";
-import { createMemo, Errored, Show } from "solid-js";
+import { createMemo, Errored, Show, useContext } from "solid-js";
 
-import { getLogGroups, getService, getSpanGroups, getTraces, type SpanGroup } from "@otelo/api";
+import type { SpanGroup } from "@otelo/api";
 import { Callout, EmptyMessage } from "@otelo/ui";
 import { Panel } from "@otelo/viz";
 
+import { ApiContext } from "../../api";
 import { link, pageContent } from "../../classes";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import LogGroupList from "../../logs/LogGroupList";
@@ -50,6 +51,7 @@ interface OpenModal {
 }
 
 export default function ServicePage() {
+  const api = useContext(ApiContext);
   const params = useParams<ServicePageParams>();
   const range = useRange();
   const navigate = useNavigate();
@@ -70,14 +72,14 @@ export default function ServicePage() {
     range,
     "service",
     () => ({ name: name() }),
-    ({ name: serviceName, ...bounds }, signal) => getService(serviceName, bounds, signal),
+    ({ name: serviceName, ...bounds }, signal) => api.getService(serviceName, bounds, signal),
   );
   const createSpanGroupFetch = (grouping: SpanGrouping) =>
     createRangeFetch(
       range,
       `span-groups-${grouping.kind}`,
       () => ({ q: grouping.writeFilter(name()), by: grouping.by.join(",") }),
-      getSpanGroups,
+      api.getSpanGroups,
     );
   const fetchedRoutes = createSpanGroupFetch(SPAN_GROUPINGS.route);
   const fetchedQueries = createSpanGroupFetch(SPAN_GROUPINGS.query);
@@ -85,13 +87,13 @@ export default function ServicePage() {
     range,
     "traces",
     () => ({ q: `${serviceTerm()} error = true`, limit: 10 }),
-    getTraces,
+    api.getTraces,
   );
   const fetchedErrorLogs = createRangeFetch(
     range,
     "log-groups",
     () => ({ q: `${serviceTerm()} level >= error`, limit: 10 }),
-    getLogGroups,
+    api.getLogGroups,
   );
 
   const service = () => {

@@ -1,9 +1,10 @@
 import { type Params, useParams } from "@solidjs/router";
-import { createMemo, Errored, Show } from "solid-js";
+import { createMemo, Errored, Show, useContext } from "solid-js";
 
-import { getMetrics, type MetricList, toQueryString } from "@otelo/api";
+import { type MetricList, toQueryString } from "@otelo/api";
 import { Callout, EmptyMessage } from "@otelo/ui";
 
+import { ApiContext } from "../../api";
 import { pageContent } from "../../classes";
 import { formatCount } from "../../count";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
@@ -26,11 +27,12 @@ interface MetricPathParams extends Params {
 }
 
 export default function MetricsPage() {
+  const api = useContext(ApiContext);
   const list = createListState<"names", NamesResult>({
     name: "metric-names",
     views: ["names"],
     firstLimits: { names: API_MAX_ROWS },
-    fetch: async (key, signal) => ({ view: "names", body: await getMetrics(key, signal) }),
+    fetch: async (key, signal) => ({ view: "names", body: await api.getMetrics(key, signal) }),
   });
   const params = useParams<MetricPathParams>();
   const openName = () => params.name && decodePathSegment(params.name);

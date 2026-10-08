@@ -1,14 +1,9 @@
-import { createMemo, createSignal, Errored, latest, Show } from "solid-js";
+import { createMemo, createSignal, Errored, latest, Show, useContext } from "solid-js";
 
-import {
-  completeQuery,
-  getAttributeKeys,
-  getMetrics,
-  type GroupedQuery,
-  type WidgetQuery,
-} from "@otelo/api";
+import type { GroupedQuery, WidgetQuery } from "@otelo/api";
 import { QueryInput, Select, type SelectOption, Tabs } from "@otelo/ui";
 
+import { ApiContext } from "../../api";
 import { fieldLabel } from "../../classes";
 import { createFetch, freezeDeeply } from "../../fetch";
 import { highlightQuery } from "../../highlight";
@@ -38,6 +33,7 @@ interface WidgetEditorQueryProps {
 }
 
 export default function WidgetEditorQuery(props: WidgetEditorQueryProps) {
+  const api = useContext(ApiContext);
   const query = () => props.grouped.query;
   const [draftFilter, setDraftFilter] = createSignal(() => props.grouped.query.filter);
   const changeQuery = (changed: WidgetQuery) =>
@@ -59,13 +55,13 @@ export default function WidgetEditorQuery(props: WidgetEditorQueryProps) {
     () => ({ signal: query().signal }),
     ({ signal, since, until }, abortSignal) =>
       signal === "metrics"
-        ? getMetrics({ since, until, limit: 10_000 }, abortSignal).then(freezeDeeply)
+        ? api.getMetrics({ since, until, limit: 10_000 }, abortSignal).then(freezeDeeply)
         : Promise.resolve(null),
   );
   const fetchedAttributeKeys = createFetch(
     "dashboard-attribute-keys",
     () => ({ signal: query().signal }),
-    ({ signal }, abortSignal) => getAttributeKeys(signal, abortSignal).then(freezeDeeply),
+    ({ signal }, abortSignal) => api.getAttributeKeys(signal, abortSignal).then(freezeDeeply),
   );
   const metricNameOptions = createMemo(() =>
     summarizeMetricNames(fetchedMetrics.data()?.series ?? []).map((metric) => ({
@@ -143,17 +139,19 @@ export default function WidgetEditorQuery(props: WidgetEditorQueryProps) {
           highlight={highlightQuery}
           complete={(text, cursorInChars, abort) => {
             const metricName = metricQuery()?.name;
-            return completeQuery(
-              {
-                signal: query().signal,
-                q: text,
-                cursor: cursorInChars,
-                since: props.range.since(),
-                until: props.range.until(),
-                ...(metricName ? { context: `name = ${quoteString(metricName)}` } : {}),
-              },
-              abort,
-            ).then((completions) => completions.suggestions);
+            return api
+              .completeQuery(
+                {
+                  signal: query().signal,
+                  q: text,
+                  cursor: cursorInChars,
+                  since: props.range.since(),
+                  until: props.range.until(),
+                  ...(metricName ? { context: `name = ${quoteString(metricName)}` } : {}),
+                },
+                abort,
+              )
+              .then((completions) => completions.suggestions);
           }}
           help={() => Promise.resolve(undefined)}
           onInput={setDraftFilter}

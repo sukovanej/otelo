@@ -1,4 +1,4 @@
-import { For } from "solid-js";
+import { createProjection, For } from "solid-js";
 
 import { activeOption, cx, option, popup } from "../classes";
 import type { Suggestion } from "../completion";
@@ -17,6 +17,10 @@ interface QueryInputSuggestionsProps {
 }
 
 export default function QueryInputSuggestions(props: QueryInputSuggestionsProps) {
+  const activeIndexes = createProjection<Record<number, true>>(
+    () => ({ [props.activeIndex]: true }),
+    {},
+  );
   return (
     <ul
       ref={props.ref}
@@ -31,26 +35,25 @@ export default function QueryInputSuggestions(props: QueryInputSuggestionsProps)
       }}
     >
       <For each={props.suggestions}>
-        {(suggestion, index) => (
-          <li
-            role="option"
-            id={toSuggestionId(index())}
-            aria-selected={props.activeIndex === index() ? "true" : "false"}
-            class={cx(
-              option,
-              "items-baseline gap-2.5",
-              props.activeIndex === index() && activeOption,
-            )}
-            // Keeps the focus in the input.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => props.onTake(suggestion)}
-            onMouseEnter={() => props.onPoint(index())}
-          >
-            <span class="truncate whitespace-pre font-mono">{suggestion.text}</span>
-            <span class="text-2xs text-muted">{suggestion.kind}</span>
-            <span class="ml-auto whitespace-nowrap text-2xs text-muted">{suggestion.detail}</span>
-          </li>
-        )}
+        {(suggestion, index) => {
+          const isActive = () => activeIndexes[index()] === true;
+          return (
+            <li
+              role="option"
+              id={toSuggestionId(index())}
+              aria-selected={isActive() ? "true" : "false"}
+              class={cx(option, "items-baseline gap-2.5", isActive() && activeOption)}
+              // Keeps the focus in the input.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => props.onTake(suggestion)}
+              onMouseEnter={() => props.onPoint(index())}
+            >
+              <span class="truncate whitespace-pre font-mono">{suggestion.text}</span>
+              <span class="text-2xs text-muted">{suggestion.kind}</span>
+              <span class="ml-auto whitespace-nowrap text-2xs text-muted">{suggestion.detail}</span>
+            </li>
+          );
+        }}
       </For>
     </ul>
   );

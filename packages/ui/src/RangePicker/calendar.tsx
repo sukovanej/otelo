@@ -1,4 +1,4 @@
-import { createMemo, createSignal, flush, For } from "solid-js";
+import { createMemo, createProjection, createSignal, flush, For } from "solid-js";
 
 import { ChevronIcon } from "@otelo/icons";
 
@@ -48,6 +48,11 @@ export default function Calendar(props: CalendarProps) {
   const today = toLocalDate(new Date());
   const [focusedDate, setFocusedDate] = createSignal(() => props.value);
 
+  const focusedDates = createProjection<Record<string, true>>(
+    () => ({ [focusedDate()]: true }),
+    {},
+  );
+  const chosenDates = createProjection<Record<string, true>>(() => ({ [props.value]: true }), {});
   const month = createMemo(() => focusedDate().slice(0, 7));
   const weeks = createMemo(() => listMonthWeeks(month()));
   const monthTitle = () =>
@@ -91,36 +96,37 @@ export default function Calendar(props: CalendarProps) {
         </For>
       </div>
       <div ref={dayGrid} onKeyDown={onKeyDown}>
-        <For each={weeks()}>
+        <For each={weeks()} keyed={false}>
           {(week) => (
             <div class="grid grid-cols-7">
-              <For each={week}>
-                {(date) => (
-                  <button
-                    type="button"
-                    class={cx(
-                      "h-7 w-8 cursor-pointer rounded-md font-mono text-2xs",
-                      date === props.value
-                        ? "bg-accent font-semibold text-on-accent"
-                        : "hover:bg-hover",
-                      date !== props.value && date === today && "font-semibold text-accent",
-                      date !== props.value &&
-                        date !== today &&
-                        !isSameMonth(date, focusedDate()) &&
-                        "text-muted",
-                    )}
-                    tabindex={date === focusedDate() ? 0 : -1}
-                    aria-label={formatDayLabel(date)}
-                    aria-pressed={date === props.value ? "true" : "false"}
-                    aria-current={date === today ? "date" : undefined}
-                    onClick={() => {
-                      setFocusedDate(date);
-                      props.onChange(date);
-                    }}
-                  >
-                    {Number(date.slice(8))}
-                  </button>
-                )}
+              <For each={week()}>
+                {(date) => {
+                  const isChosen = () => chosenDates[date] === true;
+                  return (
+                    <button
+                      type="button"
+                      class={cx(
+                        "h-7 w-8 cursor-pointer rounded-md font-mono text-2xs",
+                        isChosen() ? "bg-accent font-semibold text-on-accent" : "hover:bg-hover",
+                        !isChosen() && date === today && "font-semibold text-accent",
+                        !isChosen() &&
+                          date !== today &&
+                          !isSameMonth(date, month()) &&
+                          "text-muted",
+                      )}
+                      tabindex={focusedDates[date] === true ? 0 : -1}
+                      aria-label={formatDayLabel(date)}
+                      aria-pressed={isChosen() ? "true" : "false"}
+                      aria-current={date === today ? "date" : undefined}
+                      onClick={() => {
+                        setFocusedDate(date);
+                        props.onChange(date);
+                      }}
+                    >
+                      {Number(date.slice(8))}
+                    </button>
+                  );
+                }}
               </For>
             </div>
           )}

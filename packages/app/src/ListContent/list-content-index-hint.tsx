@@ -1,7 +1,9 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, Show, useContext } from "solid-js";
 
-import { addIndex, type IndexedSignal } from "@otelo/api";
+import type { IndexedSignal } from "@otelo/api";
 import { Button, Callout } from "@otelo/ui";
+
+import { ApiContext } from "../api";
 
 type KeyIndexState = "indexing" | "indexed";
 
@@ -12,6 +14,7 @@ interface ListContentIndexHintProps {
 }
 
 export default function ListContentIndexHint(props: ListContentIndexHintProps) {
+  const api = useContext(ApiContext);
   const [keyStates, setKeyStates] = createSignal<ReadonlyMap<string, KeyIndexState>>(new Map());
   const [errorMessage, setErrorMessage] = createSignal<string>();
   const setKeyState = (key: string, state: KeyIndexState | undefined) =>
@@ -24,7 +27,7 @@ export default function ListContentIndexHint(props: ListContentIndexHintProps) {
   const indexAttribute = (key: string) => {
     setErrorMessage(undefined);
     setKeyState(key, "indexing");
-    return addIndex(props.signal, key).then(
+    return api.addIndex(props.signal, key).then(
       () => setKeyState(key, "indexed"),
       (error: unknown) => {
         setKeyState(key, undefined);

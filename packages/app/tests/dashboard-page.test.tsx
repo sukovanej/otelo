@@ -1,13 +1,12 @@
 import { captureArtifact } from "@solidjs/diagnostics";
-import { createRouter, memoryHistory } from "@solidjs/router";
-import { render } from "@solidjs/web";
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
+import { page, userEvent } from "vitest/browser";
 
 import type { Dashboard, DashboardDefinition } from "@otelo/api";
+import { expectNoReactivityMistakes } from "@otelo/testing";
 
-import DashboardPage from "../src/dashboards/DashboardPage";
-import { expectNoReactivityMistakes } from "./diagnostics";
+import { createFakeApi } from "./fake-api";
+import { mountApp } from "./mount";
 
 const SAVED_DEFINITION: DashboardDefinition = {
   name: "Latency",
@@ -15,85 +14,46 @@ const SAVED_DEFINITION: DashboardDefinition = {
   widgets: [],
 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  document.body.replaceChildren();
-});
-
 test("a dashboard keeps its edits apart from what it saved, through reloads, a discard and a save", async () => {
   const sentDefinitions: DashboardDefinition[] = [];
   let storedDefinition = SAVED_DEFINITION;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (_path: string, init: RequestInit) => {
-      if (init.method === "PUT" && typeof init.body === "string") {
-        storedDefinition = parseDefinition(init.body);
-        sentDefinitions.push(storedDefinition);
-      }
-      return Response.json(toDashboard(storedDefinition));
-    }),
-  );
-  const container = document.body.appendChild(document.createElement("div"));
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const Router = createRouter({
-    routes: [{ path: "/dashboards/:id", component: DashboardPage }],
-    history: memoryHistory("/dashboards/1"),
+  const api = createFakeApi({
+    getDashboard: () => Promise.resolve(toDashboard(storedDefinition)),
+    replaceDashboard: (_id, definition) => {
+      storedDefinition = definition;
+      sentDefinitions.push(definition);
+      return Promise.resolve(toDashboard(definition));
+    },
   });
+  const nameInput = page.getByLabelText("Name");
+  const unsavedChanges = page.getByText("Unsaved changes");
 
   const { artifact } = await captureArtifact(async () => {
-    render(
-      () => (
-        <QueryClientProvider client={queryClient}>
-          <Router />
-        </QueryClientProvider>
-      ),
-      container,
-    );
-    const nameInput = await vi.waitFor(() => {
-      const input = container.querySelector<HTMLInputElement>('input[aria-label="Name"]');
-      expect(input?.value).toBe("Latency");
-      return input;
-    });
+    const { queryClient } = mountApp(api, "/dashboards/1");
+    await expect.element(nameInput).toHaveValue("Latency");
 
-    await reloadDashboard(queryClient, container);
+    await queryClient.refetchQueries();
+    await expect.element(page.getByText("Loading…")).not.toBeInTheDocument();
 
-    typeName(nameInput, "Latency by route");
-    await vi.waitFor(() => expect(container.textContent).toContain("Unsaved changes"));
-    await reloadDashboard(queryClient, container);
-    expect(nameInput?.value).toBe("Latency by route");
-    clickButton(container, "Discard");
-    await vi.waitFor(() => expect(container.textContent).not.toContain("Unsaved changes"));
-    expect(nameInput?.value).toBe("Latency");
+    await userEvent.fill(nameInput, "Latency by route");
+    await expect.element(unsavedChanges).toBeInTheDocument();
+    await queryClient.refetchQueries();
+    await expect.element(page.getByText("Loading…")).not.toBeInTheDocument();
+    await expect.element(nameInput).toHaveValue("Latency by route");
+    await userEvent.click(page.getByRole("button", { name: "Discard", exact: true }));
+    await expect.element(unsavedChanges).not.toBeInTheDocument();
+    await expect.element(nameInput).toHaveValue("Latency");
 
-    typeName(nameInput, "Latency by route");
-    await vi.waitFor(() => expect(container.textContent).toContain("Unsaved changes"));
-    clickButton(container, "Save");
-    await vi.waitFor(() => expect(container.textContent).not.toContain("Unsaved changes"));
-    expect(nameInput?.value).toBe("Latency by route");
+    await userEvent.fill(nameInput, "Latency by route");
+    await expect.element(unsavedChanges).toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Save", exact: true }));
+    await expect.element(unsavedChanges).not.toBeInTheDocument();
+    await expect.element(nameInput).toHaveValue("Latency by route");
   });
 
   expect(sentDefinitions).toEqual([{ ...SAVED_DEFINITION, name: "Latency by route" }]);
   expectNoReactivityMistakes(artifact);
 });
-
-async function reloadDashboard(queryClient: QueryClient, container: HTMLElement) {
-  await queryClient.refetchQueries();
-  await vi.waitFor(() => expect(container.textContent).not.toContain("Loading…"));
-}
-
-function typeName(input: HTMLInputElement | null, name: string) {
-  if (!input) throw new Error("The page has no name field");
-  input.value = name;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-function clickButton(container: HTMLElement, label: string) {
-  const button = [...container.querySelectorAll("button")].find(
-    (candidate) => candidate.textContent.trim() === label,
-  );
-  if (!button) throw new Error(`The page has no ${label} button`);
-  button.click();
-}
 
 function toDashboard(definition: DashboardDefinition): Dashboard {
   return {
@@ -102,9 +62,4 @@ function toDashboard(definition: DashboardDefinition): Dashboard {
     updated_at: "2026-10-01T00:00:00Z",
     definition,
   };
-}
-
-function parseDefinition(body: string): DashboardDefinition {
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the page sends a definition
-  return JSON.parse(body) as DashboardDefinition;
 }

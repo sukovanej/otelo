@@ -1,9 +1,10 @@
-import { Errored, Show } from "solid-js";
+import { Errored, Show, useContext } from "solid-js";
 
-import { getServices, type ServiceSummary } from "@otelo/api";
+import type { ServiceSummary } from "@otelo/api";
 import { Callout } from "@otelo/ui";
 import { type Column, Panel, Sparkline, Table } from "@otelo/viz";
 
+import { ApiContext } from "../api";
 import { pageContent } from "../classes";
 import { formatCount } from "../count";
 import FetchErrorBoundary from "../FetchErrorBoundary";
@@ -13,8 +14,9 @@ import RangeBar from "./range-bar";
 import { measureSeconds, toRate, toShare } from "./stats";
 
 export default function ServicesPage() {
+  const api = useContext(ApiContext);
   const range = useRange();
-  const fetched = createRangeFetch(range, "services", () => ({}), getServices);
+  const fetched = createRangeFetch(range, "services", () => ({}), api.getServices);
   const rangeSeconds = () => {
     const services = fetched.data();
     return services ? measureSeconds(services.start_at, services.end_at) : 0;

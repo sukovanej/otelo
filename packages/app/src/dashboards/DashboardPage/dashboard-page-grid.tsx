@@ -55,13 +55,11 @@ interface GestureBase {
   readonly pointerId: number;
   readonly startLayouts: ReadonlyArray<WidgetLayout>;
   readonly layouts: ReadonlyArray<WidgetLayout>;
-  readonly lastPointerInWindow: PointInWindow;
 }
 
 interface MoveGesture extends GestureBase {
   readonly kind: "move";
   readonly grabOffset: PointInGrid;
-  readonly pointerInGrid: PointInGrid;
 }
 
 interface ResizeGesture extends GestureBase {
@@ -104,6 +102,8 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
   let grid!: HTMLDivElement;
   const [gridWidthPx, setGridWidthPx] = createSignal(0);
   const [gesture, setGesture] = createSignal<Gesture>();
+  const [pointerInGrid, setPointerInGrid] = createSignal<PointInGrid>({ x: 0, y: 0 });
+  let lastPointerInWindow: PointInWindow = { clientX: 0, clientY: 0 };
   onSettled(() => {
     setGridWidthPx(grid.clientWidth);
     const observer = new ResizeObserver((entries) => {
@@ -154,15 +154,15 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
     e.preventDefault();
     item.setPointerCapture(e.pointerId);
     const itemRect = item.getBoundingClientRect();
+    lastPointerInWindow = toPointInWindow(e);
+    setPointerInGrid(toPointInGrid(e));
     setGesture({
       kind: "move",
       index,
       pointerId: e.pointerId,
       startLayouts: savedLayouts(),
       layouts: savedLayouts(),
-      lastPointerInWindow: toPointInWindow(e),
       grabOffset: { x: e.clientX - itemRect.left, y: e.clientY - itemRect.top },
-      pointerInGrid: toPointInGrid(e),
     });
   };
   const continueMove = (current: MoveGesture, pointer: PointInWindow) => {
@@ -174,15 +174,17 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
       WIDE_GRID_COLUMNS - moving.width,
     );
     const row = Math.max(0, Math.round((pointInGrid.y - current.grabOffset.y) / ROW_STEP_PX));
-    setGesture({
-      ...current,
-      lastPointerInWindow: pointer,
-      pointerInGrid: pointInGrid,
-      layouts: settleLayouts(
+    setPointerInGrid(pointInGrid);
+    changeGestureLayouts(
+      current,
+      settleLayouts(
         replaceLayout(current.startLayouts, current.index, { ...moving, column, row }),
         current.index,
       ),
-    });
+    );
+  };
+  const changeGestureLayouts = (current: Gesture, layouts: ReadonlyArray<WidgetLayout>) => {
+    if (hasLayoutChanged(current.layouts, layouts)) setGesture({ ...current, layouts });
   };
 
   const startResize = (index: number, edge: ResizeEdge, e: PointerEvent) => {
@@ -193,13 +195,13 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
+    lastPointerInWindow = toPointInWindow(e);
     setGesture({
       kind: "resize",
       index,
       pointerId: e.pointerId,
       startLayouts: savedLayouts(),
       layouts: savedLayouts(),
-      lastPointerInWindow: toPointInWindow(e),
       edge,
       startShown: shown,
       startPoint: toPointInGrid(e),
@@ -218,17 +220,17 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
     const height = sides.height
       ? resizing.height + Math.round((point.y - current.startPoint.y) / ROW_STEP_PX)
       : resizing.height;
-    setGesture({
-      ...current,
-      lastPointerInWindow: pointer,
-      layouts: settleLayouts(
+    changeGestureLayouts(
+      current,
+      settleLayouts(
         replaceLayout(current.startLayouts, current.index, resizeLayout(resizing, width, height)),
         current.index,
       ),
-    });
+    );
   };
 
   const continueGestureAt = (current: Gesture, pointer: PointInWindow) => {
+    lastPointerInWindow = pointer;
     if (current.kind === "move") continueMove(current, pointer);
     else continueResize(current, pointer);
   };
@@ -238,7 +240,7 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
   };
   const followScroll = () => {
     const current = gesture();
-    if (current) continueGestureAt(current, current.lastPointerInWindow);
+    if (current) continueGestureAt(current, lastPointerInWindow);
   };
   createEffect(
     () => gesture() !== undefined,
@@ -322,9 +324,9 @@ export default function DashboardPageGrid(props: DashboardPageGridProps) {
           const followPointer = () => {
             const current = isMoving() ? gesture() : undefined;
             if (current?.kind !== "move") return undefined;
-            const x =
-              current.pointerInGrid.x - current.grabOffset.x - layout().column * columnStepPx();
-            const y = current.pointerInGrid.y - current.grabOffset.y - layout().row * ROW_STEP_PX;
+            const pointer = pointerInGrid();
+            const x = pointer.x - current.grabOffset.x - layout().column * columnStepPx();
+            const y = pointer.y - current.grabOffset.y - layout().row * ROW_STEP_PX;
             return `translate(${x}px, ${y}px)`;
           };
           return (

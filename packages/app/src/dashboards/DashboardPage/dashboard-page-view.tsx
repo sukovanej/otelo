@@ -13,16 +13,10 @@ import {
   Show,
   snapshot,
   untrack,
+  useContext,
 } from "solid-js";
 
-import {
-  createDashboard,
-  type DashboardDefinition,
-  deleteDashboard,
-  getDashboard,
-  replaceDashboard,
-  type Widget,
-} from "@otelo/api";
+import type { DashboardDefinition, Widget } from "@otelo/api";
 import { CopyIcon, PlusIcon, TrashIcon } from "@otelo/icons";
 import {
   ActionMenu,
@@ -33,6 +27,7 @@ import {
   RangePicker,
 } from "@otelo/ui";
 
+import { ApiContext } from "../../api";
 import { inlineField, link, pageContent } from "../../classes";
 import { createFetch, describeError, freezeDeeply } from "../../fetch";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
@@ -74,6 +69,7 @@ interface DashboardPageViewProps {
 }
 
 export default function DashboardPageView(props: DashboardPageViewProps) {
+  const api = useContext(ApiContext);
   let nameInput!: HTMLInputElement;
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,7 +78,7 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
   const fetched = createFetch(
     "dashboard",
     () => ({ id: props.id }),
-    ({ id }, signal) => getDashboard(id, signal).then(freezeDeeply),
+    ({ id }, signal) => api.getDashboard(id, signal).then(freezeDeeply),
   );
   const savedDefinition = createMemo(() => {
     const saved = fetched.data();
@@ -125,7 +121,7 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
     runAction("save", async () => {
       const sent = definition();
       if (!sent) return;
-      const answer = freezeDeeply(await replaceDashboard(props.id, sent));
+      const answer = freezeDeeply(await api.replaceDashboard(props.id, sent));
       setDraft((current) => current && { saved: sent, edited: current.edited });
       fetched.replaceData(answer);
     });
@@ -165,13 +161,13 @@ export default function DashboardPageView(props: DashboardPageViewProps) {
     runAction("clone", async () => {
       const cloned = definition();
       if (!cloned) return;
-      const clone = await createDashboard({ ...cloned, name: `${cloned.name} (copy)` });
+      const clone = await api.createDashboard({ ...cloned, name: `${cloned.name} (copy)` });
       isLeavingOnPurpose = true;
       navigate(`/dashboards/${clone.id}${range.toSearch()}`);
     });
   const deleteThisDashboard = async () => {
     const isDeleted = await runAction("delete", async () => {
-      await deleteDashboard(props.id);
+      await api.deleteDashboard(props.id);
       isLeavingOnPurpose = true;
       navigate("/dashboards");
     });

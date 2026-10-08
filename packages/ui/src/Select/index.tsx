@@ -325,7 +325,10 @@ export default function Select<T extends string>(props: SelectProps<T>) {
             {(ghost) => (
               <span
                 class="pointer-events-none absolute z-10 flex h-5.5 items-center gap-0.5 rounded bg-active pr-0.5 pl-1.5 shadow-popup ring-1 ring-line"
-                style={{ left: `${ghost().left}px`, top: `${ghost().top}px` }}
+                style={{
+                  left: `${tagDrag.ghostPoint().left}px`,
+                  top: `${tagDrag.ghostPoint().top}px`,
+                }}
               >
                 <span class="-translate-y-px">{findOptionLabel(ghost().value)}</span>
                 <span class="flex size-4 translate-y-px items-center justify-center text-muted">

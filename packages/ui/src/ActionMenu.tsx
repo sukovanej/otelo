@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createSignal, createUniqueId, For } from "solid-js";
+import { createEffect, createSignal, createUniqueId, For } from "solid-js";
 
 import { MoreIcon } from "@otelo/icons";
 
@@ -53,13 +53,17 @@ export default function ActionMenu(props: ActionMenuProps) {
     if (isOpen) {
       placeMenu();
       itemElements()[0]?.focus();
-      window.addEventListener("scroll", closeMenu, true);
-      window.addEventListener("resize", closeMenu);
-    } else {
-      window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("resize", closeMenu);
     }
   };
+  createEffect(open, (isOpen) => {
+    if (!isOpen) return undefined;
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    return () => {
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+    };
+  });
   const onMenuKeyDown = (e: KeyboardEvent) => {
     const elements = itemElements();
     const focusedIndex = elements.findIndex((element) => element === document.activeElement);

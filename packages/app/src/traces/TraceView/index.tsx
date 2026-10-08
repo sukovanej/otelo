@@ -1,10 +1,20 @@
 import type { JSX } from "@solidjs/web";
-import { type Accessor, createMemo, createSignal, Match, Show, snapshot, Switch } from "solid-js";
+import {
+  type Accessor,
+  createMemo,
+  createSignal,
+  Match,
+  Show,
+  snapshot,
+  Switch,
+  useContext,
+} from "solid-js";
 
-import { getTrace, type LogLine, toQueryString } from "@otelo/api";
+import { type LogLine, toQueryString } from "@otelo/api";
 import { Button, Callout, EmptyMessage, Tabs } from "@otelo/ui";
 import { Panel, Value } from "@otelo/viz";
 
+import { ApiContext } from "../../api";
 import { pageContent } from "../../classes";
 import { formatCount } from "../../count";
 import { createFetch } from "../../fetch";
@@ -40,11 +50,12 @@ interface TraceViewProps {
 }
 
 export default function TraceView(props: TraceViewProps) {
+  const api = useContext(ApiContext);
   const state = () => props.state;
   const fetched = createFetch(
     "trace",
     () => props.id,
-    (id, signal) => getTrace(id, {}, signal),
+    (id, signal) => api.getTrace(id, {}, signal),
   );
   const trace = fetched.data;
   const rows = createMemo<TreeRow[]>((previousRows) =>

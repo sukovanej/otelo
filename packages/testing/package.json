@@ -1,0 +1,25 @@
+{
+  "name": "@otelo/testing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./commands": "./src/commands.ts"
+  },
+  "devDependencies": {
+    "@solidjs/diagnostics": "catalog:",
+    "@solidjs/web": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "playwright": "catalog:",
+    "solid-js": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@solidjs/diagnostics": "catalog:",
+    "@solidjs/web": "catalog:",
+    "solid-js": "catalog:",
+    "vitest": "catalog:"
+  }
+}

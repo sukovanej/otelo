@@ -21,6 +21,7 @@ change did not touch.
 - Pure components in `packages/ui`, the ones that show data in `packages/viz`, icons in
   `packages/icons`. None of them imports `@otelo/api`. The app wraps them with data.
 - A component that reaches the daemon, or lays out a whole page, stays in `packages/app`.
+- What the tests of several packages share, in `packages/testing`.
 
 ## File names
 
@@ -86,6 +87,8 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   `createSignal(() => props.value)`. It resets when the source changes.
 - **A prop read once on purpose** goes through `untrack(() => props.initialSpanId)`. Every
   other prop read sits in JSX, a memo or the first function of an effect.
+- **The daemon's API comes from `ApiContext`.** A component reads `useContext(ApiContext)`,
+  and a helper that calls the daemon takes the `Api` as its first argument.
 - **Fetching goes through `createFetch`** in `fetch.ts`, which wraps `useQuery` of
   `@tanstack/solid-query`. Each caller names its query, so two fetches with the same key
   keep apart in the cache. Solid holds every reader of a changed key until the answer
@@ -93,13 +96,19 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   that echoes its own source reads it through `latest(range.since)`, or it lags a click
   and a second click builds on the old value. The `latest()` read sits in the control's
   own JSX: a memo or projection derived from a held value stays held, even when it reads
-  through `latest()`. `loading()` shows the wait.
+  through `latest()`. A handler that builds the next value on a held one reads it through
+  `latest()` too, as `list.addTerm` does. `loading()` shows the wait.
+- **A loading flag renders as text** in an element that stays mounted, as `PageBar` does. In
+  rc.14 an element that `<Show>` or a ternary mounts from `loading()` keeps the pending value
+  after the answer lands.
 - **Fetched rows are a store a reload merges into by position**, since the daemon's rows
   carry no `id`. A row kept past the next answer turns into whatever record lands at its
   index, so a selection keeps `snapshot(row)`, as `TracesPage` does.
 - **A list of objects a memo builds anew** goes through `<For keyed={false}>`, or keyed
   by a stable field, as `Table` keys rows by `rowKey`. Keyed by identity, every refresh
   throws away and rebuilds each row.
+- **A `<For>` row reads `index()` in its JSX** or in a `<Show>` condition. The row function
+  itself runs untracked.
 - **One value compared in every row**, a selection or an open item, is a
   `createProjection` map that each row reads by its own key, as `Table` does with
   `selectedKey`. A change then re-runs the two rows that flipped.
@@ -131,10 +140,30 @@ The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 A boolean `aria-*` value renders as an empty attribute, which `aria-selected:` and the
 other Tailwind variants do not match.
 
-A change is done when `mise check` passes and the pages it touches, served by
-`mise run web:dev`, add no new warning to the browser console. The dev build names
-reactivity mistakes there, and
-`packages/app/node_modules/solid-js/skills/reactivity-diagnostics/SKILL.md` explains each one.
+Link preloading stays off in `AppRoot`: no route preloads anything, and the router of
+next.37 runs its hover timer after it is disposed.
+
+## Tests
+
+A `.ts` test covers a module in Node. A `.tsx` test renders components in Chromium, through
+Vitest browser mode, with the real styles and the dev build of Solid.
+
+- Every dependency arrives through a context or an argument. `mountApp(api, path)` mounts the
+  whole app at a route, `mountWithApi(api, view)` one component under the API, and
+  `mountView(view)` from `@otelo/testing` a component of `ui` or `viz`. Each unmounts when its
+  test finishes.
+- `createFakeApi({ getLogs: … })` is the daemon. An endpoint the test leaves out fails its
+  request with its name. `createHeldAnswers` and `createDeferred` hold an answer, so the test
+  acts while the request waits.
+- The test acts as a user: `userEvent` and `page` locators from `vitest/browser`, and
+  `pressPointerAt`, `movePointerTo` and `releasePointer` for a drag.
+- The interaction runs inside `captureArtifact`, and the test ends with
+  `expectNoReactivityMistakes(artifact)`. A cost is pinned with `expectRerunBudget` over one
+  interaction.
+
+A change is done when `mise check` passes and a test of each page it touches captures no
+reactivity mistake. `node_modules/solid-js/skills/reactivity-diagnostics/SKILL.md` explains
+each code a capture or the browser console reports.
 
 ## Names
 

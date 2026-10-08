@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@import "@otelo/ui/theme.css";
+
+@source "../src";
+@source "../../ui/src";
+@source "../../icons/src";

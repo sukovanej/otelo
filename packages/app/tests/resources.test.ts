@@ -1,8 +1,9 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 
-import type { MetricSeries, SeriesGroup } from "@otelo/api";
+import type { Api, MetricSeries, SeriesGroup } from "@otelo/api";
 
 import { getServiceResources, toResourceCharts } from "../src/services/resources";
+import { createFakeApi } from "./fake-api";
 
 const SERVICE_KEY: SeriesGroup["key"] = {
   type: "values",
@@ -63,10 +64,6 @@ const cgroupMemoryGroup = toBytesGroup([
   [2, 320e6],
 ]);
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 test("the CPU is the rate of the CPU time, which is a share of one core", () => {
   const charts = toResourceCharts({
     service: "mudro",
@@ -107,29 +104,36 @@ test("a service without the series of a unit has none to show", () => {
 });
 
 test("the series come from the host collector, not from the SDK of the app", async () => {
-  const requestedUrls: string[] = [];
-  vi.stubGlobal("fetch", (url: string) => {
-    requestedUrls.push(url);
-    const name = decodeURIComponent(url.split("?")[0]?.split("/").at(-1) ?? "");
-    return Promise.resolve(Response.json(toMetricSeries(name, [])));
+  const requests: MetricSeriesRequest[] = [];
+  const api = createFakeApi({
+    getMetricSeries: (name, query) => {
+      requests.push({ name, query });
+      return Promise.resolve(toMetricSeries(name, []));
+    },
   });
 
   const resources = await getServiceResources(
+    api,
     { service: 'say "hi"', since: "1h", until: "" },
     new AbortController().signal,
   );
 
   expect(resources.service).toBe('say "hi"');
   expect(resources.cgroupMemory.name).toBe("process.cgroup.memory.usage");
-  expect(requestedUrls.map((url) => url.split("?")[0])).toEqual([
-    "/api/metrics/process.cpu.time",
-    "/api/metrics/process.memory.usage",
-    "/api/metrics/process.cgroup.memory.usage",
-  ]);
-  const params = new URLSearchParams(requestedUrls[0]?.split("?")[1]);
-  expect(Object.fromEntries(params)).toEqual({
+  const hostCollectorQuery = {
     q: 'service = "say \\"hi\\"" NOT has(resource.telemetry.sdk.name)',
     since: "1h",
+    until: "",
     by: "service",
-  });
+  };
+  expect(requests).toEqual([
+    { name: "process.cpu.time", query: hostCollectorQuery },
+    { name: "process.memory.usage", query: hostCollectorQuery },
+    { name: "process.cgroup.memory.usage", query: hostCollectorQuery },
+  ]);
 });
+
+interface MetricSeriesRequest {
+  readonly name: string;
+  readonly query: Parameters<Api["getMetricSeries"]>[1];
+}
