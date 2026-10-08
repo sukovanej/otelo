@@ -5,7 +5,31 @@ All notable changes to otelo are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.6...main)
+## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.7...main)
+
+## [0.0.7](https://github.com/sukovanej/otelo/compare/v0.0.6...v0.0.7) - 2026-10-08
+
+### Changed
+
+- An arrow key in the query suggestions or the calendar, and a drag of a
+  Select tag or a dashboard widget, re-run a tenth of the code they did. An
+  arrow key in the calendar went from 43 re-runs to 4.
+- The chart legend keeps its focus when the chart reloads.
+
+### Fixed
+
+- "Loading…" stayed on the logs and traces pages after a sort, a new query,
+  or a reload.
+- Removing a query tab to the right of the shown one showed the wrong tab.
+- The sort header of the traces page lagged a click while the sorted list
+  loaded, and a second click sorted from the old order.
+- A second filter click during a load dropped the first term.
+- An open suggestion list jumped back to the left on every keystroke.
+- A menu removed while open kept its window listeners.
+- Log out showed nothing while it ran and hid a failure. The button reads
+  "Logging out…" and an alert shows the error.
+- A dashboard widget whose query changed kept its old message with no sign
+  of the load. The message dims while the widget loads.
 
 ## [0.0.6](https://github.com/sukovanej/otelo/compare/v0.0.5...v0.0.6) - 2026-10-08
 
