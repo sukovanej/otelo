@@ -3,6 +3,8 @@ status: backlog
 created: 2026-10-08T22:06:59Z
 tags:
 - bug
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/66
 ---
 # Report the Solid rc.14 regression that stops writes committing, and drop the solid-query patch
 
