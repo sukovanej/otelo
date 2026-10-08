@@ -1,5 +1,5 @@
 ---
-status: todo
+status: done
 created: 2026-09-27T18:27:45Z
 parent: ./00001-collect-and-query-telemetry.md
 dependencies:
