@@ -129,9 +129,12 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
   remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
   write during disposal held every later update, and the router froze with it. rc.14
-  still freezes when that write lands on a held node, so `patches/` makes the hook of
-  `@tanstack/solid-query` drop its cache listener before its observer, whose removal
-  writes the hook's version signal.
+  regressed on a narrower case: an async memo writes a signal it reads as it goes
+  pending, is disposed while held, and a cleanup writes that signal again. Every later
+  write then reaches the screen but never commits, so the router stops updating the URL.
+  The hook of `@tanstack/solid-query` does all three, and `patches/` makes it drop its
+  cache listener before its observer, whose removal made the cleanup write. Drop the
+  patch once Solid fixes the regression.
 
 The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 
