@@ -69,6 +69,7 @@ export default function QueryInput(props: QueryInputProps) {
   const [openHelp, setOpenHelp] = createSignal<OpenHelp>();
   let completeTimer: ReturnType<typeof setTimeout> | undefined;
   let completeController: AbortController | undefined;
+  let completedWordStart: number | undefined;
   let helpController: AbortController | undefined;
   let pointedToken: QueryToken | undefined;
 
@@ -88,14 +89,16 @@ export default function QueryInput(props: QueryInputProps) {
   const closeSuggestions = () => {
     clearTimeout(completeTimer);
     completeController?.abort();
+    completedWordStart = undefined;
     setListOpen(false);
     setActiveIndex(NO_SUGGESTION_PICKED);
   };
 
-  const requestSuggestions = () => {
+  const completeWordAtCursor = () => {
+    completedWordStart = findWordStart(input);
     clearTimeout(completeTimer);
+    completeController?.abort();
     completeTimer = setTimeout(() => {
-      completeController?.abort();
       const controller = new AbortController();
       completeController = controller;
       const query = input.value;
@@ -108,13 +111,24 @@ export default function QueryInput(props: QueryInputProps) {
           setSuggestions(list);
           setActiveIndex(NO_SUGGESTION_PICKED);
           setListOpen(list.length > 0);
+          if (list.length === 0) completedWordStart = undefined;
         },
         (error: unknown) => {
           // Completion is a help, so a failed one only hides the list.
-          if (!isAbortError(error)) setListOpen(false);
+          if (isAbortError(error)) return;
+          completedWordStart = undefined;
+          setListOpen(false);
         },
       );
     }, COMPLETE_DELAY_MS);
+  };
+
+  const followCursor = () => {
+    if (isStartingWord(input) || findWordStart(input) === completedWordStart) {
+      completeWordAtCursor();
+    } else {
+      closeSuggestions();
+    }
   };
 
   const takeSuggestion = (suggestion: Suggestion) => {
@@ -122,7 +136,7 @@ export default function QueryInput(props: QueryInputProps) {
     input.value = next.text;
     input.setSelectionRange(next.cursor, next.cursor);
     props.onInput(next.text);
-    requestSuggestions();
+    closeSuggestions();
   };
 
   // The card stays closed until the pointer comes to another token.
@@ -178,7 +192,7 @@ export default function QueryInput(props: QueryInputProps) {
     if (step !== 0) {
       e.preventDefault();
       if (!shown) {
-        if (step > 0) requestSuggestions();
+        if (step > 0) completeWordAtCursor();
         return;
       }
       setActiveIndex((index) => moveListIndex(index, step, list.length, true));
@@ -249,7 +263,7 @@ export default function QueryInput(props: QueryInputProps) {
         onInput={(e) => {
           closeHelp();
           props.onInput(e.currentTarget.value);
-          requestSuggestions();
+          followCursor();
         }}
         onPointerMove={onPointerMove}
         onPointerLeave={closeHelp}
@@ -267,11 +281,11 @@ export default function QueryInput(props: QueryInputProps) {
             e.key === "Home" ||
             e.key === "End"
           ) {
-            requestSuggestions();
+            followCursor();
           }
         }}
-        onClick={requestSuggestions}
-        onFocus={requestSuggestions}
+        onClick={followCursor}
+        onFocus={followCursor}
         onBlur={closeSuggestions}
         role="combobox"
         aria-expanded={listShown() ? "true" : "false"}
@@ -304,6 +318,18 @@ export default function QueryInput(props: QueryInputProps) {
       </Show>
     </div>
   );
+}
+
+function isStartingWord(input: HTMLInputElement): boolean {
+  return input.value === "" || /[\s(,]$/.test(textBeforeCursor(input));
+}
+
+function findWordStart(input: HTMLInputElement): number {
+  return textBeforeCursor(input).search(/[^\s(,]*$/);
+}
+
+function textBeforeCursor(input: HTMLInputElement): string {
+  return input.value.slice(0, input.selectionStart ?? input.value.length);
 }
 
 function isAbortError(error: unknown): boolean {

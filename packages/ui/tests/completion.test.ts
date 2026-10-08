@@ -10,7 +10,7 @@ test("toChars and toUtf16 count a character outside the BMP once", () => {
 });
 
 describe("applySuggestion", () => {
-  test("replaces the word at the cursor and adds a space", () => {
+  test("replaces the word at the cursor", () => {
     const next = applySuggestion("http.ro", {
       text: "http.route",
       start: 0,
@@ -18,10 +18,10 @@ describe("applySuggestion", () => {
       kind: "field",
       detail: null,
     });
-    expect(next).toEqual({ text: "http.route ", cursor: 11 });
+    expect(next).toEqual({ text: "http.route", cursor: 10 });
   });
 
-  test("keeps the space or the parenthesis that follows", () => {
+  test("keeps the text that follows", () => {
     const next = applySuggestion('x = "/l" y = 1', {
       text: '"/languages"',
       start: 4,
@@ -44,6 +44,6 @@ describe("applySuggestion", () => {
       kind: "value",
       detail: null,
     });
-    expect(next).toEqual({ text: '😀 = "x" ', cursor: 9 });
+    expect(next).toEqual({ text: '😀 = "x"', cursor: 8 });
   });
 });
