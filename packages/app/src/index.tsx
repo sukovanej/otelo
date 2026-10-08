@@ -1,81 +1,32 @@
-import { createRouter, useNavigate } from "@solidjs/router";
+import { browserHistory } from "@solidjs/router";
 import { render } from "@solidjs/web";
-import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { Show } from "solid-js";
+import { QueryCache, QueryClient } from "@tanstack/solid-query";
 
-import { isUnauthorizedError } from "@otelo/api";
+import { createApi, isUnauthorizedError } from "@otelo/api";
 
-import App from "./App";
-import DashboardPage from "./dashboards/DashboardPage";
-import DashboardsPage from "./dashboards/DashboardsPage";
+import AppRoot from "./AppRoot";
 import { trimUnwatchedListsToFirstPage } from "./fetch";
-import { askForLogin, finishLogin, isLoginNeeded } from "./login";
-import LoginPage from "./LoginPage";
-import LogsPage from "./logs/LogsPage";
-import MetricsPage from "./metrics/MetricsPage";
-import ServicePage from "./services/ServicePage";
-import ServicesPage from "./services/ServicesPage";
-import TracePage from "./traces/TracePage";
-import TracesPage from "./traces/TracesPage";
+import { createLoginState } from "./login";
 
 import "@otelo/ui/fonts.css";
 import "./app.css";
 
+const api = createApi(fetch);
+const login = createLoginState();
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error) => {
-      if (isUnauthorizedError(error)) askForLogin();
+      if (isUnauthorizedError(error)) login.askForLogin();
     },
   }),
   defaultOptions: { queries: { retry: false } },
 });
 trimUnwatchedListsToFirstPage(queryClient);
 
-const Router = createRouter({
-  routes: [
-    { path: "/", component: RedirectToServices },
-    { path: "/services", component: ServicesPage },
-    { path: "/services/:name", component: ServicePage },
-    { path: "/logs", component: LogsPage },
-    { path: "/traces", component: TracesPage },
-    { path: "/traces/:id", component: TracePage },
-    { path: "/metrics/:name?", component: MetricsPage },
-    { path: "/dashboards", component: DashboardsPage },
-    { path: "/dashboards/:id", component: DashboardPage },
-    { path: "*", component: NotFound },
-  ],
-});
-
-function RedirectToServices() {
-  const navigate = useNavigate();
-  navigate("/services", { replace: true });
-  return null;
-}
-
-function NotFound() {
-  return <div class="py-8 text-center text-muted">Nothing is at this address.</div>;
-}
-
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html has no #root");
 
 render(
-  () => (
-    <QueryClientProvider client={queryClient}>
-      <Show
-        when={!isLoginNeeded()}
-        fallback={
-          <LoginPage
-            onLogin={() => {
-              queryClient.clear();
-              finishLogin();
-            }}
-          />
-        }
-      >
-        <Router>{(props) => <App {...props} />}</Router>
-      </Show>
-    </QueryClientProvider>
-  ),
+  () => <AppRoot api={api} login={login} queryClient={queryClient} history={browserHistory()} />,
   root,
 );

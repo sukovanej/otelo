@@ -98,8 +98,8 @@ export default function SelectChosenList<T extends string>(props: SelectChosenLi
             <div
               class="pointer-events-none absolute z-10 flex h-7 items-center gap-1.5 rounded-[5px] border border-line bg-surface pr-1 shadow-popup"
               style={{
-                left: `${ghost().left}px`,
-                top: `${ghost().top}px`,
+                left: `${drag.ghostPoint().left}px`,
+                top: `${drag.ghostPoint().top}px`,
                 width: `${ghost().width}px`,
               }}
             >

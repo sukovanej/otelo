@@ -1,4 +1,4 @@
-import { completeQuery, type FieldBody, type FieldSource, type Signal } from "@otelo/api";
+import type { Api, FieldBody, FieldSource, Signal } from "@otelo/api";
 import type { QueryToken } from "@otelo/ui";
 
 import type { RangeBounds } from "./services/range";
@@ -25,6 +25,7 @@ interface Noun {
 }
 
 export async function describeFieldOfToken(
+  api: Api,
   signal: Signal,
   range: RangeBounds,
   query: string,
@@ -35,7 +36,7 @@ export async function describeFieldOfToken(
   // The field alone, so the rest of the query cannot hide it.
   const name = query.slice(token.start, token.end);
   const cursor = Array.from(name).length;
-  const { field } = await completeQuery({ signal, q: name, cursor, ...range }, abort);
+  const { field } = await api.completeQuery({ signal, q: name, cursor, ...range }, abort);
   return field ?? undefined;
 }
 

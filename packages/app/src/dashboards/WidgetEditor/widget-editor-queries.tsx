@@ -26,9 +26,7 @@ export default function WidgetEditorQueries(props: WidgetEditorQueriesProps) {
     props.onChange([...props.queries, lastQuery]);
   };
   const removeQuery = (index: number) => {
-    if (index < shownIndex() || index === props.queries.length - 1) {
-      setChosenIndex(Math.max(0, shownIndex() - 1));
-    }
+    setChosenIndex(index < shownIndex() ? shownIndex() - 1 : shownIndex());
     props.onChange(props.queries.toSpliced(index, 1));
   };
   const changeShownQuery = (changed: GroupedQuery) =>

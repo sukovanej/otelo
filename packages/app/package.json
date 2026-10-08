@@ -13,10 +13,12 @@
     "solid-js": "catalog:"
   },
   "devDependencies": {
+    "@otelo/testing": "workspace:*",
     "@solidjs/diagnostics": "catalog:",
     "@solidjs/vite-plugin": "catalog:",
     "@tailwindcss/vite": "catalog:",
-    "jsdom": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "playwright": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",

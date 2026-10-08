@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { Show } from "solid-js";
+import { children, Show } from "solid-js";
 
 interface PanelProps {
   readonly title?: string | undefined;
@@ -13,6 +13,8 @@ interface PanelProps {
 }
 
 export default function Panel(props: PanelProps) {
+  const description = children(() => props.description);
+  const actions = children(() => props.actions);
   return (
     <section
       class={[
@@ -23,7 +25,7 @@ export default function Panel(props: PanelProps) {
       // as the header of a table, takes the color of the panel.
       style={{ "--viz-surface": "var(--color-panel)" }}
     >
-      <Show when={props.title || props.actions}>
+      <Show when={props.title || actions()}>
         <header
           class={[
             "flex min-h-10 items-center gap-x-3 gap-y-1 border-b border-line bg-subtle px-4 py-2",
@@ -34,11 +36,11 @@ export default function Panel(props: PanelProps) {
             <Show when={props.title}>
               <h2 class="m-0 truncate text-sm font-semibold">{props.title}</h2>
             </Show>
-            <Show when={props.description}>
-              <div class="truncate text-xs text-muted">{props.description}</div>
+            <Show when={description()}>
+              <div class="truncate text-xs text-muted">{description()}</div>
             </Show>
           </div>
-          <Show when={props.actions}>
+          <Show when={actions()}>
             <div
               class={[
                 "flex items-center gap-3 text-xs",
@@ -49,7 +51,7 @@ export default function Panel(props: PanelProps) {
                 },
               ]}
             >
-              {props.actions}
+              {actions()}
             </div>
           </Show>
         </header>

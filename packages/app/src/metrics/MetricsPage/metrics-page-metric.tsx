@@ -1,10 +1,11 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createMemo, For, latest, Show } from "solid-js";
+import { createMemo, For, latest, Show, untrack, useContext } from "solid-js";
 
-import { getMetricSeries, type MetricSeries, type SeriesInfo } from "@otelo/api";
+import type { MetricSeries, SeriesInfo } from "@otelo/api";
 import { Callout, EmptyMessage, Select } from "@otelo/ui";
 import { ChartPanel, formatValue } from "@otelo/viz";
 
+import { ApiContext } from "../../api";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { createRangeFetch, type RangeState } from "../../services/range";
 import { listGroupingOptions, toMetricCharts, toMetricFrame } from "../metric";
@@ -39,17 +40,18 @@ interface MetricsPageMetricProps {
 }
 
 export default function MetricsPageMetric(props: MetricsPageMetricProps) {
+  const api = useContext(ApiContext);
   const [params, setParams] = useSearchParams<GroupingSearchParams>();
   const by = createMemo(() => (params.by ?? "").split(",").filter((name) => name !== ""));
   const top = (): TopValue =>
     TOP_OPTIONS.find((option) => option.value === params.top)?.value ?? "";
 
   const fetched = createRangeFetch(
-    props.range,
+    untrack(() => props.range),
     "metric-series",
     () => ({ name: props.name, q: props.query.trim(), by: by().join(","), top: top() }),
     (key, signal) =>
-      getMetricSeries(
+      api.getMetricSeries(
         key.name,
         {
           q: key.q,

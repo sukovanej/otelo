@@ -448,7 +448,9 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
           <thead>
             <tr>
               <th scope="col">Time</th>
-              <For each={coloredSeries()}>{(series) => <th scope="col">{series.label}</th>}</For>
+              <For each={coloredSeries()} keyed={(series) => series.label}>
+                {(series) => <th scope="col">{series().label}</th>}
+              </For>
             </tr>
           </thead>
           <tbody>
@@ -456,8 +458,8 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
               {(bucketStartMs, bucketIndex) => (
                 <tr>
                   <th scope="row">{formatInstant(bucketStartMs)}</th>
-                  <For each={coloredSeries()}>
-                    {(series) => <td>{formatValue(series.values[bucketIndex()], props.unit)}</td>}
+                  <For each={coloredSeries()} keyed={(series) => series.label}>
+                    {(series) => <td>{formatValue(series().values[bucketIndex()], props.unit)}</td>}
                   </For>
                 </tr>
               )}

@@ -1,17 +1,10 @@
 import { type SearchParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { createSignal, Match, Show, snapshot, Switch } from "solid-js";
+import { createSignal, latest, Match, Show, snapshot, Switch, useContext } from "solid-js";
 
-import {
-  getSpans,
-  getTraces,
-  toQueryString,
-  type SpanSort,
-  type Spans,
-  type Traces,
-  type TraceSpan,
-} from "@otelo/api";
+import { toQueryString, type SpanSort, type Spans, type Traces, type TraceSpan } from "@otelo/api";
 import { EmptyMessage } from "@otelo/ui";
 
+import { ApiContext } from "../../api";
 import { formatCount } from "../../count";
 import { createListState, usePageKeys } from "../../list";
 import ListContent from "../../ListContent";
@@ -47,6 +40,7 @@ interface OpenTraceSearchParams extends SearchParams {
 }
 
 export default function TracesPage() {
+  const api = useContext(ApiContext);
   const list = createListState<TracesView, TracesResult, SpanSort>({
     name: "traces",
     views: ["traces", "spans"],
@@ -54,8 +48,8 @@ export default function TracesPage() {
     firstLimits: { traces: 50, spans: 200 },
     fetch: async (key, signal) =>
       key.view === "spans"
-        ? { view: "spans", body: await getSpans(key, signal) }
-        : { view: "traces", body: await getTraces(key, signal) },
+        ? { view: "spans", body: await api.getSpans(key, signal) }
+        : { view: "traces", body: await api.getTraces(key, signal) },
     pageJoining: {
       readNextCursor: (result) => result.body.next ?? undefined,
       joinPages: joinTracesPages,
@@ -155,7 +149,7 @@ export default function TracesPage() {
                 <TraceList
                   traces={body().traces}
                   onOpen={openTrace}
-                  sorting={{ sort: sort(), onSort: list.setSortOrder }}
+                  sorting={{ sort: latest(sort), onSort: list.setSortOrder }}
                 />
               </Show>
             )}
@@ -170,7 +164,7 @@ export default function TracesPage() {
                   spans={body().spans}
                   selectedKey={selectedKey()}
                   onSelect={selectSpan}
-                  sorting={{ sort: sort(), onSort: list.setSortOrder }}
+                  sorting={{ sort: latest(sort), onSort: list.setSortOrder }}
                 />
               </Show>
             )}

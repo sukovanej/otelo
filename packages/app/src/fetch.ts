@@ -1,4 +1,5 @@
 import {
+  hashKey,
   type InfiniteData,
   type QueryClient,
   replaceEqualDeep,
@@ -40,8 +41,9 @@ export function createFetch<K, T>(
   live: Accessor<boolean> = () => false,
 ): ReplaceableFetchState<T> {
   const queryClient = useQueryClient();
+  const requestKeyByContent = memoizeKeyByContent(key);
   const query = useQuery(() => {
-    const requestKey = key();
+    const requestKey = requestKeyByContent();
     return {
       queryKey: [queryName, requestKey],
       queryFn: ({ signal }) => fetcher(requestKey, signal),
@@ -62,7 +64,7 @@ export function createFetch<K, T>(
     loading: () => query.isFetching || isPending(() => query.data),
     updatedAt,
     reload: () => void query.refetch(),
-    replaceData: (data) => queryClient.setQueryData([queryName, key()], data),
+    replaceData: (data) => queryClient.setQueryData([queryName, requestKeyByContent()], data),
   };
 }
 
@@ -73,8 +75,9 @@ export function createPagedFetch<K, T>(
   pageJoining: PageJoining<T> | undefined,
   live: Accessor<boolean> = () => false,
 ): PagedFetchState<T> {
+  const requestKeyByContent = memoizeKeyByContent(key);
   const query = useInfiniteQuery(() => {
-    const requestKey = key();
+    const requestKey = requestKeyByContent();
     const isLive = live();
     return {
       // A refresh reads every loaded page again, so a live list keeps its own single page.
@@ -147,6 +150,10 @@ export function freezeDeeply<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+function memoizeKeyByContent<K>(key: Accessor<K>): Accessor<K> {
+  return createMemo(key, { equals: (shown, next) => hashKey([shown]) === hashKey([next]) });
 }
 
 function isInfiniteData(data: unknown): data is InfiniteData<unknown> {

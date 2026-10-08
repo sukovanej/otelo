@@ -1,13 +1,18 @@
-import { createSignal } from "solid-js";
+import { type Accessor, createContext, createSignal } from "solid-js";
 
-const [isLoginNeeded, setLoginNeeded] = createSignal(false);
-
-export { isLoginNeeded };
-
-export function askForLogin() {
-  setLoginNeeded(true);
+export interface LoginState {
+  readonly isLoginNeeded: Accessor<boolean>;
+  readonly askForLogin: () => void;
+  readonly finishLogin: () => void;
 }
 
-export function finishLogin() {
-  setLoginNeeded(false);
+export const LoginContext = createContext<LoginState>();
+
+export function createLoginState(): LoginState {
+  const [isLoginNeeded, setLoginNeeded] = createSignal(false);
+  return {
+    isLoginNeeded,
+    askForLogin: () => setLoginNeeded(true),
+    finishLogin: () => setLoginNeeded(false),
+  };
 }

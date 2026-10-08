@@ -21,9 +21,9 @@ interface ChartPanelLegendProps {
 export default function ChartPanelLegend(props: ChartPanelLegendProps) {
   return (
     <ul class="m-0 flex list-none flex-wrap justify-end gap-x-1 p-0 text-xs text-muted">
-      <For each={props.series}>
+      <For each={props.series} keyed={(series) => series.label}>
         {(series, index) => {
-          const cssColor = () => toCssColor(series.color ?? pickDefaultColor(index()));
+          const cssColor = () => toCssColor(series().color ?? pickDefaultColor(index()));
           const isIsolated = () => props.isolatedIndex === index();
           return (
             <li>
@@ -34,7 +34,7 @@ export default function ChartPanelLegend(props: ChartPanelLegendProps) {
                   { "opacity-40": props.isolatedIndex !== undefined && !isIsolated() },
                 ]}
                 aria-pressed={isIsolated() ? "true" : "false"}
-                title={isIsolated() ? "Show every series" : `Show ${series.label} alone`}
+                title={isIsolated() ? "Show every series" : `Show ${series().label} alone`}
                 onClick={() => props.onIsolate(isIsolated() ? undefined : index())}
               >
                 <span class={KEY_CLASSES[props.kind]} style={{ background: cssColor() }} />

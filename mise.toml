@@ -83,9 +83,14 @@ description = "Web types, with tsc in each package"
 depends = ["web:install"]
 run = "pnpm --recursive exec tsc"
 
+[tasks."web:chromium"]
+description = "Install the Chromium the component tests run in, with its system libraries on CI"
+depends = ["web:install"]
+run = "pnpm --filter @otelo/app exec playwright install ${CI:+--with-deps} chromium-headless-shell"
+
 [tasks."check:web:test"]
 description = "Web tests, with vitest in each package"
-depends = ["web:install"]
+depends = ["web:chromium"]
 run = "pnpm --recursive exec vitest run"
 
 [tasks.check]

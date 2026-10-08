@@ -1,11 +1,12 @@
 import { type SearchParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { createMemo, createSignal, Errored, Show } from "solid-js";
+import { createMemo, createSignal, Errored, Show, useContext } from "solid-js";
 
-import { createDashboard, type DashboardSummary, listDashboards } from "@otelo/api";
+import type { DashboardSummary } from "@otelo/api";
 import { PlusIcon } from "@otelo/icons";
 import { Button, Callout } from "@otelo/ui";
 import { type Column, Panel, Table } from "@otelo/viz";
 
+import { ApiContext } from "../api";
 import { pageContent, textField } from "../classes";
 import { formatCount } from "../count";
 import { createFetch, describeError } from "../fetch";
@@ -57,6 +58,7 @@ interface DashboardSearchParams extends SearchParams {
 }
 
 export default function DashboardsPage() {
+  const api = useContext(ApiContext);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams<DashboardSearchParams>();
   const [createError, setCreateError] = createSignal<string>();
@@ -64,7 +66,7 @@ export default function DashboardsPage() {
   const fetched = createFetch(
     "dashboards",
     () => ({}),
-    (_, signal) => listDashboards(signal),
+    (_, signal) => api.listDashboards(signal),
   );
   const search = () => params.q ?? "";
   const matchingDashboards = createMemo(() => {
@@ -81,7 +83,7 @@ export default function DashboardsPage() {
     setCreating(true);
     setCreateError(undefined);
     try {
-      const dashboard = await createDashboard({
+      const dashboard = await api.createDashboard({
         name: "New dashboard",
         description: "",
         widgets: [],

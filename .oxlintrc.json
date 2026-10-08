@@ -19,6 +19,7 @@
     ],
     "no-unassigned-vars": "off",
     "promise/always-return": "off",
+    "vitest/expect-expect": ["error", { "assertFunctionNames": ["expect", "expect*"] }],
     "typescript/no-explicit-any": "error",
     "typescript/no-unsafe-argument": "error",
     "typescript/no-unsafe-assignment": "error",

@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, latest, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
@@ -133,8 +133,8 @@ export function createListState<
       if (draftQuery() === query()) fetched.reload();
       else setParams({ q: draftQuery() || undefined });
     },
-    addTerm: (term, newView = view()) =>
-      setParams({ q: addTerm(query(), term), view: toViewParam(newView) }),
+    addTerm: (term, newView = latest(view)) =>
+      setParams({ q: addTerm(latest(query), term), view: toViewParam(newView) }),
     setView: (newView) => setParams({ view: toViewParam(newView) }),
     setSortOrder: (newSort) => setParams({ sort: newSort === defaultSort ? undefined : newSort }),
     setRange: (newSince, newUntil) =>

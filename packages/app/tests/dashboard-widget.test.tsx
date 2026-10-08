@@ -1,13 +1,14 @@
 import { captureArtifact } from "@solidjs/diagnostics";
-import { render } from "@solidjs/web";
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { createSignal } from "solid-js";
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
+import { page } from "vitest/browser";
 
 import type { Widget } from "@otelo/api";
+import { expectNoReactivityMistakes } from "@otelo/testing";
 
 import DashboardWidget from "../src/dashboards/DashboardWidget";
-import { expectNoReactivityMistakes } from "./diagnostics";
+import { createFakeApi } from "./fake-api";
+import { mountWithApi } from "./mount";
 
 const UNNAMED_METRIC_VALUE: Widget = {
   title: "",
@@ -33,34 +34,26 @@ const RANGE = {
   setRange: () => {},
 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  document.body.replaceChildren();
-});
-
 test("a widget redraws its message when the reason for no data changes", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => Response.json({ groups: [] })),
-  );
-  const container = document.body.appendChild(document.createElement("div"));
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const api = createFakeApi({
+    getMetricSeries: (name) =>
+      Promise.resolve({
+        name,
+        start_at: "2026-10-01T00:00:00Z",
+        end_at: "2026-10-01T01:00:00Z",
+        step_ns: 60e9,
+        resolution: "raw",
+        groups: [],
+        truncated: false,
+      }),
+  });
   const [widget, setWidget] = createSignal(UNNAMED_METRIC_VALUE);
 
   const { artifact } = await captureArtifact(async () => {
-    render(
-      () => (
-        <QueryClientProvider client={queryClient}>
-          <DashboardWidget widget={widget()} range={RANGE} />
-        </QueryClientProvider>
-      ),
-      container,
-    );
-    await vi.waitFor(() =>
-      expect(container.textContent).toContain("Pick a metric to see its numbers."),
-    );
+    mountWithApi(api, () => <DashboardWidget widget={widget()} range={RANGE} />);
+    await expect.element(page.getByText("Pick a metric to see its numbers.")).toBeInTheDocument();
     setWidget(NAMED_METRIC_VALUE);
-    await vi.waitFor(() => expect(container.textContent).toContain("No series match."));
+    await expect.element(page.getByText("No series match.")).toBeInTheDocument();
   });
 
   expectNoReactivityMistakes(artifact);

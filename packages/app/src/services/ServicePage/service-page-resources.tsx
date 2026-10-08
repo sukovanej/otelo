@@ -1,8 +1,9 @@
-import { createMemo, Match, Show, Switch } from "solid-js";
+import { createMemo, Match, Show, Switch, useContext } from "solid-js";
 
 import { Callout, EmptyMessage } from "@otelo/ui";
 import { ChartPanel, Panel } from "@otelo/viz";
 
+import { ApiContext } from "../../api";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { createRangeFetch, type RangeState } from "../range";
 import { getServiceResources, RESOURCE_METRIC_NAMES, toResourceCharts } from "../resources";
@@ -14,11 +15,12 @@ interface ServicePageResourcesProps {
 }
 
 export default function ServicePageResources(props: ServicePageResourcesProps) {
+  const api = useContext(ApiContext);
   const fetchedResources = createRangeFetch(
     props.range,
     "resources",
     () => ({ service: props.service }),
-    getServiceResources,
+    (query, signal) => getServiceResources(api, query, signal),
   );
   const charts = createMemo(() => {
     const answer = fetchedResources.data();

@@ -1,14 +1,16 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, useContext } from "solid-js";
 
-import { logIn } from "@otelo/api";
 import { LogoIcon } from "@otelo/icons";
 import { Button, Callout } from "@otelo/ui";
+
+import { ApiContext } from "./api";
 
 interface LoginPageProps {
   readonly onLogin: () => void;
 }
 
 export default function LoginPage(props: LoginPageProps) {
+  const api = useContext(ApiContext);
   const [password, setPassword] = createSignal("");
   const [errorMessage, setErrorMessage] = createSignal<string>();
   const [checking, setChecking] = createSignal(false);
@@ -18,7 +20,7 @@ export default function LoginPage(props: LoginPageProps) {
     setChecking(true);
     setErrorMessage(undefined);
     try {
-      await logIn(password());
+      await api.logIn(password());
       props.onLogin();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));

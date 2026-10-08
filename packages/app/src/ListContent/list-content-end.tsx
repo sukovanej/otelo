@@ -1,4 +1,4 @@
-import { createEffect } from "solid-js";
+import { createEffect, createMemo } from "solid-js";
 
 const SHOW_MORE_AHEAD_PX = 600;
 
@@ -16,12 +16,10 @@ interface ListContentEndProps {
 
 export default function ListContentEnd(props: ListContentEndProps) {
   let endElement!: HTMLDivElement;
+  const canShowMore = createMemo(() => props.canShowMore && !props.loading);
 
   createEffect(
-    (): EndWatch => ({
-      scrollElement: props.scrollElement,
-      canShowMore: props.canShowMore && !props.loading,
-    }),
+    (): EndWatch => ({ scrollElement: props.scrollElement, canShowMore: canShowMore() }),
     (watch) => {
       const observer = new IntersectionObserver(
         (entries) => {
@@ -32,6 +30,7 @@ export default function ListContentEnd(props: ListContentEndProps) {
       observer.observe(endElement);
       return () => observer.disconnect();
     },
+    { name: "watchListEnd" },
   );
 
   return <div ref={endElement} aria-hidden="true" />;

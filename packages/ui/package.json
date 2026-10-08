@@ -13,7 +13,13 @@
     "@otelo/icons": "workspace:*"
   },
   "devDependencies": {
+    "@otelo/testing": "workspace:*",
+    "@solidjs/diagnostics": "catalog:",
+    "@solidjs/vite-plugin": "catalog:",
     "@solidjs/web": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "playwright": "catalog:",
     "solid-js": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",

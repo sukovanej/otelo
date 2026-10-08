@@ -1,8 +1,9 @@
-import { createSignal, Match, Show, snapshot, Switch } from "solid-js";
+import { createSignal, Match, Show, snapshot, Switch, useContext } from "solid-js";
 
-import { getLogGroups, getLogs, type LogGroups, type LogLine, type Logs } from "@otelo/api";
+import type { LogGroups, LogLine, Logs } from "@otelo/api";
 import { EmptyMessage } from "@otelo/ui";
 
+import { ApiContext } from "../api";
 import { formatCount } from "../count";
 import { createListState, usePageKeys } from "../list";
 import ListContent from "../ListContent";
@@ -33,14 +34,15 @@ interface GroupsResult {
 }
 
 export default function LogsPage() {
+  const api = useContext(ApiContext);
   const list = createListState<LogsView, LogsResult>({
     name: "logs",
     views: ["lines", "groups"],
     firstLimits: { lines: 200, groups: 50 },
     fetch: async (key, signal) =>
       key.view === "groups"
-        ? { view: "groups", body: await getLogGroups(key, signal) }
-        : { view: "lines", body: await getLogs(key, signal) },
+        ? { view: "groups", body: await api.getLogGroups(key, signal) }
+        : { view: "lines", body: await api.getLogs(key, signal) },
     pageJoining: {
       readNextCursor: (result) =>
         result.view === "lines" ? (result.body.next ?? undefined) : undefined,

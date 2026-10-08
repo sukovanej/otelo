@@ -11,18 +11,22 @@ export interface ReorderDrag<T extends string> {
   // The order the drop would leave, which the items show while the drag lasts.
   readonly shownOrder: Accessor<ReadonlyArray<T>>;
   readonly draggedValue: Accessor<T | undefined>;
-  readonly ghost: Accessor<GhostPlacement<T> | undefined>;
+  readonly ghost: Accessor<DraggedItem<T> | undefined>;
+  readonly ghostPoint: Accessor<GhostPoint>;
   readonly start: (e: PointerEvent, container: HTMLElement) => void;
   readonly move: (e: PointerEvent) => void;
   readonly end: (e: PointerEvent) => boolean;
   readonly cancel: () => void;
 }
 
-export interface GhostPlacement<T extends string> {
+export interface DraggedItem<T extends string> {
   readonly value: T;
+  readonly width: number;
+}
+
+export interface GhostPoint {
   readonly left: number;
   readonly top: number;
-  readonly width: number;
 }
 
 interface ReorderDragOptions<T extends string> {
@@ -41,8 +45,6 @@ interface DragState<T extends string> {
   readonly grabOffsetY: number;
   readonly width: number;
   readonly isMoving: boolean;
-  readonly ghostLeft: number;
-  readonly ghostTop: number;
   readonly order: ReadonlyArray<T>;
 }
 
@@ -53,10 +55,18 @@ export function createReorderDrag<T extends string>(
   options: ReorderDragOptions<T>,
 ): ReorderDrag<T> {
   const [state, setState] = createSignal<DragState<T>>();
+  const [ghostPoint, setGhostPoint] = createSignal<GhostPoint>({ left: 0, top: 0 });
   const movingState = createMemo(() => {
     const current = state();
     return current?.isMoving ? current : undefined;
   });
+  const draggedItem = createMemo<DraggedItem<T> | undefined>(
+    () => {
+      const current = movingState();
+      return current && { value: current.value, width: current.width };
+    },
+    { equals: (shown, next) => shown?.value === next?.value && shown?.width === next?.width },
+  );
 
   const start = (e: PointerEvent, container: HTMLElement) => {
     const pressed = e.target;
@@ -83,8 +93,6 @@ export function createReorderDrag<T extends string>(
       grabOffsetY: e.clientY - itemBox.top,
       width: itemBox.width,
       isMoving: false,
-      ghostLeft: 0,
-      ghostTop: 0,
       order: options.values(),
     });
   };
@@ -103,13 +111,8 @@ export function createReorderDrag<T extends string>(
     const order = moveValue(options.values(), current.value, dropIndex);
     const isReordered = order.some((value, index) => value !== current.order[index]);
     const boxesBefore = isReordered ? mapItemBoxes(current.container) : undefined;
-    setState({
-      ...current,
-      isMoving: true,
-      ghostLeft: point.x - current.grabOffsetX,
-      ghostTop: point.y - current.grabOffsetY,
-      order,
-    });
+    if (isReordered || !current.isMoving) setState({ ...current, isMoving: true, order });
+    setGhostPoint({ left: point.x - current.grabOffsetX, top: point.y - current.grabOffsetY });
     if (boxesBefore) settleItems(current.container, boxesBefore);
   };
   const end = (e: PointerEvent) => {
@@ -118,9 +121,10 @@ export function createReorderDrag<T extends string>(
     setState(undefined);
     if (!current.isMoving) return false;
     const containerBox = current.container.getBoundingClientRect();
+    const droppedGhost = ghostPoint();
     const ghostBox = {
-      left: containerBox.left + current.container.clientLeft + current.ghostLeft,
-      top: containerBox.top + current.container.clientTop + current.ghostTop,
+      left: containerBox.left + current.container.clientLeft + droppedGhost.left,
+      top: containerBox.top + current.container.clientTop + droppedGhost.top,
       right: 0,
       bottom: 0,
     };
@@ -135,17 +139,8 @@ export function createReorderDrag<T extends string>(
   return {
     shownOrder: () => state()?.order ?? options.values(),
     draggedValue: () => movingState()?.value,
-    ghost: () => {
-      const current = movingState();
-      return (
-        current && {
-          value: current.value,
-          left: current.ghostLeft,
-          top: current.ghostTop,
-          width: current.width,
-        }
-      );
-    },
+    ghost: draggedItem,
+    ghostPoint,
     start,
     move,
     end,

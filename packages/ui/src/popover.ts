@@ -33,6 +33,7 @@ export function createPopover(options: PopoverOptions): Popover {
   return {
     open,
     show: () => {
+      if (open()) return;
       setAlignsRight(false);
       setOpen(true);
     },

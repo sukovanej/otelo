@@ -1,13 +1,11 @@
-import {
-  getLogCounts,
-  getMetricSeries,
-  getSpanGroups,
-  type GroupedQuery,
-  type RankOrder,
-  type SpanGroupRank,
-  type SpanMeasure,
-  type WidgetDisplay,
-  type WidgetQuery,
+import type {
+  Api,
+  GroupedQuery,
+  RankOrder,
+  SpanGroupRank,
+  SpanMeasure,
+  WidgetDisplay,
+  WidgetQuery,
 } from "@otelo/api";
 
 import type { RangeBounds } from "../services/range";
@@ -101,6 +99,7 @@ export function toFetchedDisplay(display: WidgetDisplay): FetchedDisplay | undef
 }
 
 export async function fetchWidgetData(
+  api: Api,
   display: FetchedDisplay,
   bounds: RangeBounds,
   signal: AbortSignal,
@@ -110,7 +109,9 @@ export async function fetchWidgetData(
   }
   if (display.kind === "timeseries") {
     const measured = await Promise.all(
-      display.queries.map((query) => fetchMeasuredQuery(query, TIMESERIES_GROUPS, bounds, signal)),
+      display.queries.map((query) =>
+        fetchMeasuredQuery(api, query, TIMESERIES_GROUPS, bounds, signal),
+      ),
     );
     const chart = combineMeasuredQueries(
       measured.filter((query): query is MeasuredQuery => query !== undefined),
@@ -123,11 +124,12 @@ export async function fetchWidgetData(
     display.kind === "toplist"
       ? { limit: display.limit, order: display.order, foldedGroup: "dropped" }
       : { limit: 1, order: "highest", foldedGroup: "dropped" };
-  const measured = await fetchMeasuredQuery(grouped, request, bounds, signal);
+  const measured = await fetchMeasuredQuery(api, grouped, request, bounds, signal);
   return measured ? { kind: "measured", measured } : { kind: "none", reason: "No series match." };
 }
 
 async function fetchMeasuredQuery(
+  api: Api,
   grouped: GroupedQuery,
   request: GroupRequest,
   bounds: RangeBounds,
@@ -137,7 +139,7 @@ async function fetchMeasuredQuery(
   const label = describeWidgetQuery(query);
   const isGrouped = by.length > 0;
   if (query.signal === "spans") {
-    const answer = await getSpanGroups(
+    const answer = await api.getSpanGroups(
       {
         ...bounds,
         q: query.filter,
@@ -152,13 +154,13 @@ async function fetchMeasuredQuery(
     return measureSpanGroups(answer, query.measure, by, label);
   }
   if (query.signal === "logs") {
-    const answer = await getLogCounts(
+    const answer = await api.getLogCounts(
       { ...bounds, q: query.filter, by: by.join(","), order: request.order, limit: request.limit },
       signal,
     );
     return measureLogCounts(answer, by, label);
   }
-  const answer = await getMetricSeries(
+  const answer = await api.getMetricSeries(
     query.name.trim(),
     isGrouped
       ? {

@@ -1,4 +1,4 @@
-import { getMetricSeries, type MetricSeries } from "@otelo/api";
+import type { Api, MetricSeries } from "@otelo/api";
 import type { TimeFrame, TimeSeries } from "@otelo/viz";
 
 import { readAveragesOrRates, toMetricFrame } from "../metrics/metric";
@@ -41,6 +41,7 @@ interface ServiceResourcesQuery {
 }
 
 export async function getServiceResources(
+  api: Api,
   query: ServiceResourcesQuery,
   signal: AbortSignal,
 ): Promise<ServiceResources> {
@@ -51,9 +52,9 @@ export async function getServiceResources(
     by: "service",
   };
   const [cpuTime, memory, cgroupMemory] = await Promise.all([
-    getMetricSeries(RESOURCE_METRIC_NAMES.cpuTime, metricQuery, signal),
-    getMetricSeries(RESOURCE_METRIC_NAMES.memory, metricQuery, signal),
-    getMetricSeries(RESOURCE_METRIC_NAMES.cgroupMemory, metricQuery, signal),
+    api.getMetricSeries(RESOURCE_METRIC_NAMES.cpuTime, metricQuery, signal),
+    api.getMetricSeries(RESOURCE_METRIC_NAMES.memory, metricQuery, signal),
+    api.getMetricSeries(RESOURCE_METRIC_NAMES.cgroupMemory, metricQuery, signal),
   ]);
   return { service: query.service, cpuTime, memory, cgroupMemory };
 }

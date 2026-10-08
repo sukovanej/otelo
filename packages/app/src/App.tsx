@@ -1,8 +1,7 @@
 import type { RouteSectionProps } from "@solidjs/router";
 import { useQueryClient } from "@tanstack/solid-query";
-import { For } from "solid-js";
+import { createSignal, For, Show, useContext } from "solid-js";
 
-import { logOut } from "@otelo/api";
 import {
   DashboardsIcon,
   LogoIcon,
@@ -13,7 +12,9 @@ import {
 } from "@otelo/icons";
 import { Button } from "@otelo/ui";
 
-import { askForLogin } from "./login";
+import { ApiContext } from "./api";
+import { describeError } from "./fetch";
+import { LoginContext } from "./login";
 
 const SECTIONS = [
   { href: "/services", label: "Services", icon: ServicesIcon },
@@ -24,11 +25,23 @@ const SECTIONS = [
 ] as const;
 
 export default function App(props: RouteSectionProps) {
+  const api = useContext(ApiContext);
+  const login = useContext(LoginContext);
   const queryClient = useQueryClient();
+  const [loggingOut, setLoggingOut] = createSignal(false);
+  const [logOutError, setLogOutError] = createSignal<string>();
   const logOutOfDaemon = async () => {
-    await logOut();
-    queryClient.clear();
-    askForLogin();
+    setLoggingOut(true);
+    setLogOutError(undefined);
+    try {
+      await api.logOut();
+      queryClient.clear();
+      login.askForLogin();
+    } catch (error) {
+      setLogOutError(describeError(error));
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -53,9 +66,23 @@ export default function App(props: RouteSectionProps) {
             )}
           </For>
         </nav>
-        <Button variant="ghost" size="sm" class="ml-auto" onClick={() => void logOutOfDaemon()}>
-          Log out
-        </Button>
+        <div class="ml-auto flex min-w-0 items-center gap-3">
+          <Show when={logOutError()}>
+            {(message) => (
+              <span role="alert" class="truncate text-xs text-error">
+                {message()}
+              </span>
+            )}
+          </Show>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={loggingOut()}
+            onClick={() => void logOutOfDaemon()}
+          >
+            {loggingOut() ? "Logging out…" : "Log out"}
+          </Button>
+        </div>
       </header>
       <main class="flex min-h-0 flex-1 flex-col bg-page">{props.children}</main>
     </div>
