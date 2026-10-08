@@ -974,6 +974,21 @@ fn the_catalog_suggests_only_what_the_context_matches() {
 }
 
 #[test]
+fn a_query_of_one_service_reads_the_rows_of_its_resources() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader_around_midnight();
+    for signal in [Signal::Logs, Signal::Spans] {
+        let plan = reader
+            .explain_query(&parse_query("service = api", signal).unwrap())
+            .unwrap();
+        assert!(
+            plan.iter().any(|step| step.contains("resources_service")),
+            "{signal}: {plan:?}"
+        );
+    }
+}
+
+#[test]
 fn an_indexed_attribute_has_an_index_on_its_table() {
     let indexes = Indexes::new(indexed_attributes(&[(IndexedSignal::Logs, "user.id")]));
     let fixture = Fixture::with_indexes(&indexes);

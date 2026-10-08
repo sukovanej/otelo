@@ -1,10 +1,10 @@
 use std::fmt;
 
-pub const STORAGE_VERSION: i64 = 1;
+pub const STORAGE_VERSION: i64 = 2;
 
 // The xxh3 of schema.sql at STORAGE_VERSION. A test fails when the schema changes and the hash
 // does not, so a change of the schema bumps both.
-pub const SCHEMA_HASH_AT_STORAGE_VERSION: u64 = 0x33a8_ca11_6b80_a14b;
+pub const SCHEMA_HASH_AT_STORAGE_VERSION: u64 = 0x9397_c0b9_f13c_9cc1;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct OtherStorageVersion {
