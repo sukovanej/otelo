@@ -1,6 +1,6 @@
 use std::fmt;
 
-pub const STORAGE_VERSION: i64 = 3;
+pub const STORAGE_VERSION: i64 = 4;
 
 // The xxh3 of schema.sql at STORAGE_VERSION. A test fails when the schema changes and the hash
 // does not, so a change of the schema bumps both.

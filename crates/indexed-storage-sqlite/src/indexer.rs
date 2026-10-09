@@ -131,9 +131,18 @@ enum JournalRead {
     FailedAt(Instant),
 }
 
+#[derive(Clone, Copy, Default)]
+enum IndexedUntil {
+    #[default]
+    NothingRead,
+    FrameReceivedAt(i64),
+    JournalEnd,
+}
+
 #[derive(Default)]
 struct SignalCursor {
     indexed_position: Option<Position>,
+    indexed_until: IndexedUntil,
     newest_journal_received_at: Option<i64>,
     journal_read: JournalRead,
 }
@@ -299,6 +308,7 @@ impl IndexerState {
         let caught_up = read_frames.len() < MAX_FRAMES_PER_TRANSACTION;
         let Some(last_frame) = read_frames.last() else {
             self.meters.set_index_lag(signal, Duration::ZERO);
+            self.cursor_mut(signal).indexed_until = IndexedUntil::JournalEnd;
             return Ok(Progress::CaughtUp);
         };
         let transaction_started_at = Instant::now();
@@ -339,6 +349,11 @@ impl IndexerState {
         meters.record_index_transaction(signal, transaction_started_at.elapsed());
         let cursor = &mut self.cursors[signal_index(signal)];
         cursor.indexed_position = Some(last_frame.position_after);
+        cursor.indexed_until = if caught_up {
+            IndexedUntil::JournalEnd
+        } else {
+            IndexedUntil::FrameReceivedAt(last_frame.received_at)
+        };
         let index_lag = if caught_up {
             Duration::ZERO
         } else {
@@ -437,14 +452,20 @@ impl IndexerState {
         }
     }
 
+    // A minute rolled up before its points are indexed would stay without them.
     fn roll_up_next_due_metrics(&mut self) -> Progress {
+        let indexed_until_at = match self.cursor(Signal::Metrics).indexed_until {
+            IndexedUntil::NothingRead => return Progress::CaughtUp,
+            IndexedUntil::FrameReceivedAt(received_at) => received_at,
+            IndexedUntil::JournalEnd => now_unix_nanos(),
+        };
         let oldest_point_at = self
             .config
             .oldest_retained_days(Day::today())
             .metrics
             .start_at();
         self.file
-            .roll_up_next_due(now_unix_nanos(), oldest_point_at)
+            .roll_up_next_due(indexed_until_at, oldest_point_at)
             .unwrap_or_else(|error| {
                 tracing::error!("roll up the metrics: {error:#}");
                 Progress::CaughtUp
