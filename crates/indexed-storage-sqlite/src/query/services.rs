@@ -7,17 +7,25 @@ use otelo_indexed_storage::query::{
 };
 use otelo_indexed_storage::{Attributes, Severity, SpanKind, SpanStatus};
 
-use super::span_stats::SpanTally;
-use super::{WhereClause, timestamp_from_nanos, truncate_to_limit};
-use crate::Reader;
-use crate::indexes::attribute_json_path;
+use otelo_query::{BuiltinField, Expression, Field, Operator, Query, Signal, Value};
 
-fn http_request_condition() -> String {
-    format!(
-        "span.kind = {} AND json_extract(span.attributes, {}) IS NOT NULL",
-        SpanKind::Server.number(),
-        attribute_json_path("http.request.method")
-    )
+use super::span_stats::SpanTally;
+use super::traces::compile_span_query;
+use super::{LOG_ALIASES, SPAN_ALIASES, WhereClause, timestamp_from_nanos, truncate_to_limit};
+use crate::Reader;
+
+fn http_request_query() -> Query {
+    Query {
+        signal: Signal::Spans,
+        expression: Some(Expression::And(vec![
+            Expression::Compare {
+                field: Field::Builtin(BuiltinField::Kind),
+                operator: Operator::Eq,
+                value: Value::String(SpanKind::Server.name().to_owned()),
+            },
+            Expression::Has(Field::Attribute("http.request.method".to_owned())),
+        ])),
+    }
 }
 
 #[derive(Default)]
@@ -98,8 +106,7 @@ impl Reader {
     ) -> anyhow::Result<HashMap<String, ServiceTally>> {
         let mut tallies: HashMap<String, ServiceTally> = HashMap::new();
 
-        let mut where_clause = WhereClause::within_reader_range(self, "span.started_at");
-        where_clause.push_condition(http_request_condition());
+        let (mut where_clause, _) = compile_span_query(self, &http_request_query())?;
         if let Some(service) = scope.service() {
             where_clause.push_condition_with_param(
                 "resource.service = :service",
@@ -109,9 +116,9 @@ impl Reader {
         }
         let sql = format!(
             "SELECT resource.service, span.started_at, span.duration_ns, span.status_code
-             FROM spans span
-             JOIN resources resource ON resource.id = span.resource_id
+             FROM {}
              WHERE {}",
+            SPAN_ALIASES.encoded_records_sql("spans"),
             where_clause.sql()
         );
         self.scan_rows(&sql, &where_clause, |row| {
@@ -149,10 +156,10 @@ impl Reader {
         }
         let sql = format!(
             "SELECT resource.service, count(*)
-             FROM spans span
-             JOIN resources resource ON resource.id = span.resource_id
+             FROM {}
              WHERE {}
              GROUP BY resource.service",
+            SPAN_ALIASES.encoded_records_sql("spans"),
             where_clause.sql()
         );
         self.scan_rows(&sql, &where_clause, |row| {
@@ -180,11 +187,11 @@ impl Reader {
         let sql = format!(
             "SELECT resource.service, log.logged_at / :step * :step AS step_start_at, count(*),
                     sum(log.severity_number >= {})
-             FROM logs log
-             JOIN resources resource ON resource.id = log.resource_id
+             FROM {}
              WHERE {}
              GROUP BY resource.service, step_start_at",
             Severity::ERROR.number(),
+            LOG_ALIASES.encoded_records_sql("logs"),
             where_clause.sql()
         );
         self.scan_rows(&sql, &where_clause, |row| {

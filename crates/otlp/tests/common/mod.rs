@@ -4,11 +4,13 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use otelo_indexed_storage::PipelineMeters;
-use otelo_indexed_storage_sqlite::{Config, FrameMapper, Indexer, TELEMETRY_FILE_NAME};
+use otelo_indexed_storage::query::{LogLine, PageRequest, SpanSort, TraceSpan};
+use otelo_indexed_storage::{PipelineMeters, RangeQueries, TimeRange, now_unix_nanos};
+use otelo_indexed_storage_sqlite::{Config, FrameMapper, Indexer, Reader, TELEMETRY_FILE_NAME};
 use otelo_journal::{Journal, SyncedEndInbox};
 use otelo_journal_files::{JournalFiles, JournalThreads};
 use otelo_otlp::Intake;
+use otelo_query::{Query, Signal};
 use rusqlite::Connection;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -148,6 +150,33 @@ impl Receiver {
             indexer.join().unwrap();
         }
     }
+}
+
+const DAY: i64 = 86_400 * 1_000_000_000;
+
+fn open_reader_around_now(directory: &Path) -> Reader {
+    let now = now_unix_nanos();
+    Reader::open(directory, TimeRange::new(now - DAY, now + DAY).unwrap()).unwrap()
+}
+
+pub fn read_spans_oldest_first(directory: &Path) -> Vec<TraceSpan> {
+    open_reader_around_now(directory)
+        .list_spans(
+            &Query::all(Signal::Spans),
+            SpanSort::Oldest,
+            &PageRequest::first(1000),
+        )
+        .unwrap()
+        .spans
+}
+
+pub fn read_logs_oldest_first(directory: &Path) -> Vec<LogLine> {
+    let mut logs = open_reader_around_now(directory)
+        .list_logs(&Query::all(Signal::Logs), &PageRequest::first(1000))
+        .unwrap()
+        .logs;
+    logs.reverse();
+    logs
 }
 
 pub fn open_telemetry_file(directory: &Path) -> Connection {

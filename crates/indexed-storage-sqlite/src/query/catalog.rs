@@ -43,7 +43,7 @@ impl ListedColumn {
 }
 
 impl Reader {
-    const fn days_of_range(&self) -> (Day, Day) {
+    pub(super) const fn days_of_range(&self) -> (Day, Day) {
         (
             Day::from_unix_nanos(self.range().start_at()),
             Day::from_unix_nanos(self.range().end_at() - 1),

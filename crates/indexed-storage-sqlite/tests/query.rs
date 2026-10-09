@@ -1014,55 +1014,47 @@ fn an_indexed_attribute_has_an_index_on_its_table() {
         let connection =
             Connection::open(fixture.directory.path().join(TELEMETRY_FILE_NAME)).unwrap();
         connection
-            .prepare("SELECT name FROM sqlite_master WHERE name GLOB 'logs_attribute_*'")
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE name GLOB 'logs_interned_attribute_*' OR name GLOB 'logs_literal_attribute_*'
+                 ORDER BY name",
+            )
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap()
     };
-    assert_eq!(index_names().len(), 1);
+    assert_eq!(index_names().len(), 2);
 
+    // So few logs keep their keys in stable sets, which have an index of their own.
     let reader = fixture.reader_around_midnight();
-    let index = &index_names()[0];
     for query in ["user.id = 7", "user.id = 7 OR user.id in (8, 9)"] {
         let plan = reader
             .explain_query(&parse_query(query, Signal::Logs).unwrap())
             .unwrap();
         assert!(
-            plan.iter().any(|step| step.contains(index)),
+            plan.iter()
+                .any(|step| step.contains("logs_stable_attribute_set_id_logged_at")),
             "{query}: {plan:?}"
         );
     }
-    let plan = reader
-        .explain_query(&parse_query("http.route = x", Signal::Logs).unwrap())
-        .unwrap();
-    assert!(
-        !plan.iter().any(|step| step.contains("_attribute_")),
-        "{plan:?}"
-    );
     assert!(
         reader
             .explain_query(&parse_query("", Signal::Metrics).unwrap())
             .is_err()
     );
-
-    let mut reader = fixture.reader_around_midnight();
-    let query = parse_query("user.id = 7 OR http.route = x", Signal::Logs).unwrap();
+    let query = parse_query(
+        "user.id = 7 OR http.route = x OR no.such.key = 1",
+        Signal::Logs,
+    )
+    .unwrap();
     assert_eq!(
         reader
             .list_logs(&query, &PageRequest::first(10))
             .unwrap()
             .unindexed,
-        ["user.id", "http.route"]
-    );
-    reader.set_indexed_attributes(indexes.attributes());
-    assert_eq!(
-        reader
-            .list_logs(&query, &PageRequest::first(10))
-            .unwrap()
-            .unindexed,
-        ["http.route"]
+        ["no.such.key"]
     );
 
     indexes.replace_attributes(BTreeSet::new());
@@ -1213,24 +1205,38 @@ fn a_context_with_more_records_than_the_sample_finds_older_values_by_their_prefi
     );
 }
 
+// The span ID of a log has no index, so the context reads every log of the range.
 #[test]
 fn a_context_without_a_match_within_the_time_budget_falls_back_to_the_day_catalog() {
     let many_logs = ManyLogs::write();
     let reader = many_logs.open_reader();
+    let context = r#"span_id = "0101010101010101""#;
     assert_eq!(
-        list_suggestions_at_end(&reader, "user.id = 1 and http."),
+        list_suggestions_at_end(&reader, &format!("{context} and http.")),
         Vec::<String>::new()
     );
 
     let mut reader_out_of_time = many_logs.open_reader();
     reader_out_of_time.set_completion_time_budget(Duration::ZERO);
     assert_eq!(
-        list_suggestions_at_end(&reader_out_of_time, "user.id = 1 and http."),
+        list_suggestions_at_end(&reader_out_of_time, &format!("{context} and http.")),
         ["http.route"]
     );
     assert_eq!(
-        list_suggestions_at_end(&reader_out_of_time, "user.id = 1 and http.route = "),
+        list_suggestions_at_end(&reader_out_of_time, &format!("{context} and http.route = ")),
         [r#""/matches""#, r#""/billing""#]
+    );
+}
+
+// The catalog says no log of the range has the key, so no log is read.
+#[test]
+fn a_context_of_a_key_the_range_lacks_matches_nothing_without_reading() {
+    let many_logs = ManyLogs::write();
+    let mut reader_out_of_time = many_logs.open_reader();
+    reader_out_of_time.set_completion_time_budget(Duration::ZERO);
+    assert_eq!(
+        list_suggestions_at_end(&reader_out_of_time, "user.id = 1 and http."),
+        Vec::<String>::new()
     );
 }
 

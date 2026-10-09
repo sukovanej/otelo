@@ -4,7 +4,9 @@ use std::io::Write;
 
 use std::sync::Arc;
 
-use common::{Receiver, TestJournal, open_telemetry_file, query_first_column};
+use common::{
+    Receiver, TestJournal, open_telemetry_file, query_first_column, read_spans_oldest_first,
+};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -94,10 +96,10 @@ fn takes_a_gzip_json_body_and_answers_in_json() {
     );
     assert_eq!((status, response), (200, json!({"partialSuccess": null})));
     receiver.stop_and_wait_for_indexer();
-    let names: Vec<String> = query_first_column(
-        &open_telemetry_file(directory.path()),
-        "SELECT name FROM spans",
-    );
+    let names: Vec<String> = read_spans_oldest_first(directory.path())
+        .into_iter()
+        .map(|span| span.name)
+        .collect();
     assert_eq!(names, ["GET /cart"]);
 }
 
@@ -138,12 +140,10 @@ fn rejects_a_span_without_ids_and_keeps_the_rest() {
     assert_eq!(status, 200);
     assert_eq!(response["partialSuccess"]["rejectedSpans"], 1, "{response}");
     receiver.stop_and_wait_for_indexer();
-    let spans: Vec<String> = query_first_column(
-        &open_telemetry_file(directory.path()),
-        "SELECT resource.service || ' ' || span.name
-         FROM spans span
-         JOIN resources resource ON resource.id = span.resource_id",
-    );
+    let spans: Vec<String> = read_spans_oldest_first(directory.path())
+        .into_iter()
+        .map(|span| format!("{} {}", span.service, span.name))
+        .collect();
     assert_eq!(spans, ["unknown_service GET /cart"]);
 }
 

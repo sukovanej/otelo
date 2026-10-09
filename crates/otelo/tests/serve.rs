@@ -5,6 +5,8 @@ mod common;
 use common::{
     Daemon, StopSignal, send_get_request, start_daemon, start_daemon_with_args, stop_daemon,
 };
+use otelo_indexed_storage::RangeQueries;
+use otelo_indexed_storage::query::{PageRequest, SpanSort};
 use otelo_indexed_storage_sqlite::{STORAGE_VERSION, TELEMETRY_FILE_NAME};
 
 #[test]
@@ -109,57 +111,59 @@ fn traces_itself() {
     let response = send_get_request(&daemon, "/api/logs?q=level%20%3E%3D%20warn");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     stop_daemon(daemon, StopSignal::Term);
-    let connection = rusqlite::Connection::open(
-        dir.path()
-            .join("telemetry")
-            .join(otelo_indexed_storage_sqlite::TELEMETRY_FILE_NAME),
+    let now = otelo_indexed_storage::now_unix_nanos();
+    let day = 86_400 * 1_000_000_000;
+    let reader = otelo_indexed_storage_sqlite::Reader::open(
+        &dir.path().join("telemetry"),
+        otelo_indexed_storage::TimeRange::new(now - day, now + day).unwrap(),
     )
     .unwrap();
-    let request: (Vec<u8>, Vec<u8>, String) = connection
-        .query_row(
-            "SELECT trace_id, span_id, spans.attributes FROM spans
-             JOIN resources ON resources.id = resource_id
-             WHERE service = 'otelo' AND name = 'GET /api/logs' AND parent_span_id IS NULL",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    let (trace_id, span_id, attributes) = request;
-    let attributes: serde_json::Value = serde_json::from_str(&attributes).unwrap();
+    let list_spans = |query: &str| {
+        reader
+            .list_spans(
+                &otelo_query::parse_query(query, otelo_query::Signal::Spans).unwrap(),
+                SpanSort::Oldest,
+                &PageRequest::first(1000),
+            )
+            .unwrap()
+            .spans
+    };
+    let requests = list_spans(r#"service = otelo and name = "GET /api/logs" and root = true"#);
+    let [request] = requests.as_slice() else {
+        panic!("one request, not {requests:?}");
+    };
+    let attributes = serde_json::to_value(&request.attributes).unwrap();
     assert_eq!(attributes["http.response.status_code"], 200, "{attributes}");
     assert_eq!(attributes["url.query"], "q=level%20%3E%3D%20warn");
-    let children: Vec<String> = connection
-        .prepare(
-            "SELECT name FROM spans WHERE trace_id = ?1 AND parent_span_id = ?2 ORDER BY started_at",
-        )
+    let children: Vec<String> = reader
+        .get_trace(request.trace_id, 1000)
         .unwrap()
-        .query_map((&trace_id, &span_id), |row| row.get(0))
         .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
+        .spans
+        .into_iter()
+        .filter(|span| span.parent_span_id == Some(request.span_id))
+        .map(|span| span.name)
+        .collect();
     assert_eq!(
         children,
         ["wait for a blocking thread", "open reader", "SELECT"]
     );
     // The rollups and the retention of the writer trace none of their statements.
-    let spans_outside_a_request: i64 = connection
-        .query_row(
-            "SELECT count(*) FROM spans WHERE parent_span_id IS NULL AND name != 'GET /api/logs'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(spans_outside_a_request, 0);
-    let bodies: Vec<String> = connection
-        .prepare(
-            "SELECT body FROM logs JOIN resources ON resources.id = resource_id
-             WHERE service = 'otelo' ORDER BY logged_at",
+    assert_eq!(
+        list_spans(r#"root = true and name != "GET /api/logs""#).len(),
+        0
+    );
+    let mut bodies: Vec<String> = reader
+        .list_logs(
+            &otelo_query::parse_query("service = otelo", otelo_query::Signal::Logs).unwrap(),
+            &PageRequest::first(1000),
         )
         .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
+        .logs
+        .into_iter()
+        .map(|log| log.body)
+        .collect();
+    bodies.reverse();
     // The indexer catches up on its own thread, before or after the daemon listens.
     let (catch_ups, lifecycle): (Vec<&String>, Vec<&String>) = bodies
         .iter()

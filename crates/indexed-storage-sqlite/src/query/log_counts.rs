@@ -10,8 +10,12 @@ use rusqlite::Row;
 
 use super::logs::compile_log_query;
 use super::span_groups::{GroupingValuesAsJson, parse_grouping_values};
-use super::{WhereClause, limit_groups_with_buckets, timestamp_from_nanos, truncate_to_limit};
+use super::stored_attributes::StoredAttributes;
+use super::{
+    LOG_ALIASES, WhereClause, limit_groups_with_buckets, timestamp_from_nanos, truncate_to_limit,
+};
 use crate::Reader;
+use crate::catalog::AttributeOwner;
 use crate::indexes::attribute_json_path;
 
 #[derive(Default)]
@@ -31,17 +35,41 @@ impl LogCountTally {
 }
 
 // The JSON of a value keeps a bool apart from 1, which json_extract turns it into.
-fn grouping_column(field: &LogGroupingField) -> String {
+fn grouping_column(field: &LogGroupingField, stored_attributes: &StoredAttributes) -> String {
     match field {
         LogGroupingField::Service => "json_quote(resource.service)".to_owned(),
         LogGroupingField::Level => "log.severity_number".to_owned(),
         LogGroupingField::Attribute(key) => {
-            format!("log.attributes -> {}", attribute_json_path(key))
+            LOG_ALIASES.attribute_json_sql(key, stored_attributes.stored_key(key))
         }
         LogGroupingField::Resource(key) => {
             format!("resource.attributes -> {}", attribute_json_path(key))
         }
     }
+}
+
+fn list_grouping_columns(reader: &Reader, by: &[LogGroupingField]) -> anyhow::Result<String> {
+    let grouped_keys: Vec<&str> = by
+        .iter()
+        .filter_map(|field| match field {
+            LogGroupingField::Attribute(key) => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    let stored_attributes =
+        reader.read_stored_attributes(AttributeOwner::Log, &grouped_keys, &[])?;
+    Ok(by
+        .iter()
+        .enumerate()
+        .flat_map(|(index, field)| {
+            [
+                ", ".to_owned(),
+                grouping_column(field, &stored_attributes),
+                " AS ".to_owned(),
+                grouping_alias(index),
+            ]
+        })
+        .collect())
 }
 
 fn grouping_alias(index: usize) -> String {
@@ -72,25 +100,14 @@ pub(super) fn count_logs(
 ) -> anyhow::Result<LogCounts> {
     reader.check_step(step_ns)?;
     let (mut where_clause, unindexed) = compile_log_query(reader, query)?;
-    let grouping_columns: String = by
-        .iter()
-        .enumerate()
-        .flat_map(|(index, field)| {
-            [
-                ", ".to_owned(),
-                grouping_column(field),
-                " AS ".to_owned(),
-                grouping_alias(index),
-            ]
-        })
-        .collect();
+    let grouping_columns = list_grouping_columns(reader, by)?;
     let grouping_aliases: String = (0..by.len())
         .flat_map(|index| [", ".to_owned(), grouping_alias(index)])
         .collect();
     let from_logs = format!(
-        "FROM logs log
-         JOIN resources resource ON resource.id = log.resource_id
+        "FROM {}
          WHERE {}",
+        LOG_ALIASES.encoded_records_sql("logs"),
         where_clause.sql()
     );
     // The second read of the steps sees what the first saw, so the buckets of

@@ -9,6 +9,7 @@ use otelo_indexed_storage::{
 };
 
 use super::WhereClause;
+use super::stored_attributes::{StoredAttributes, format_text_value_json};
 use crate::indexes::attribute_json_path;
 
 #[derive(Debug)]
@@ -29,20 +30,50 @@ const fn invalid_query<T>(message: String) -> Result<T> {
 }
 
 #[derive(Clone, Copy)]
-pub struct TableAliases {
+pub struct EncodedRecordAliases {
     pub record: &'static str,
+    pub stable_attribute_set: &'static str,
+    pub record_group: &'static str,
     pub resource: &'static str,
 }
 
+#[derive(Clone, Copy)]
+pub enum TableAliases {
+    EncodedRecords(EncodedRecordAliases),
+    MetricSeries {
+        record: &'static str,
+        resource: &'static str,
+    },
+}
+
+impl TableAliases {
+    pub const fn record(self) -> &'static str {
+        match self {
+            Self::EncodedRecords(aliases) => aliases.record,
+            Self::MetricSeries { record, .. } => record,
+        }
+    }
+
+    pub const fn resource(self) -> &'static str {
+        match self {
+            Self::EncodedRecords(aliases) => aliases.resource,
+            Self::MetricSeries { resource, .. } => resource,
+        }
+    }
+}
+
 pub fn builtin_column(aliases: TableAliases, builtin_field: BuiltinField) -> String {
-    let (record, resource) = (aliases.record, aliases.resource);
+    let (record, resource) = (aliases.record(), aliases.resource());
     match builtin_field {
         BuiltinField::Service => format!("{resource}.service"),
         BuiltinField::Level => format!("{record}.severity_number"),
         BuiltinField::Body => format!("{record}.body"),
         BuiltinField::TraceId => format!("{record}.trace_id"),
         BuiltinField::SpanId => format!("{record}.span_id"),
-        BuiltinField::Name => format!("{record}.name"),
+        BuiltinField::Name => match aliases {
+            TableAliases::EncodedRecords(aliases) => format!("{}.name", aliases.record_group),
+            TableAliases::MetricSeries { .. } => format!("{record}.name"),
+        },
         BuiltinField::Kind => format!("{record}.kind"),
         BuiltinField::Status | BuiltinField::Error => format!("{record}.status_code"),
         BuiltinField::Duration => format!("{record}.duration_ns"),
@@ -51,10 +82,15 @@ pub fn builtin_column(aliases: TableAliases, builtin_field: BuiltinField) -> Str
     }
 }
 
+pub struct QueryContext<'a> {
+    pub aliases: TableAliases,
+    pub indexed_attributes: &'a BTreeSet<IndexedAttribute>,
+    pub stored_attributes: &'a StoredAttributes,
+}
+
 pub fn compile_query(
     query: &Query,
-    aliases: TableAliases,
-    indexed_attributes: &BTreeSet<IndexedAttribute>,
+    context: &QueryContext,
     param_prefix: &str,
     where_clause: &mut WhereClause,
 ) -> Result<Vec<String>> {
@@ -63,7 +99,8 @@ pub fn compile_query(
     };
     let mut compiler = Compiler {
         signal: query.signal,
-        aliases,
+        aliases: context.aliases,
+        stored_attributes: context.stored_attributes,
         param_prefix,
         where_clause,
         next_param: 0,
@@ -74,8 +111,14 @@ pub fn compile_query(
     if let Ok(signal) = IndexedSignal::try_from(query.signal) {
         for field in query.fields() {
             if let Field::Attribute(key) = field {
+                // A stable key is found through the index of the stable sets.
                 let is_indexed = IndexedAttribute::new(signal, key)
-                    .is_ok_and(|attribute| indexed_attributes.contains(&attribute));
+                    .is_ok_and(|attribute| context.indexed_attributes.contains(&attribute))
+                    || context
+                        .stored_attributes
+                        .stored_key(key)
+                        .encodings
+                        .is_only_stable();
                 if !is_indexed && !unindexed.contains(key) {
                     unindexed.push(key.clone());
                 }
@@ -85,15 +128,50 @@ pub fn compile_query(
     Ok(unindexed)
 }
 
+enum AttributePredicate {
+    EqualsAny(Vec<SqliteValue>),
+    Compare(Operator, SqliteValue),
+    Contains(String),
+}
+
 struct Compiler<'a> {
     signal: Signal,
     aliases: TableAliases,
+    stored_attributes: &'a StoredAttributes,
     param_prefix: &'a str,
     where_clause: &'a mut WhereClause,
     next_param: usize,
 }
 
 impl Compiler<'_> {
+    // A branch binds its own parameters, since SQLite refuses a parameter the statement lacks.
+    fn compile_predicate_on(
+        &mut self,
+        predicate: &AttributePredicate,
+        extracted_sql: &str,
+    ) -> String {
+        match predicate {
+            AttributePredicate::EqualsAny(values) => {
+                let params: Vec<String> = values
+                    .iter()
+                    .map(|value| self.bind_param(value.clone()))
+                    .collect();
+                match params.as_slice() {
+                    [param] => format!("{extracted_sql} = {param}"),
+                    params => format!("{extracted_sql} IN ({})", params.join(", ")),
+                }
+            }
+            AttributePredicate::Compare(operator, value) => {
+                let param = self.bind_param(value.clone());
+                format!("{extracted_sql} {} {param}", operator.symbol())
+            }
+            AttributePredicate::Contains(text) => {
+                let param = self.bind_param(text.clone());
+                format!("instr({extracted_sql}, {param}) > 0")
+            }
+        }
+    }
+
     fn bind_param(&mut self, value: impl Into<SqliteValue>) -> String {
         let name = format!(":{}{}", self.param_prefix, self.next_param);
         self.next_param += 1;
@@ -123,9 +201,128 @@ impl Compiler<'_> {
                         builtin_field.name()
                     ));
                 }
+                Field::Attribute(key)
+                    if let TableAliases::EncodedRecords(aliases) = self.aliases =>
+                {
+                    self.compile_encoded_has(aliases, key)?
+                }
                 _ => format!("json_type({}) IS NOT NULL", self.json_extract_args(field)?),
             },
         })
+    }
+
+    const fn find_encoded_record_attribute<'f>(
+        &self,
+        field: &'f Field,
+    ) -> Option<(EncodedRecordAliases, &'f str)> {
+        match (field, self.aliases) {
+            (Field::Attribute(key), TableAliases::EncodedRecords(aliases)) => {
+                Some((aliases, key.as_str()))
+            }
+            _ => None,
+        }
+    }
+
+    fn compile_attribute_predicate(
+        &mut self,
+        field: &Field,
+        predicate: &AttributePredicate,
+        compared_texts: &[String],
+    ) -> Result<String> {
+        let Some((aliases, key)) = self.find_encoded_record_attribute(field) else {
+            let extracted_sql = format!("json_extract({})", self.json_extract_args(field)?);
+            return Ok(self.compile_predicate_on(predicate, &extracted_sql));
+        };
+        let key_path = build_attribute_json_path(key)?;
+        let stored_key = self.stored_attributes.stored_key(key);
+        let record = aliases.record;
+        let mut branches = Vec::new();
+        if stored_key.encodings.has_stable_values {
+            let condition = self.compile_predicate_on(
+                predicate,
+                &format!("json_extract(filtered_stable_attribute_set.attributes, {key_path})"),
+            );
+            branches.push(format!(
+                "{record}.stable_attribute_set_id IN (
+                   SELECT filtered_stable_attribute_set.id
+                   FROM stable_attribute_sets filtered_stable_attribute_set
+                   WHERE {condition})"
+            ));
+        }
+        if let Some(key_id) = stored_key.key_id {
+            let id_path = key_id.json_path();
+            let interned_sql = format!("json_extract({record}.interned_attributes, {id_path})");
+            if stored_key.encodings.has_interned_values {
+                match predicate {
+                    // The ids of the values let SQLite use the index of the attribute.
+                    AttributePredicate::EqualsAny(_) => {
+                        let value_ids: Vec<i64> = compared_texts
+                            .iter()
+                            .filter_map(|text| {
+                                self.stored_attributes
+                                    .find_interned_value_id(&format_text_value_json(text))
+                            })
+                            .map(|value_id| value_id.0)
+                            .collect();
+                        if !value_ids.is_empty() {
+                            let values = value_ids.into_iter().map(SqliteValue::Integer).collect();
+                            branches.push(self.compile_predicate_on(
+                                &AttributePredicate::EqualsAny(values),
+                                &interned_sql,
+                            ));
+                        }
+                    }
+                    AttributePredicate::Compare(..) | AttributePredicate::Contains(_) => {
+                        let condition = self.compile_predicate_on(
+                            predicate,
+                            "json_extract(filtered_interned_attribute_value.value, '$')",
+                        );
+                        branches.push(format!(
+                            "{interned_sql} IN (
+                               SELECT filtered_interned_attribute_value.id
+                               FROM interned_attribute_values filtered_interned_attribute_value
+                               WHERE {condition})"
+                        ));
+                    }
+                }
+            }
+            if stored_key.encodings.has_literal_values {
+                branches.push(self.compile_predicate_on(
+                    predicate,
+                    &format!("json_extract({record}.literal_attributes, {id_path})"),
+                ));
+            }
+        }
+        Ok(join_branches(&branches))
+    }
+
+    fn compile_encoded_has(&self, aliases: EncodedRecordAliases, key: &str) -> Result<String> {
+        let key_path = build_attribute_json_path(key)?;
+        let stored_key = self.stored_attributes.stored_key(key);
+        let record = aliases.record;
+        let mut branches = Vec::new();
+        if stored_key.encodings.has_stable_values {
+            branches.push(format!(
+                "{record}.stable_attribute_set_id IN (
+                   SELECT filtered_stable_attribute_set.id
+                   FROM stable_attribute_sets filtered_stable_attribute_set
+                   WHERE json_type(filtered_stable_attribute_set.attributes, {key_path}) IS NOT NULL)"
+            ));
+        }
+        if let Some(key_id) = stored_key.key_id {
+            let id_path = key_id.json_path();
+            if stored_key.encodings.has_interned_values {
+                branches.push(format!(
+                    "json_extract({record}.interned_attributes, {id_path}) IS NOT NULL"
+                ));
+            }
+            if stored_key.encodings.has_literal_values {
+                branches.push(format!(
+                    "json_type({record}.literal_attributes, {id_path}) IS NOT NULL"
+                ));
+            }
+        }
+        Ok(join_branches(&branches))
     }
 
     fn compile_joined_terms(&mut self, terms: &[Expression], separator: &str) -> Result<String> {
@@ -138,17 +335,14 @@ impl Compiler<'_> {
 
     fn json_extract_args(&self, field: &Field) -> Result<String> {
         let (alias, key) = match field {
-            Field::Attribute(key) => (self.aliases.record, key),
-            Field::Resource(key) => (self.aliases.resource, key),
+            Field::Attribute(key) => (self.aliases.record(), key),
+            Field::Resource(key) => (self.aliases.resource(), key),
             Field::Builtin(_) => unreachable!("a built-in field is a column"),
         };
-        if key.contains('"') {
-            return invalid_query(format!(
-                "the key {key:?} has a double quote, which a query cannot read"
-            ));
-        }
-        // The expression of the attribute's index, so SQLite uses the index when there is one.
-        Ok(format!("{alias}.attributes, {}", attribute_json_path(key)))
+        Ok(format!(
+            "{alias}.attributes, {}",
+            build_attribute_json_path(key)?
+        ))
     }
 
     fn compile_comparison(
@@ -160,30 +354,34 @@ impl Compiler<'_> {
         if let Field::Builtin(builtin_field) = field {
             return self.compile_builtin_comparison(*builtin_field, operator, value);
         }
-        let extracted_sql = format!("json_extract({})", self.json_extract_args(field)?);
-        Ok(match operator {
-            Operator::Eq => self.compile_equals_any(&extracted_sql, &equal_sql_values(value)),
-            Operator::Ne => format!(
-                "({extracted_sql} IS NULL OR NOT {})",
-                self.compile_equals_any(&extracted_sql, &equal_sql_values(value))
+        match operator {
+            Operator::Eq => self.compile_equals_any(field, &equal_sql_values(value)),
+            // A record without the attribute is not equal to the value either.
+            Operator::Ne => Ok(format!(
+                "NOT coalesce({}, FALSE)",
+                self.compile_equals_any(field, &equal_sql_values(value))?
+            )),
+            _ => self.compile_attribute_predicate(
+                field,
+                &AttributePredicate::Compare(operator, value_as_scalar(value)),
+                &[],
             ),
-            _ => {
-                let param = self.bind_param(value_as_scalar(value));
-                format!("{extracted_sql} {} {param}", operator.symbol())
-            }
-        })
+        }
     }
 
-    fn compile_equals_any(&mut self, extracted_sql: &str, values: &[SqliteValue]) -> String {
-        let params: Vec<String> = values
+    fn compile_equals_any(&mut self, field: &Field, values: &[SqliteValue]) -> Result<String> {
+        let compared_texts: Vec<String> = values
             .iter()
-            .map(|value| self.bind_param(value.clone()))
+            .filter_map(|value| match value {
+                SqliteValue::Text(text) => Some(text.clone()),
+                _ => None,
+            })
             .collect();
-        if let [param] = params.as_slice() {
-            format!("{extracted_sql} = {param}")
-        } else {
-            format!("{extracted_sql} IN ({})", params.join(", "))
-        }
+        self.compile_attribute_predicate(
+            field,
+            &AttributePredicate::EqualsAny(values.to_vec()),
+            &compared_texts,
+        )
     }
 
     fn compile_in_list(&mut self, field: &Field, values: &[Value]) -> Result<String> {
@@ -199,13 +397,19 @@ impl Compiler<'_> {
                 .collect::<Result<Vec<_>>>()?;
             return Ok(terms.join(" OR "));
         }
-        let extracted_sql = format!("json_extract({})", self.json_extract_args(field)?);
         let sql_values: Vec<SqliteValue> = values.iter().flat_map(equal_sql_values).collect();
-        Ok(self.compile_equals_any(&extracted_sql, &sql_values))
+        self.compile_equals_any(field, &sql_values)
     }
 
     fn compile_contains(&mut self, field: &Field, text: &str) -> Result<String> {
         let column = match field {
+            Field::Attribute(_) | Field::Resource(_) => {
+                return self.compile_attribute_predicate(
+                    field,
+                    &AttributePredicate::Contains(text.to_owned()),
+                    &[],
+                );
+            }
             Field::Builtin(BuiltinField::Body) => {
                 let Some(words) = super::logs::quote_fts_words(text) else {
                     return Ok("TRUE".into());
@@ -213,7 +417,7 @@ impl Compiler<'_> {
                 let param = self.bind_param(words);
                 return Ok(format!(
                     "{}.rowid IN (SELECT rowid FROM log_body_search WHERE log_body_search MATCH {param})",
-                    self.aliases.record
+                    self.aliases.record()
                 ));
             }
             Field::Builtin(builtin_field) if builtin_field.is_text() => {
@@ -225,7 +429,6 @@ impl Compiler<'_> {
                     builtin_field.name()
                 ));
             }
-            _ => format!("json_extract({})", self.json_extract_args(field)?),
         };
         let param = self.bind_param(text.to_owned());
         Ok(format!("instr({column}, {param}) > 0"))
@@ -364,6 +567,24 @@ impl Compiler<'_> {
     }
 }
 
+fn build_attribute_json_path(key: &str) -> Result<String> {
+    if key.contains('"') {
+        return invalid_query(format!(
+            "the key {key:?} has a double quote, which a query cannot read"
+        ));
+    }
+    // The expression of the attribute's index, so SQLite uses the index when there is one.
+    Ok(attribute_json_path(key))
+}
+
+fn join_branches(branches: &[String]) -> String {
+    match branches {
+        [] => "FALSE".into(),
+        [branch] => branch.clone(),
+        branches => format!("({})", branches.join(" OR ")),
+    }
+}
+
 fn find_kind_or_status_number(
     builtin_field: BuiltinField,
     fixed_values: &[&str],
@@ -395,7 +616,7 @@ fn value_as_scalar(value: &Value) -> SqliteValue {
     }
 }
 
-fn equal_sql_values(value: &Value) -> Vec<SqliteValue> {
+pub fn equal_sql_values(value: &Value) -> Vec<SqliteValue> {
     // Apps send a number both as a number and as a string.
     match value {
         Value::String(text) => {

@@ -2,7 +2,10 @@ mod common;
 
 use std::time::SystemTime;
 
-use common::{Receiver, open_telemetry_file, query_first_column};
+use common::{
+    Receiver, open_telemetry_file, query_first_column, read_logs_oldest_first,
+    read_spans_oldest_first,
+};
 use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
@@ -15,6 +18,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use serde_json::json;
 
 #[derive(Clone, Copy)]
 enum Transport {
@@ -54,57 +58,69 @@ fn send_each_signal_and_check_the_telemetry_file(transport: Transport) {
     );
     assert_eq!(host_names, ["droplet"]);
 
-    let spans: Vec<String> = query_first_column(
-        &connection,
-        "SELECT json_object(
-             'name', name, 'kind', kind, 'status', status_code, 'root', parent_span_id IS NULL,
-             'route', attributes ->> '$.\"http.route\"',
-             'scope', attributes ->> '$.\"otel.scope.name\"',
-             'description', attributes ->> '$.\"otel.status_description\"')
-         FROM spans
-         ORDER BY started_at",
-    );
+    let spans = read_spans_oldest_first(directory.path());
+    let span_summaries: Vec<serde_json::Value> = spans
+        .iter()
+        .map(|span| {
+            json!({
+                "name": span.name,
+                "kind": span.kind.number(),
+                "status": span.status.number(),
+                "root": span.parent_span_id.is_none(),
+                "route": span.attributes.get("http.route"),
+                "scope": span.attributes.get("otel.scope.name"),
+                "description": span.attributes.get("otel.status_description"),
+            })
+        })
+        .collect();
     assert_eq!(
-        spans,
+        span_summaries,
         [
-            r#"{"name":"GET /cart","kind":2,"status":0,"root":1,"route":"/cart","scope":"shop-test","description":null}"#,
-            r#"{"name":"SELECT cart","kind":1,"status":2,"root":0,"route":null,"scope":"shop-test","description":"timeout"}"#,
+            json!({"name": "GET /cart", "kind": 2, "status": 0, "root": true, "route": "/cart", "scope": "shop-test", "description": null}),
+            json!({"name": "SELECT cart", "kind": 1, "status": 2, "root": false, "route": null, "scope": "shop-test", "description": "timeout"}),
         ]
     );
-    let events: Vec<String> = query_first_column(
-        &connection,
-        "SELECT json_object('name', event.value ->> 'name',
-                            'attempt', event.value ->> '$.attributes.attempt')
-         FROM spans, json_each(spans.events) event",
-    );
-    assert_eq!(events, [r#"{"name":"retry","attempt":2}"#]);
-    let child_span_counts: Vec<i64> = query_first_column(
-        &connection,
-        "SELECT count(*)
-         FROM spans child_span
-         JOIN spans parent_span
-           ON parent_span.trace_id = child_span.trace_id
-          AND parent_span.span_id = child_span.parent_span_id",
-    );
-    assert_eq!(child_span_counts, [1]);
+    let events: Vec<serde_json::Value> = spans
+        .iter()
+        .flat_map(|span| &span.events)
+        .map(|event| json!({"name": event.name, "attempt": event.attributes.get("attempt")}))
+        .collect();
+    assert_eq!(events, [json!({"name": "retry", "attempt": 2})]);
+    let child_span_count = spans
+        .iter()
+        .filter(|child| {
+            spans.iter().any(|parent| {
+                parent.trace_id == child.trace_id && Some(parent.span_id) == child.parent_span_id
+            })
+        })
+        .count();
+    assert_eq!(child_span_count, 1);
 
-    let logs: Vec<String> = query_first_column(
-        &connection,
-        "SELECT json_object('body', body, 'severity', severity_number,
-                            'user', attributes ->> '$.\"user.id\"',
-                            'scope', attributes ->> '$.\"otel.scope.name\"')
-         FROM logs",
-    );
+    let logs = read_logs_oldest_first(directory.path());
+    let log_summaries: Vec<serde_json::Value> = logs
+        .iter()
+        .map(|log| {
+            json!({
+                "body": log.body,
+                "severity": log.severity.number(),
+                "user": log.attributes.get("user.id"),
+                "scope": log.attributes.get("otel.scope.name"),
+            })
+        })
+        .collect();
     assert_eq!(
-        logs,
-        [r#"{"body":"cart is empty","severity":13,"user":7,"scope":"shop-test"}"#]
+        log_summaries,
+        [json!({"body": "cart is empty", "severity": 13, "user": 7, "scope": "shop-test"})]
     );
-    let spans_of_the_log: Vec<String> = query_first_column(
-        &connection,
-        "SELECT span.name
-         FROM logs log
-         JOIN spans span ON span.trace_id = log.trace_id AND span.span_id = log.span_id",
-    );
+    let spans_of_the_log: Vec<&str> = logs
+        .iter()
+        .flat_map(|log| {
+            spans.iter().filter(move |span| {
+                Some(span.trace_id) == log.trace_id && Some(span.span_id) == log.span_id
+            })
+        })
+        .map(|span| span.name.as_str())
+        .collect();
     assert_eq!(spans_of_the_log, ["GET /cart"]);
 
     let points: Vec<String> = query_first_column(

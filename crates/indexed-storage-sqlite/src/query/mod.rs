@@ -7,6 +7,7 @@ mod sample;
 mod services;
 mod span_groups;
 mod span_stats;
+mod stored_attributes;
 mod traces;
 
 use std::iter;
@@ -30,6 +31,21 @@ pub use sample::RecordSample;
 
 use crate::Reader;
 use crate::reader::timed_out;
+use compile::EncodedRecordAliases;
+
+pub const SPAN_ALIASES: EncodedRecordAliases = EncodedRecordAliases {
+    record: "span",
+    stable_attribute_set: "stable_attribute_set",
+    record_group: "record_group",
+    resource: "resource",
+};
+
+pub const LOG_ALIASES: EncodedRecordAliases = EncodedRecordAliases {
+    record: "log",
+    stable_attribute_set: "stable_attribute_set",
+    record_group: "record_group",
+    resource: "resource",
+};
 
 pub fn timestamp_from_nanos(unix_nanos: i64) -> Timestamp {
     Timestamp::from_nanosecond(i128::from(unix_nanos))

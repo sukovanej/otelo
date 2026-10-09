@@ -14,10 +14,64 @@ CREATE TABLE IF NOT EXISTS resources (
 -- Without it SQLite reads every span or log of the range to find those of one service.
 CREATE INDEX IF NOT EXISTS resources_service ON resources (service);
 
+CREATE TABLE IF NOT EXISTS attribute_keys (
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE
+);
+
+-- The indexer profiles the attributes of each group on its own.
+CREATE TABLE IF NOT EXISTS record_groups (
+  id INTEGER PRIMARY KEY,
+  -- log or span.
+  attribute_owner TEXT NOT NULL,
+  resource_id INTEGER NOT NULL REFERENCES resources (id),
+  -- The name of a span, or the otel.scope.name of a log.
+  name TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS record_groups_resource_id_attribute_owner_name
+  ON record_groups (resource_id, attribute_owner, name);
+
+CREATE TABLE IF NOT EXISTS stable_attribute_sets (
+  id INTEGER PRIMARY KEY,
+  -- xxh3 of the record group and the attributes.
+  identity_hash INTEGER NOT NULL UNIQUE,
+  record_group_id INTEGER NOT NULL REFERENCES record_groups (id),
+  -- A JSON object of the attributes whose key is stable in the group.
+  attributes TEXT NOT NULL,
+  -- The UTC date of the newest record that has the set. Retention deletes the set after it.
+  newest_record_day TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS stable_attribute_sets_record_group_id
+  ON stable_attribute_sets (record_group_id);
+
+CREATE TABLE IF NOT EXISTS interned_attribute_values (
+  id INTEGER PRIMARY KEY,
+  -- xxh3 of the value.
+  identity_hash INTEGER NOT NULL UNIQUE,
+  -- JSON.
+  value TEXT NOT NULL,
+  -- The UTC date of the newest record that has the value. Retention deletes the value after it.
+  newest_record_day TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attribute_key_profiles (
+  record_group_id INTEGER NOT NULL REFERENCES record_groups (id),
+  attribute_key_id INTEGER NOT NULL REFERENCES attribute_keys (id),
+  -- stable, interned, or literal.
+  encoding TEXT NOT NULL,
+  -- The records of the group with the key since the classification before.
+  record_count INTEGER NOT NULL,
+  -- Of those records. Exact up to 64, and a HyperLogLog estimate above.
+  distinct_value_count INTEGER NOT NULL,
+  -- Unix nanoseconds: the received_at of the journal frame that the classification followed.
+  classified_at INTEGER NOT NULL,
+  PRIMARY KEY (record_group_id, attribute_key_id)
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS logs (
   -- Unix nanoseconds.
   logged_at INTEGER NOT NULL,
-  resource_id INTEGER NOT NULL REFERENCES resources (id),
+  stable_attribute_set_id INTEGER NOT NULL REFERENCES stable_attribute_sets (id),
   -- The OpenTelemetry severity number: 0 is unspecified, 1 to 4 trace, 5 to 8 debug,
   -- 9 to 12 info, 13 to 16 warn, 17 to 20 error, 21 to 24 fatal.
   severity_number INTEGER NOT NULL,
@@ -26,12 +80,15 @@ CREATE TABLE IF NOT EXISTS logs (
   trace_id BLOB,
   -- 8 bytes. NULL for a log outside a span.
   span_id BLOB,
-  -- A JSON object.
-  attributes TEXT NOT NULL
+  -- A JSON object from the attribute_keys id to the interned_attribute_values id.
+  interned_attributes TEXT NOT NULL,
+  -- A JSON object from the attribute_keys id to the value.
+  literal_attributes TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS logs_logged_at ON logs (logged_at);
 CREATE INDEX IF NOT EXISTS logs_trace_id ON logs (trace_id) WHERE trace_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS logs_resource_id_logged_at ON logs (resource_id, logged_at);
+CREATE INDEX IF NOT EXISTS logs_stable_attribute_set_id_logged_at
+  ON logs (stable_attribute_set_id, logged_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS log_body_search USING fts5 (body, content = 'logs');
 CREATE TRIGGER IF NOT EXISTS log_body_search_insert AFTER INSERT ON logs BEGIN
@@ -49,8 +106,7 @@ CREATE TABLE IF NOT EXISTS spans (
   span_id BLOB NOT NULL,
   -- 8 bytes. NULL for a root span.
   parent_span_id BLOB,
-  resource_id INTEGER NOT NULL REFERENCES resources (id),
-  name TEXT NOT NULL,
+  stable_attribute_set_id INTEGER NOT NULL REFERENCES stable_attribute_sets (id),
   -- The OpenTelemetry span kind: 0 unspecified, 1 internal, 2 server, 3 client,
   -- 4 producer, 5 consumer.
   kind INTEGER NOT NULL,
@@ -59,14 +115,17 @@ CREATE TABLE IF NOT EXISTS spans (
   duration_ns INTEGER NOT NULL,
   -- The OpenTelemetry status code: 0 unset, 1 ok, 2 error.
   status_code INTEGER NOT NULL,
-  -- A JSON object.
-  attributes TEXT NOT NULL,
+  -- A JSON object from the attribute_keys id to the interned_attribute_values id.
+  interned_attributes TEXT NOT NULL,
+  -- A JSON object from the attribute_keys id to the value.
+  literal_attributes TEXT NOT NULL,
   -- A JSON array of objects with occurred_at in Unix nanoseconds, name, and attributes.
   events TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS spans_trace_id ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS spans_started_at ON spans (started_at);
-CREATE INDEX IF NOT EXISTS spans_resource_id_started_at ON spans (resource_id, started_at);
+CREATE INDEX IF NOT EXISTS spans_stable_attribute_set_id_started_at
+  ON spans (stable_attribute_set_id, started_at);
 
 CREATE TABLE IF NOT EXISTS metric_series (
   id INTEGER PRIMARY KEY,
@@ -152,6 +211,12 @@ CREATE TABLE IF NOT EXISTS attribute_key_counts (
   record_count INTEGER NOT NULL,
   -- 1 once the key has more distinct values on the day than attribute_value_counts keeps.
   has_more_values_than_listed INTEGER NOT NULL DEFAULT 0,
+  -- 1 once a log or span of the day kept the key in its stable attribute set.
+  has_stable_values INTEGER NOT NULL DEFAULT 0,
+  -- 1 once a log or span of the day kept the key in interned_attribute_values.
+  has_interned_values INTEGER NOT NULL DEFAULT 0,
+  -- 1 once a log or span of the day kept the key on its row.
+  has_literal_values INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, attribute_owner, key)
 ) WITHOUT ROWID;
 

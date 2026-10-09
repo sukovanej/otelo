@@ -9,9 +9,13 @@ use otelo_indexed_storage::{AttributeValue, Attributes, SpanStatus};
 use otelo_query::Query;
 
 use super::span_stats::{SpanTally, fill_span_buckets};
-use super::traces::compile_span_query;
-use super::{WhereClause, limit_groups_with_buckets, timestamp_from_nanos, truncate_to_limit};
+use super::stored_attributes::StoredAttributes;
+use super::traces::{compile_span_query, select_spans};
+use super::{
+    SPAN_ALIASES, WhereClause, limit_groups_with_buckets, timestamp_from_nanos, truncate_to_limit,
+};
 use crate::Reader;
+use crate::catalog::AttributeOwner;
 use crate::indexes::attribute_json_path;
 
 pub(super) type GroupingValuesAsJson = Vec<Option<String>>;
@@ -49,17 +53,44 @@ struct SpanNameAndAttributes {
 }
 
 // The JSON of a value keeps a bool apart from 1, which json_extract turns it into.
-fn grouping_column_as_json(field: &SpanGroupingField) -> String {
+fn grouping_column_as_json(
+    field: &SpanGroupingField,
+    stored_attributes: &StoredAttributes,
+) -> String {
     match field {
         SpanGroupingField::Service => "json_quote(resource.service)".to_owned(),
-        SpanGroupingField::Name => "json_quote(span.name)".to_owned(),
+        SpanGroupingField::Name => "json_quote(record_group.name)".to_owned(),
         SpanGroupingField::Attribute(key) => {
-            format!("span.attributes -> {}", attribute_json_path(key))
+            SPAN_ALIASES.attribute_json_sql(key, stored_attributes.stored_key(key))
         }
         SpanGroupingField::Resource(key) => {
             format!("resource.attributes -> {}", attribute_json_path(key))
         }
     }
+}
+
+fn list_grouping_columns_as_json(
+    reader: &Reader,
+    by: &[SpanGroupingField],
+) -> anyhow::Result<String> {
+    let grouped_keys: Vec<&str> = by
+        .iter()
+        .filter_map(|field| match field {
+            SpanGroupingField::Attribute(key) => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    let stored_attributes =
+        reader.read_stored_attributes(AttributeOwner::Span, &grouped_keys, &[])?;
+    Ok(by
+        .iter()
+        .flat_map(|field| {
+            [
+                ", ".to_owned(),
+                grouping_column_as_json(field, &stored_attributes),
+            ]
+        })
+        .collect())
 }
 
 impl Reader {
@@ -72,12 +103,20 @@ impl Reader {
             return Ok(HashMap::new());
         }
         let mut where_clause = WhereClause::new();
-        where_clause.push_param(":rowids", serde_json::to_string(&rowids)?);
+        where_clause.push_condition_with_param(
+            "span.rowid IN (SELECT value FROM json_each(:rowids))",
+            ":rowids",
+            serde_json::to_string(&rowids)?,
+        );
         let mut spans = HashMap::new();
-        let sql = "SELECT rowid, name, attributes
-                   FROM spans
-                   WHERE rowid IN (SELECT value FROM json_each(:rowids))";
-        self.scan_rows(sql, &where_clause, |row| {
+        let sql = select_spans(
+            &format!(
+                "span.rowid, record_group.name, {}",
+                SPAN_ALIASES.record_attributes_json_sql()
+            ),
+            &where_clause,
+        );
+        self.scan_rows(&sql, &where_clause, |row| {
             let attributes: String = row.get(2)?;
             spans.insert(
                 SpanRowid(row.get(0)?),
@@ -106,16 +145,12 @@ pub(super) fn group_spans(
     // The second read of the steps sees what the first saw, so the buckets of
     // a group add up to its count.
     let _snapshot = reader.connection().unchecked_transaction()?;
-    let grouping_columns: String = by
-        .iter()
-        .flat_map(|field| [", ".to_owned(), grouping_column_as_json(field)])
-        .collect();
-    let sql = format!(
-        "SELECT span.started_at, span.duration_ns, span.status_code, span.rowid{grouping_columns}
-         FROM spans span
-         JOIN resources resource ON resource.id = span.resource_id
-         WHERE {}",
-        where_clause.sql()
+    let grouping_columns = list_grouping_columns_as_json(reader, by)?;
+    let sql = select_spans(
+        &format!(
+            "span.started_at, span.duration_ns, span.status_code, span.rowid{grouping_columns}"
+        ),
+        &where_clause,
     );
     let mut all_spans = SpanTally::default();
     let mut steps: HashMap<i64, SpanTally> = HashMap::new();

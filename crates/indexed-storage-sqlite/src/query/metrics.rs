@@ -12,7 +12,8 @@ use otelo_indexed_storage::{
 };
 use otelo_query::{Query, Signal};
 
-use super::compile::{TableAliases, compile_query};
+use super::compile::{QueryContext, TableAliases, compile_query};
+use super::stored_attributes::StoredAttributes;
 use super::{WhereClause, row_limit_with_one_more, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
 use crate::rollup::{SummaryTable, convert_to_summary_kind, read_summary, summary_columns_of};
@@ -25,7 +26,7 @@ pub const BASELINE_LOOKBACK_NS: i64 = 5 * 60 * 1_000_000_000;
 // A group needs every series of the metric, so the query cannot stop at the limit of the answer.
 const MAX_SERIES_IN_A_METRIC_QUERY: usize = 2_000;
 
-pub(super) const SERIES_TABLE_ALIASES: TableAliases = TableAliases {
+pub(super) const SERIES_TABLE_ALIASES: TableAliases = TableAliases::MetricSeries {
     record: "metric_series",
     resource: "resource",
 };
@@ -175,8 +176,11 @@ pub(super) fn list_metrics(
     let mut where_clause = where_series_have_points_in_range(reader, resolution);
     compile_query(
         query,
-        SERIES_TABLE_ALIASES,
-        reader.indexed_attributes(),
+        &QueryContext {
+            aliases: SERIES_TABLE_ALIASES,
+            indexed_attributes: reader.indexed_attributes(),
+            stored_attributes: &StoredAttributes::default(),
+        },
         "q",
         &mut where_clause,
     )?;
@@ -253,8 +257,11 @@ fn read_buckets_of_raw_points(
     );
     compile_query(
         &filter.query,
-        SERIES_TABLE_ALIASES,
-        reader.indexed_attributes(),
+        &QueryContext {
+            aliases: SERIES_TABLE_ALIASES,
+            indexed_attributes: reader.indexed_attributes(),
+            stored_attributes: &StoredAttributes::default(),
+        },
         "q",
         &mut where_clause,
     )?;
@@ -343,8 +350,11 @@ fn read_buckets_of_summaries(
     );
     compile_query(
         &filter.query,
-        SERIES_TABLE_ALIASES,
-        reader.indexed_attributes(),
+        &QueryContext {
+            aliases: SERIES_TABLE_ALIASES,
+            indexed_attributes: reader.indexed_attributes(),
+            stored_attributes: &StoredAttributes::default(),
+        },
         "q",
         &mut where_clause,
     )?;
