@@ -1,14 +1,22 @@
 use std::collections::BTreeSet;
+use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use jiff::Timestamp;
 use otelo_api::{
     Api, DefaultSince, RangeSignals, convert_to_unix_nanos, parse_duration, parse_time,
 };
-use otelo_indexed_storage_sqlite::{Day, Sqlite};
+use otelo_indexed_storage_sqlite::{Day, RetentionDays, Sqlite};
 use otelo_query::Signal;
 use otelo_state::StateFile;
 use tokio_util::sync::CancellationToken;
+
+const INDEX_RETENTION_DAYS: RetentionDays = RetentionDays {
+    logs: SEVEN_DAYS,
+    traces: SEVEN_DAYS,
+    metrics: SEVEN_DAYS,
+};
+const SEVEN_DAYS: NonZeroU16 = NonZeroU16::new(7).expect("seven is not zero");
 
 const HOUR_NS: i64 = 3600 * 1_000_000_000;
 
@@ -29,7 +37,7 @@ fn parses_durations_and_timestamps() {
 fn caps_the_range_at_the_retention_of_its_signals() {
     let dir = tempfile::tempdir().unwrap();
     let api = Api::new(
-        Arc::new(Sqlite::open(dir.path(), BTreeSet::new()).unwrap()),
+        Arc::new(Sqlite::open(dir.path(), INDEX_RETENTION_DAYS, BTreeSet::new()).unwrap()),
         Arc::new(StateFile::open(dir.path()).unwrap()),
         CancellationToken::new(),
     );

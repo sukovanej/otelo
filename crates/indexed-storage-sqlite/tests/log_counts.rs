@@ -66,7 +66,7 @@ impl Fixture {
             &json!({}),
         )];
         common::index_batches(
-            Config::new(directory.path().to_owned()),
+            Config::new(directory.path().to_owned(), common::INDEX_RETENTION_DAYS),
             vec![vec![
                 records("api", api_logs),
                 records("worker", worker_logs),

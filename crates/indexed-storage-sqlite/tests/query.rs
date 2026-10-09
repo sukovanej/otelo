@@ -111,7 +111,7 @@ const fn rate_of(bucket: &Bucket) -> Option<f64> {
 }
 
 fn write_batch(directory: &Path, batch: Batch, indexes: &Indexes) {
-    let mut config = Config::new(directory.to_owned());
+    let mut config = Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS);
     config.indexes = indexes.clone();
     common::index_batches(config, vec![batch]);
 }

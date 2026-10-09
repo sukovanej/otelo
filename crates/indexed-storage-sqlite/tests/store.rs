@@ -94,7 +94,10 @@ fn log_batch(logged_at: i64, body: &str) -> Batch {
 }
 
 fn write_batches(directory: &Path, batches: Vec<Batch>) {
-    common::index_batches(Config::new(directory.to_owned()), batches);
+    common::index_batches(
+        Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS),
+        batches,
+    );
 }
 
 fn query_pairs<First: rusqlite::types::FromSql, Second: rusqlite::types::FromSql>(
@@ -218,7 +221,12 @@ fn a_reader_needs_the_telemetry_file() {
     let directory = tempfile::tempdir().unwrap();
     let range = TimeRange::new(0, SECOND).unwrap();
     assert!(Reader::open(&directory.path().join("telemetry"), range).is_err());
-    Sqlite::open(directory.path(), BTreeSet::new()).unwrap();
+    Sqlite::open(
+        directory.path(),
+        common::INDEX_RETENTION_DAYS,
+        BTreeSet::new(),
+    )
+    .unwrap();
     let reader = Reader::open(&directory.path().join("telemetry"), range).unwrap();
     assert_eq!(
         query_integer(reader.connection(), "SELECT count(*) FROM logs"),
@@ -352,7 +360,7 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
         points: Points::Gauge(number_points(&[(recorded_at, 1.0)])),
     };
     let pipeline = common::index_batches_of_signal(
-        Config::new(directory.path().to_owned()),
+        Config::new(directory.path().to_owned(), common::INDEX_RETENTION_DAYS),
         Signal::Metrics,
         vec![
             metric_batch(
@@ -407,7 +415,12 @@ fn a_metric_past_1000_series_rejects_the_points_of_its_newer_series() {
 #[test]
 fn the_size_counts_the_write_ahead_log_of_the_telemetry() {
     let directory = tempfile::tempdir().unwrap();
-    let storage = Sqlite::open(directory.path(), BTreeSet::new()).unwrap();
+    let storage = Sqlite::open(
+        directory.path(),
+        common::INDEX_RETENTION_DAYS,
+        BTreeSet::new(),
+    )
+    .unwrap();
     let telemetry_path = directory.path().join("telemetry").join(TELEMETRY_FILE_NAME);
     let telemetry_bytes = fs::metadata(&telemetry_path).unwrap().len();
     assert!(telemetry_bytes > 0);

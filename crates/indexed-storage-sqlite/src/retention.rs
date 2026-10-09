@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::num::NonZeroU16;
 
 use otelo_query::Signal;
 use rusqlite::{Transaction, params};
@@ -16,6 +17,35 @@ use crate::telemetry_file::TelemetryFile;
 const MAX_DELETED_ROWS_PER_TRANSACTION: usize = 10_000;
 
 const PAGES_PER_INCREMENTAL_VACUUM: i64 = 2_048;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetentionDays {
+    pub logs: NonZeroU16,
+    pub traces: NonZeroU16,
+    pub metrics: NonZeroU16,
+}
+
+impl RetentionDays {
+    #[must_use]
+    pub const fn of_signal(self, signal: Signal) -> NonZeroU16 {
+        match signal {
+            Signal::Logs => self.logs,
+            Signal::Spans => self.traces,
+            Signal::Metrics => self.metrics,
+        }
+    }
+
+    #[must_use]
+    pub fn oldest_retained_days(self, today: Day) -> OldestRetainedDays {
+        let oldest_retained_day =
+            |retention_days: NonZeroU16| today.add_days(1 - i64::from(retention_days.get()));
+        OldestRetainedDays {
+            logs: oldest_retained_day(self.logs),
+            traces: oldest_retained_day(self.traces),
+            metrics: oldest_retained_day(self.metrics),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OldestRetainedDays {

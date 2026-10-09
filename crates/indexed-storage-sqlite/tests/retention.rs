@@ -89,11 +89,14 @@ const fn days(count: u16) -> NonZeroU16 {
 }
 
 fn write_batches(directory: &Path, batches: Vec<Batch>) {
-    common::index_batches(Config::new(directory.to_owned()), batches);
+    common::index_batches(
+        Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS),
+        batches,
+    );
 }
 
 fn delete_past_retention(directory: &Path, configure_retention: impl FnOnce(&mut Config)) {
-    let mut config = Config::new(directory.to_owned());
+    let mut config = Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS);
     configure_retention(&mut config);
     let oldest_retained_days = config.oldest_retained_days(Day::today());
     let mut file = TelemetryFile::open(directory).unwrap();
@@ -137,7 +140,7 @@ fn deletes_the_rows_of_one_signal_and_leaves_the_others() {
         )],
     );
     delete_past_retention(directory.path(), |config| {
-        config.logs_retention_days = days(2);
+        config.retention_days.logs = days(2);
     });
     assert_eq!(count_rows(directory.path(), "SELECT count(*) FROM logs"), 0);
     assert_eq!(
@@ -171,7 +174,7 @@ fn retention_of_the_spans_deletes_their_summaries_and_the_keys_left_without_span
         ],
     );
     delete_past_retention(directory.path(), |config| {
-        config.traces_retention_days = days(2);
+        config.retention_days.traces = days(2);
     });
     for table in [
         "span_minute_summaries",
@@ -222,7 +225,7 @@ fn a_deleted_log_no_longer_matches_a_full_text_search() {
     };
     assert_eq!(search_bodies(), ["payment 13 failed", "payment 12 failed"]);
     delete_past_retention(directory.path(), |config| {
-        config.logs_retention_days = days(2);
+        config.retention_days.logs = days(2);
     });
     assert_eq!(search_bodies(), ["payment 13 failed"]);
     assert_eq!(
@@ -264,7 +267,7 @@ fn the_catalog_drops_a_key_whose_last_day_passed_the_retention() {
     };
     assert_eq!(log_keys(), [("kept.key".into(), 2), ("old.key".into(), 1)]);
     delete_past_retention(directory.path(), |config| {
-        config.logs_retention_days = days(2);
+        config.retention_days.logs = days(2);
     });
     assert_eq!(log_keys(), [("kept.key".into(), 1)]);
 }
@@ -320,7 +323,7 @@ fn retention_of_the_metrics_deletes_a_series_with_no_rows_left() {
     }
 
     delete_past_retention(directory.path(), |config| {
-        config.metrics_retention_days = days(2);
+        config.retention_days.metrics = days(2);
     });
     for (table, instant_column) in tables {
         assert_eq!(
@@ -375,7 +378,7 @@ fn lowering_a_retention_shrinks_the_file_after_the_incremental_vacuum() {
     assert!(bytes_before > 5_000_000, "{bytes_before} bytes");
 
     delete_past_retention(directory.path(), |config| {
-        config.logs_retention_days = days(2);
+        config.retention_days.logs = days(2);
     });
     assert_eq!(count_rows(directory.path(), "SELECT count(*) FROM logs"), 0);
     let bytes_after = file_bytes();

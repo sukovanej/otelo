@@ -69,7 +69,10 @@ fn log(logged_at: i64, severity: Severity) -> Log {
 }
 
 fn write_batch(directory: &Path, batch: Batch) {
-    common::index_batches(Config::new(directory.to_owned()), vec![batch]);
+    common::index_batches(
+        Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS),
+        vec![batch],
+    );
 }
 
 struct Fixture {
