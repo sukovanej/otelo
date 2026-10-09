@@ -1,3 +1,4 @@
+import { subscribeToIndexing } from "./events";
 import type { components, paths } from "./schema";
 
 export type AttributeKeys = Schemas["AttributeKeys"];
@@ -10,6 +11,7 @@ export type DashboardSummary = Schemas["DashboardSummary"];
 export type FieldBody = Schemas["FieldBody"];
 export type FieldSource = FieldBody["source"];
 export type IndexedSignal = Schemas["IndexedSignal"];
+export type Indexing = Schemas["Indexing"];
 export type GroupedQuery = Schemas["GroupedQuery"];
 export type LogCounts = Schemas["LogCounts"];
 export type LogGroup = Schemas["LogGroup"];
@@ -25,6 +27,7 @@ export type SeriesInfo = Schemas["SeriesInfo"];
 export type Service = Schemas["Service"];
 export type ServiceSummary = Schemas["ServiceSummary"];
 export type Signal = Schemas["Signal"];
+export type SignalIndexing = Schemas["SignalIndexing"];
 export type SpanBucket = Schemas["SpanBucket"];
 export type SpanGroup = Schemas["SpanGroup"];
 export type SpanGroupRank = Schemas["SpanGroupRank"];
@@ -147,6 +150,7 @@ export interface Api {
   ) => Promise<OkBody<"/api/indexes/{signal}/{key}", "put">>;
   readonly logIn: (password: string) => Promise<void>;
   readonly logOut: () => Promise<void>;
+  readonly subscribeToIndexing: (onIndexing: (indexing: Indexing) => void) => () => void;
 }
 
 export function createApi(fetchFromDaemon: typeof fetch): Api {
@@ -201,6 +205,7 @@ export function createApi(fetchFromDaemon: typeof fetch): Api {
         password,
       } satisfies LoginBody).then(() => undefined),
     logOut: () => sendRequest(fetchFromDaemon, "POST", "/api/logout").then(() => undefined),
+    subscribeToIndexing,
   };
 }
 

@@ -4,6 +4,7 @@ mod grouping;
 mod histogram;
 mod increase;
 mod indexes;
+mod indexing;
 mod meters;
 mod metric;
 mod otel;
@@ -21,6 +22,7 @@ pub use histogram::{
 };
 pub use increase::{Increase, StepIncreases};
 pub use indexes::{IndexedAttribute, IndexedSignal};
+pub use indexing::{Indexing, SignalIndexing};
 pub use meters::{
     DURATION_BUCKET_BOUNDS_SECONDS, DurationCounts, FrameCounts, PipelineMeters, PipelineReading,
     RecordCounts, RequestCounts, SignalReading,

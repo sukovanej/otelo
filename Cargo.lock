@@ -1803,6 +1803,7 @@ version = "0.0.7"
 dependencies = [
  "anyhow",
  "axum",
+ "futures-util",
  "jiff",
  "otelo-indexed-storage",
  "otelo-indexed-storage-sqlite",
@@ -1812,6 +1813,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tracing",
  "utoipa",
  "utoipa-axum",
@@ -1841,6 +1843,7 @@ dependencies = [
  "otelo-query",
  "serde",
  "serde_json",
+ "tokio",
  "utoipa",
 ]
 

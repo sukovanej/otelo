@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    IndexedAttribute, PipelineMeters, RangeQueries, Result, Storage, TimeRange,
+    IndexedAttribute, Indexing, PipelineMeters, RangeQueries, Result, Storage, TimeRange,
 };
 use otelo_journal::{Hour, Journal, SyncedEndInbox};
 use otelo_query::Signal;
+use tokio::sync::watch;
 
 use crate::completion_cache::CompletionCache;
 use crate::day::Day;
@@ -32,6 +33,7 @@ pub enum ReindexProgress {
 pub struct Sqlite {
     config: Config,
     completion_cache: Arc<CompletionCache>,
+    indexing: watch::Sender<Indexing>,
     _telemetry_lock: TelemetryLock,
 }
 
@@ -51,6 +53,7 @@ impl Sqlite {
         Ok(Self {
             config,
             completion_cache: Arc::default(),
+            indexing: watch::Sender::new(Indexing::STARTING),
             _telemetry_lock: telemetry_lock,
         })
     }
@@ -62,7 +65,14 @@ impl Sqlite {
         map_frame: FrameMapper,
         meters: Arc<PipelineMeters>,
     ) -> anyhow::Result<Indexer> {
-        Indexer::spawn(self.config.clone(), journal, synced_ends, map_frame, meters)
+        Indexer::spawn(
+            self.config.clone(),
+            journal,
+            synced_ends,
+            map_frame,
+            meters,
+            self.indexing.clone(),
+        )
     }
 }
 
@@ -141,6 +151,10 @@ impl Storage for Sqlite {
 
     fn replace_indexed_attributes(&self, attributes: BTreeSet<IndexedAttribute>) {
         self.config.indexes.replace_attributes(attributes);
+    }
+
+    fn watch_indexing(&self) -> watch::Receiver<Indexing> {
+        self.indexing.subscribe()
     }
 }
 

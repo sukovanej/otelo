@@ -14,6 +14,7 @@ import { Button } from "@otelo/ui";
 
 import { ApiContext } from "./api";
 import { describeError } from "./fetch";
+import IndexingProgressBar from "./IndexingProgressBar";
 import { LoginContext } from "./login";
 
 const SECTIONS = [
@@ -84,6 +85,7 @@ export default function App(props: RouteSectionProps) {
           </Button>
         </div>
       </header>
+      <IndexingProgressBar />
       <main class="flex min-h-0 flex-1 flex-col bg-page">{props.children}</main>
     </div>
   );

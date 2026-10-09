@@ -326,6 +326,24 @@
         }
       }
     },
+    "/api/events": {
+      "get": {
+        "summary": "The events of the daemon, as server-sent events. The first `indexing`\nevent comes at once and holds how far the index has read the journal, and\nanother comes after each change, a second apart at least.",
+        "operationId": "stream_events",
+        "responses": {
+          "200": {
+            "description": "An `indexing` event of the JSON of `Indexing`",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Indexing"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/indexes": {
       "get": {
         "summary": "The attributes that have an index.",
@@ -2070,6 +2088,26 @@
           "spans"
         ]
       },
+      "Indexing": {
+        "type": "object",
+        "description": "How far the index has read the journal of each signal. A query answers\nfrom the index, so it misses what the index has not read yet.",
+        "required": [
+          "logs",
+          "spans",
+          "metrics"
+        ],
+        "properties": {
+          "logs": {
+            "$ref": "#/components/schemas/SignalIndexing"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/SignalIndexing"
+          },
+          "spans": {
+            "$ref": "#/components/schemas/SignalIndexing"
+          }
+        }
+      },
       "Latency": {
         "type": "object",
         "description": "Percentiles of durations, in nanoseconds.",
@@ -2817,6 +2855,63 @@
           "spans",
           "metrics"
         ]
+      },
+      "SignalIndexing": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The indexer has not read the journal yet since the daemon started.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The index is behind the journal, after a start, a rebuild, or a burst.",
+            "required": [
+              "indexed_percent",
+              "state"
+            ],
+            "properties": {
+              "indexed_percent": {
+                "type": "integer",
+                "format": "int32",
+                "description": "How much of what the journal received since the catch-up began\nthe index holds, from 0 to 99.",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "catching_up"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The index holds what the journal received up to the last second or so.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "caught_up"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "How far the index has read the journal of one signal."
       },
       "SpanBucket": {
         "type": "object",

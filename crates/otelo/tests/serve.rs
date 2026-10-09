@@ -2,6 +2,10 @@
 
 mod common;
 
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
+use std::time::Duration;
+
 use common::{
     Daemon, StopSignal, send_get_request, start_daemon, start_daemon_with_args, stop_daemon,
 };
@@ -302,4 +306,46 @@ fn the_daemon_builds_the_telemetry_of_another_storage_version_again_as_it_receiv
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(bodies, ["cart is empty", "cart is full"]);
+}
+
+fn open_event_stream(daemon: &Daemon) -> BufReader<TcpStream> {
+    let mut stream = TcpStream::connect(&daemon.api_addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let request = format!(
+        "GET /api/events HTTP/1.1\r\nHost: {}\r\nAuthorization: {}\r\n\r\n",
+        daemon.api_addr,
+        daemon.bearer_header()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    BufReader::new(stream)
+}
+
+fn read_next_event_data(events: &mut BufReader<TcpStream>) -> serde_json::Value {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        assert_ne!(events.read_line(&mut line).unwrap(), 0, "the stream ended");
+        if let Some(data) = line.trim_end().strip_prefix("data: ") {
+            return serde_json::from_str(data).unwrap();
+        }
+    }
+}
+
+#[test]
+fn streams_how_far_the_index_has_read_until_the_daemon_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(dir.path());
+    let mut events = open_event_stream(&daemon);
+    let caught_up = serde_json::json!({
+        "logs": { "state": "caught_up" },
+        "spans": { "state": "caught_up" },
+        "metrics": { "state": "caught_up" },
+    });
+    while read_next_event_data(&mut events) != caught_up {}
+
+    stop_daemon(daemon, StopSignal::Term);
+    let mut rest = Vec::new();
+    events.read_to_end(&mut rest).unwrap();
 }

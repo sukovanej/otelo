@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use otelo_indexed_storage::{
-    Attributes, Batch, FrameCounts, Log, Metric, NumberPoint, PipelineMeters, Points, Records,
-    Resource, Severity, TraceContext, now_unix_nanos,
+    Attributes, Batch, FrameCounts, Indexing, Log, Metric, NumberPoint, PipelineMeters, Points,
+    Records, Resource, Severity, TraceContext, now_unix_nanos,
 };
 use otelo_indexed_storage_sqlite::{
     Config, Day, FrameMapper, Indexer, Progress, TELEMETRY_FILE_NAME, TelemetryFile,
@@ -183,6 +183,7 @@ fn indexes_each_frame_once_the_journal_synced_it() {
         opened.synced_ends,
         common::map_numbered_frames(numbered_log_batches(3)),
         Arc::clone(&meters),
+        tokio::sync::watch::Sender::new(Indexing::STARTING),
     )
     .unwrap();
 
@@ -271,6 +272,7 @@ fn rolls_up_only_the_minutes_it_has_indexed_while_it_catches_up() {
         opened.synced_ends,
         common::map_numbered_frames(recorded_ats.into_iter().map(gauge_batch).collect()),
         Arc::new(PipelineMeters::default()),
+        tokio::sync::watch::Sender::new(Indexing::STARTING),
     )
     .unwrap();
     opened.threads.stop_and_join().unwrap();

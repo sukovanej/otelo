@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 otelo-indexed-storage = { workspace = true }
 otelo-journal = { workspace = true }
 otelo-query = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 twox-hash = { workspace = true }
 utoipa = { workspace = true }
@@ -22,7 +23,6 @@ utoipa = { workspace = true }
 [dev-dependencies]
 otelo-journal-files = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [lints]

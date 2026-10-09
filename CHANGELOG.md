@@ -7,6 +7,15 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.7...main)
 
+### Added
+
+- A bar under the header of the web UI fills while the index catches up with
+  the journal, such as after a rebuild, and the open page reads again once it
+  has. `GET /api/events` streams how far the index of each signal has read, as
+  server-sent events. Only one browser tab reads the stream, and it passes the
+  events to the other tabs, so open tabs don't use up the six connections a
+  browser keeps to one host.
+
 ### Changed
 
 - `otelo serve` starts on a `telemetry.sqlite` of another storage version. It
@@ -17,6 +26,9 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On a phone, the query field of the logs and traces pages shrank to nothing,
+  and the Run button went past the edge of the screen. The time range now goes
+  on its own row below the query field and Run.
 - While the indexer caught up with the journal, the metric rollups ran ahead of
   it. They marked minutes and hours as done before their points were indexed,
   and a chart over more than a few hours showed nothing for them. A rebuild of

@@ -36,7 +36,7 @@ export default function QueryBar<V extends string, R extends ListResult<V>, S ex
       fetched={list().fetched}
       top={
         <form
-          class="flex items-center gap-2"
+          class="flex flex-wrap items-center gap-2 sm:flex-nowrap"
           onSubmit={(e) => {
             e.preventDefault();
             list().runDraftQuery();
@@ -78,12 +78,14 @@ export default function QueryBar<V extends string, R extends ListResult<V>, S ex
             size="lg"
             ref={props.ref}
           />
-          <RangePicker
-            since={latest(list().since)}
-            until={latest(list().until)}
-            onChange={(since, until) => list().setRange(since, until)}
-            size="lg"
-          />
+          <div class="order-last w-full sm:order-none sm:w-auto">
+            <RangePicker
+              since={latest(list().since)}
+              until={latest(list().until)}
+              onChange={(since, until) => list().setRange(since, until)}
+              size="lg"
+            />
+          </div>
           <Button type="submit" variant="primary" size="lg">
             Run
           </Button>

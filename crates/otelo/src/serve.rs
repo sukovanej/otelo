@@ -170,7 +170,7 @@ async fn serve_until_shutdown(
     )?;
     let intake = Intake::new(Arc::clone(&journal), Arc::clone(&meters));
     let storage: Arc<dyn Storage> = Arc::new(storage);
-    let api = Api::new(Arc::clone(&storage), Arc::clone(&state));
+    let api = Api::new(Arc::clone(&storage), Arc::clone(&state), shutdown.clone());
     let Listeners {
         api: api_listener,
         otlp_http,

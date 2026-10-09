@@ -82,6 +82,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The events of the daemon, as server-sent events. The first `indexing`
+         *     event comes at once and holds how far the index has read the journal, and
+         *     another comes after each change, a second apart at least.
+         */
+        get: operations["stream_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/indexes": {
         parameters: {
             query?: never;
@@ -653,6 +674,15 @@ export interface components {
          * @enum {string}
          */
         IndexedSignal: "logs" | "spans";
+        /**
+         * @description How far the index has read the journal of each signal. A query answers
+         *     from the index, so it misses what the index has not read yet.
+         */
+        Indexing: {
+            logs: components["schemas"]["SignalIndexing"];
+            metrics: components["schemas"]["SignalIndexing"];
+            spans: components["schemas"]["SignalIndexing"];
+        };
         /** @description Percentiles of durations, in nanoseconds. */
         Latency: {
             /** Format: int64 */
@@ -996,6 +1026,23 @@ export interface components {
          * @enum {string}
          */
         Signal: "logs" | "spans" | "metrics";
+        /** @description How far the index has read the journal of one signal. */
+        SignalIndexing: {
+            /** @enum {string} */
+            state: "starting";
+        } | {
+            /**
+             * Format: int32
+             * @description How much of what the journal received since the catch-up began
+             *     the index holds, from 0 to 99.
+             */
+            indexed_percent: number;
+            /** @enum {string} */
+            state: "catching_up";
+        } | {
+            /** @enum {string} */
+            state: "caught_up";
+        };
         /** @description The spans of one step. */
         SpanBucket: {
             spans: components["schemas"]["SpanStats"];
@@ -1549,6 +1596,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    stream_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An `indexing` event of the JSON of `Indexing` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["Indexing"];
                 };
             };
         };
