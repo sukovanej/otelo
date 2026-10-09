@@ -194,7 +194,7 @@ impl IndexerState {
             due_signals
                 .retain(|&signal| self.index_next_frames_or_log(signal) == Progress::MoreIsDue);
             if due_signals.is_empty()
-                && !self.has_failed_journal_read()
+                && !self.has_failed_indexing()
                 && let Some(started_at) = catch_up_started_at.take()
             {
                 tracing::info!(
@@ -250,7 +250,7 @@ impl IndexerState {
         self.report_rejected_points();
     }
 
-    fn has_failed_journal_read(&self) -> bool {
+    fn has_failed_indexing(&self) -> bool {
         self.cursors
             .iter()
             .any(|cursor| matches!(cursor.journal_read, JournalRead::FailedAt(_)))

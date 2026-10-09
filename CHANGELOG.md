@@ -15,6 +15,12 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Until the indexer catches up, queries miss the newest hours. The daemon logs
   `caught up with the journal` when it has.
 
+### Fixed
+
+- A thread of the daemon that panicked, such as the indexer, printed to stderr
+  only, and nothing in otelo's own logs showed it. The panic is now an error
+  log with its message, thread, file, line, and backtrace.
+
 ## [0.0.7](https://github.com/sukovanej/otelo/compare/v0.0.6...v0.0.7) - 2026-10-08
 
 ### Changed

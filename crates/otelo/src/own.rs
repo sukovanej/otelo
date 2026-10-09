@@ -1,6 +1,8 @@
+use std::backtrace::Backtrace;
 use std::fmt;
 use std::io::{self, IsTerminal};
 use std::net::SocketAddr;
+use std::panic::Location;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -156,6 +158,22 @@ pub fn install_tracing_subscriber(own_telemetry: Option<&Telemetry>) {
         .with(trace_export_layer)
         .with(log_export_layer)
         .init();
+}
+
+// A thread that panics, such as the indexer, ends while the daemon runs on, so its panic goes
+// where the daemon's errors go.
+pub fn log_panics_as_errors() {
+    std::panic::set_hook(Box::new(|panic| {
+        let location = panic.location();
+        tracing::error!(
+            exception.message = panic.payload_as_str().unwrap_or("a panic without a message"),
+            exception.stacktrace = %Backtrace::force_capture(),
+            thread.name = std::thread::current().name(),
+            code.file.path = location.map(Location::file),
+            code.line.number = location.map(Location::line),
+            "panicked"
+        );
+    }));
 }
 
 impl Telemetry {
