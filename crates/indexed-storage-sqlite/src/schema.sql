@@ -124,8 +124,10 @@ CREATE TABLE IF NOT EXISTS spans (
 );
 CREATE INDEX IF NOT EXISTS spans_trace_id ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS spans_started_at ON spans (started_at);
-CREATE INDEX IF NOT EXISTS spans_stable_attribute_set_id_started_at
-  ON spans (stable_attribute_set_id, started_at);
+-- With kind and status_code, a query of the requests or the failed spans of a service reads the
+-- rows of those spans only.
+CREATE INDEX IF NOT EXISTS spans_stable_attribute_set_id_started_at_kind_status_code
+  ON spans (stable_attribute_set_id, started_at, kind, status_code);
 
 CREATE TABLE IF NOT EXISTS metric_series (
   id INTEGER PRIMARY KEY,

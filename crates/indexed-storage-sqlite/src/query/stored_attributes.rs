@@ -184,6 +184,24 @@ impl EncodedRecordAliases {
         )
     }
 
+    // CROSS JOIN keeps the stable sets the outer loop, so a query of every service seeks the
+    // records of each set in its index instead of reading every record of the range.
+    pub fn encoded_records_by_stable_attribute_set_sql(self, table: &str) -> String {
+        let Self {
+            record,
+            stable_attribute_set,
+            record_group,
+            resource,
+        } = self;
+        format!(
+            "stable_attribute_sets {stable_attribute_set}
+             CROSS JOIN {table} {record}
+               ON {record}.stable_attribute_set_id = {stable_attribute_set}.id
+             JOIN record_groups {record_group} ON {record_group}.id = {stable_attribute_set}.record_group_id
+             JOIN resources {resource} ON {resource}.id = {record_group}.resource_id"
+        )
+    }
+
     pub fn record_attributes_json_sql(self) -> String {
         let Self {
             record,

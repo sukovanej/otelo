@@ -87,6 +87,15 @@ impl<'a> TallyScope<'a> {
             Self::Service(service) => Some(service),
         }
     }
+
+    // A query of one service reaches its stable sets from its resource, and loses to a loop over
+    // every set.
+    fn encoded_spans_sql(self) -> String {
+        match self {
+            Self::EveryService => SPAN_ALIASES.encoded_records_by_stable_attribute_set_sql("spans"),
+            Self::Service(_) => SPAN_ALIASES.encoded_records_sql("spans"),
+        }
+    }
 }
 
 impl Reader {
@@ -118,7 +127,7 @@ impl Reader {
             "SELECT resource.service, span.started_at, span.duration_ns, span.status_code
              FROM {}
              WHERE {}",
-            SPAN_ALIASES.encoded_records_sql("spans"),
+            scope.encoded_spans_sql(),
             where_clause.sql()
         );
         self.scan_rows(&sql, &where_clause, |row| {
@@ -136,18 +145,18 @@ impl Reader {
                 .add_span(duration_ns, failed);
             Ok(ControlFlow::Continue(()))
         })?;
-        self.count_spans(scope.service(), &mut tallies)?;
+        self.count_spans(scope, &mut tallies)?;
         self.tally_logs(scope.service(), step_ns, &mut tallies)?;
         Ok(tallies)
     }
 
     fn count_spans(
         &self,
-        only_service: Option<&str>,
+        scope: TallyScope,
         tallies: &mut HashMap<String, ServiceTally>,
     ) -> anyhow::Result<()> {
         let mut where_clause = WhereClause::within_reader_range(self, "span.started_at");
-        if let Some(service) = only_service {
+        if let Some(service) = scope.service() {
             where_clause.push_condition_with_param(
                 "resource.service = :service",
                 ":service",
@@ -159,7 +168,7 @@ impl Reader {
              FROM {}
              WHERE {}
              GROUP BY resource.service",
-            SPAN_ALIASES.encoded_records_sql("spans"),
+            scope.encoded_spans_sql(),
             where_clause.sql()
         );
         self.scan_rows(&sql, &where_clause, |row| {

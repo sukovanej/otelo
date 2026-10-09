@@ -1007,6 +1007,26 @@ fn a_query_of_one_service_reads_the_rows_of_its_resources() {
 }
 
 #[test]
+fn a_query_of_the_server_or_failed_spans_of_a_service_filters_them_in_the_index() {
+    let fixture = Fixture::new();
+    let reader = fixture.reader_around_midnight();
+    for query in [
+        "service = api kind = server",
+        "service = api status = error",
+    ] {
+        let plan = reader
+            .explain_query(&parse_query(query, Signal::Spans).unwrap())
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|step| step
+                    .contains("spans_stable_attribute_set_id_started_at_kind_status_code")),
+            "{query}: {plan:?}"
+        );
+    }
+}
+
+#[test]
 fn an_indexed_attribute_has_an_index_on_its_table() {
     let indexes = Indexes::new(indexed_attributes(&[(IndexedSignal::Logs, "user.id")]));
     let fixture = Fixture::with_indexes(&indexes);
