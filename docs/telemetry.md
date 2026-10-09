@@ -108,8 +108,12 @@ The receiver and the indexer count into one set of meters, and the host collecto
 
 ```mermaid
 erDiagram
-  resources ||--o{ logs : "resource_id"
-  resources ||--o{ spans : "resource_id"
+  resources ||--o{ record_groups : "resource_id"
+  record_groups ||--o{ stable_attribute_sets : "record_group_id"
+  record_groups ||--o{ attribute_key_profiles : "record_group_id"
+  attribute_keys ||--o{ attribute_key_profiles : "attribute_key_id"
+  stable_attribute_sets ||--o{ logs : "stable_attribute_set_id"
+  stable_attribute_sets ||--o{ spans : "stable_attribute_set_id"
   resources ||--o{ metric_series : "resource_id"
   logs ||--|| log_body_search : "rowid"
   metric_series ||--o{ metric_points : "metric_series_id"
@@ -122,14 +126,46 @@ erDiagram
     TEXT service
     TEXT attributes "JSON object"
   }
+  attribute_keys {
+    INTEGER id PK
+    TEXT key "UNIQUE"
+  }
+  record_groups {
+    INTEGER id PK
+    TEXT attribute_owner "log or span"
+    INTEGER resource_id FK
+    TEXT name "span name, or otel.scope.name of a log"
+  }
+  stable_attribute_sets {
+    INTEGER id PK
+    INTEGER identity_hash "xxh3 of the record group and the attributes, UNIQUE"
+    INTEGER record_group_id FK
+    TEXT attributes "JSON object of the stable attributes"
+    TEXT newest_record_day "UTC date"
+  }
+  interned_attribute_values {
+    INTEGER id PK
+    INTEGER identity_hash "xxh3 of the value, UNIQUE"
+    TEXT value "JSON"
+    TEXT newest_record_day "UTC date"
+  }
+  attribute_key_profiles {
+    INTEGER record_group_id PK,FK
+    INTEGER attribute_key_id PK,FK
+    TEXT encoding "stable, interned, literal"
+    INTEGER record_count
+    INTEGER distinct_value_count "exact up to 64, HyperLogLog above"
+    INTEGER classified_at "Unix ns, received_at of the frame"
+  }
   logs {
     INTEGER logged_at "Unix ns"
-    INTEGER resource_id FK
+    INTEGER stable_attribute_set_id FK
     INTEGER severity_number "OTel severity number"
     TEXT body
     BLOB trace_id "16 bytes, NULL outside a span"
     BLOB span_id "8 bytes, NULL outside a span"
-    TEXT attributes "JSON object"
+    TEXT interned_attributes "JSON: attribute_keys id to interned_attribute_values id"
+    TEXT literal_attributes "JSON: attribute_keys id to the value"
   }
   log_body_search {
     TEXT body "FTS5 over logs.body"
@@ -138,13 +174,13 @@ erDiagram
     BLOB trace_id "16 bytes"
     BLOB span_id "8 bytes"
     BLOB parent_span_id "8 bytes, NULL for a root"
-    INTEGER resource_id FK
-    TEXT name
+    INTEGER stable_attribute_set_id FK
     INTEGER kind "OTel span kind"
     INTEGER started_at "Unix ns"
     INTEGER duration_ns
     INTEGER status_code "OTel status code"
-    TEXT attributes "JSON object"
+    TEXT interned_attributes "JSON: attribute_keys id to interned_attribute_values id"
+    TEXT literal_attributes "JSON: attribute_keys id to the value"
     TEXT events "JSON array"
   }
   metric_series {
@@ -211,11 +247,33 @@ erDiagram
 ```
 
 - A name says what a table or a column holds without its comment, and takes the OpenTelemetry name where OpenTelemetry has one: `severity_number`, `status_code`, `aggregation_temporality`.
-- `metric_points`, the two summary tables, and the three count tables are `WITHOUT ROWID`. A trigger keeps `log_body_search` in step with `logs`, on an insert and on a delete.
+- `metric_points`, the two summary tables, the three count tables, and `attribute_key_profiles` are `WITHOUT ROWID`. A trigger keeps `log_body_search` in step with `logs`, on an insert and on a delete.
 - The file is made with `auto_vacuum = INCREMENTAL`, so it can give pages back to the disk.
-- `resources` has an index on `service`, and `logs` and `spans` one on `resource_id` and the time. A query of one service finds its resources first and reads only their rows of the range. Without the index on `service`, SQLite reads every row of the range through the index on the time, and checks the service of each.
+- `resources` has an index on `service`, `record_groups` a unique one on `resource_id`, `attribute_owner`, and `name`, `stable_attribute_sets` one on `record_group_id`, and `logs` and `spans` one on `stable_attribute_set_id` and the time. A query of one service or span name finds its groups and their sets first, and reads only their rows of the range.
+- A log or a span has no `resource_id` and a span no `name`: both come from the record group of its stable set.
 
-The `attributes` columns hold JSON objects. In Rust they are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. The JSON of the columns is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes.
+In Rust, attributes are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. Every JSON of attributes in the file is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes, and its attributes stay JSON in `events`.
+
+### Attribute encodings
+
+The attributes of a log or a span repeat: on mudro, the 242,270 spans of 4.7 days took 188 MB of JSON, and most keys of one span name hold one value or a few. The indexer profiles each key within a record group, the logs of one `otel.scope.name` or the spans of one name of a resource, and stores it in one of three encodings ([[../tasks/00030-store-the-attributes-of-logs-and.md]]):
+
+| Encoding | Where the value lives | Keys on mudro |
+|---|---|---|
+| stable | once in a stable set of the group, which the row points to | `code.file.path`, `http.route`, `thread.name`, `busy_ns` of SQL spans, always 0 |
+| interned | once in `interned_attribute_values`, and the row holds its id | `db.query.text`, `url.path`, `client.address` |
+| literal | on the row | `idle_ns`, `db.sqlite.vm_steps`, `busy_ns` of a timer |
+
+- A number, a bool, or a null is stable or literal, never interned: its id would take more bytes than the value.
+- A key without a profile goes into the stable set, so a constant key never takes another encoding.
+- For each group and key the indexer counts the records and their distinct values: exactly up to 64, then with a HyperLogLog of 64 bytes. It keeps at most 2,000 groups in memory.
+- It classifies a group at 32 records, at each doubling up to 4,096, then every 4,096 records, and after an hour of `received_at`. It classifies at once when a stable key passes 128 distinct values, or when the group made more than 4,096 stable sets since the last classification. The counts start over at each classification.
+- A key becomes stable at 64 distinct values or fewer, each on 20 records or more on average, and stays stable up to 128. The product of the value counts of the stable keys of a group stays at most 4,096. A string, array, or map whose values repeat twice on average is interned, and the rest is literal.
+- A classification writes `attribute_key_profiles` in the transaction of the records, so a restarted indexer goes on with the encodings it left, and a reindex makes the same choices from the same journal.
+- A classification rewrites no row. `attribute_key_counts` marks the encodings a key had on each day in `has_stable_values`, `has_interned_values`, and `has_literal_values`, and a query looks for the key in each encoding it had in the range.
+- A record reads back as one JSON object: a subquery joins its stable set, its interned values, and its literals.
+
+On the mudro spans, the spans and their indexes went from 261 MB to 48 MB, every span read back with the attributes it had, and a filter on one key read 2 to 40 times faster.
 
 ## OTLP receiver
 
@@ -287,9 +345,11 @@ When the daemon starts, and then once an hour, the indexer deletes what is past 
 |---|---|
 | logs | `logs` by `logged_at`, through its index. The trigger deletes the row from `log_body_search`. |
 | traces | `spans` by `started_at`, through its index |
+| logs and traces | the stable sets of each owner whose `newest_record_day` is past its retention, the interned values past the longer of the two, the record groups without a set and their profiles |
 | metrics | `metric_points` and the two summary tables, one series at a time by its primary key, then the series that have no rows left |
 
-- A resource that no row refers to is deleted with the metrics. `logs` and `spans` have an index on `resource_id` and the time, so the check reads an index and not the tables.
+- The indexer writes the day of the newest record into a stable set or an interned value, at most once a day for each, so no record past the retention keeps one. A foreign key stops the deletion of a set that a row still has.
+- A resource that no series and no record group refers to is deleted with the metrics.
 - The catalog deletes the days past the retention of their signal. A resource belongs to every signal, so its keys stay as long as the longest retention.
 - Deleted pages go to the freelist, and new rows reuse them, so the file keeps its size without a `VACUUM`. When the freelist passes a quarter of the file, after a retention was lowered, the indexer runs `PRAGMA incremental_vacuum` in steps of 2,048 pages.
 
@@ -360,6 +420,6 @@ The indexer counts the attribute keys of each signal and of the resources by UTC
 
 ## Indexed attributes
 
-`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the indexer. Within a second the indexer creates an expression index on `json_extract(attributes, '$."user.id"')` on the table, once. The index is named `logs_attribute_<hash>`, after its table and a hash of the key. `otelo index remove` drops it. The query compiler writes the same expression, so SQLite uses the index, also for an `OR` of indexed keys. A query on a key without an index still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
+`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the indexer. Within a second the indexer creates two partial expression indexes on the table, once: on `json_extract(interned_attributes, '$."<key id>"')` and on `json_extract(literal_attributes, '$."<key id>"')`, each `WHERE` the expression `IS NOT NULL`. They are named `logs_interned_attribute_<hash>` and `logs_literal_attribute_<hash>`, after the table and a hash of the key. `otelo index remove` drops them. The query compiler writes the same expressions, and turns an interned value into its id before the query, so SQLite uses the indexes, also for an `OR` of indexed keys. A stable key needs no index: the index on `stable_attribute_set_id` and the time finds its rows. A query on another key still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
 
 Until UI auth exists, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel.
