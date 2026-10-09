@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: in_review
 created: 2026-10-03T14:55:04Z
 parent: ./00001-collect-and-query-telemetry.md
 tags:
