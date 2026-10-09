@@ -247,5 +247,8 @@ interface KeyedLabelPart extends RangeLabelPart {
 }
 
 function keyLabelParts(parts: ReadonlyArray<RangeLabelPart>): KeyedLabelPart[] {
-  return parts.map((part, index) => ({ ...part, key: `${index}:${part.dim}:${part.text}` }));
+  return parts.map((part, index) => ({
+    ...part,
+    key: JSON.stringify([index, part.dim, part.text]),
+  }));
 }

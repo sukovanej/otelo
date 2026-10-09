@@ -1,5 +1,5 @@
 import { type SearchParams, useSearchParams } from "@solidjs/router";
-import { createMemo, createSignal, latest, onCleanup } from "solid-js";
+import { createSignal, latest, onCleanup } from "solid-js";
 
 import type { ListQuery } from "@otelo/api";
 
@@ -80,17 +80,14 @@ export function createListState<
 >(options: ListOptions<V, R, S>): ListState<V, R, S> {
   const [params, setParams] = useSearchParams<ListSearchParams>();
   const [defaultView] = options.views;
-  const query = createMemo(() => params.q ?? "");
-  const since = createMemo(() => params.since || DEFAULT_SINCE);
-  const until = createMemo(() => params.until ?? "");
-  const view = createMemo(
-    () => options.views.find((knownView) => knownView === params.view) ?? defaultView,
-  );
+  const query = () => params.q ?? "";
+  const since = () => params.since || DEFAULT_SINCE;
+  const until = () => params.until ?? "";
+  const view = () => options.views.find((knownView) => knownView === params.view) ?? defaultView;
   const defaultSort = options.sorts?.[0];
-  const sortOrder = createMemo(
-    () => options.sorts?.find((knownSort) => knownSort === params.sort) ?? defaultSort,
-  );
-  const live = createMemo(() => params.live === "1" && until() === "");
+  const sortOrder = () =>
+    options.sorts?.find((knownSort) => knownSort === params.sort) ?? defaultSort;
+  const live = () => params.live === "1" && until() === "";
   const toViewParam = (newView: V) => (newView === defaultView ? undefined : newView);
 
   const [draftQuery, setDraftQuery] = createSignal(() => query());

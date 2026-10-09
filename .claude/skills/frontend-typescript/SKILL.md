@@ -97,11 +97,9 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   and a second click builds on the old value. The `latest()` read sits in the control's
   own JSX: a memo or projection derived from a held value stays held, even when it reads
   through `latest()`. A handler that builds the next value on a held one reads it through
-  `latest()` too, as `list.addTerm` does. `loading()` shows the wait. A search param that
-  goes through `latest()` is a memo first, as `useRange` makes `since`. In rc.14 a list or
-  projection over `latest()` of the router's params froze the router once its page left
-  mid-load. A fetch that joins a key another one shows skips the reload on mount, or the
-  reload holds whatever mounted it, such as the widget editor.
+  `latest()` too, as `list.addTerm` does. `loading()` shows the wait. A fetch that joins a
+  key another one shows skips the reload on mount, or the reload holds whatever mounted
+  it, such as the widget editor.
 - **A loading flag renders as text** in an element that stays mounted, as `PageBar` does. In
   rc.14 an element that `<Show>` or a ternary mounts from `loading()` keeps the pending value
   after the answer lands.
@@ -127,14 +125,12 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   open, and the page stops answering. A view keyed on what it fetches, as `TracePage`
   keys `TraceView` by the trace id, never changes key, so its reads need no boundary.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
-  remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
-  write during disposal held every later update, and the router froze with it. rc.14
-  regressed on a narrower case: an async memo writes a signal it reads as it goes
-  pending, is disposed while held, and a cleanup writes that signal again. Every later
-  write then reaches the screen but never commits, so the router stops updating the URL.
-  The hook of `@tanstack/solid-query` does all three, and `patches/` makes it drop its
-  cache listener before its observer, whose removal made the cleanup write. Drop the
-  patch once Solid fixes the regression.
+  remove listeners and abort requests, and leave signals untouched. Libraries still write
+  in theirs, the solid-query hook among them. In rc.14 such a write to a held signal,
+  made while its transaction lands, left the scheduler joined to the landed transaction,
+  so no later write committed and the router stopped updating the URL. `patches/` makes
+  the scheduler skip a landed transaction. Drop the patch once Solid ships the fix
+  (SIN-31).
 
 The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 

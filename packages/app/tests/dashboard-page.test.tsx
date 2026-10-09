@@ -17,7 +17,7 @@ const SAVED_DEFINITION: DashboardDefinition = {
 };
 
 const CPU_DEFINITION: DashboardDefinition = {
-  name: "Latency",
+  name: "Hosts",
   description: "",
   widgets: [
     {
@@ -80,7 +80,7 @@ test("a dashboard keeps its edits apart from what it saved, through reloads, a d
   expectNoReactivityMistakes(artifact);
 });
 
-test("a widget's editor opens at once, without reloading the widget's answer", async () => {
+test("opening a widget's editor requests none of the series the widget shows", async () => {
   const series = createHeldSeries();
   const api = createCpuDashboardApi(series);
 
@@ -133,7 +133,7 @@ test("cancelling an edit while its preview loads keeps the next pages navigating
 
     releaseHeldSeries(series);
     await expectNavigationToReach(app, "Dashboards", "/dashboards");
-    await expect.element(page.getByRole("row", { name: /Latency/ })).toBeInTheDocument();
+    await expect.element(page.getByRole("row", { name: /Hosts/ })).toBeInTheDocument();
   });
 
   expectNoReactivityMistakes(artifact);
@@ -160,7 +160,7 @@ function createCpuDashboardApi(series: HeldSeries): Api {
       (name === "memory" ? series.memory : series.cpu).answer(signal),
     getMetrics: () => Promise.resolve(toMetricList(["cpu", "memory"])),
     getAttributeKeys: () => Promise.resolve({ record: [], resource: [] }),
-    listDashboards: () => Promise.resolve(toDashboardList(["Latency"])),
+    listDashboards: () => Promise.resolve(toDashboardList(["Hosts"])),
   });
 }
 

@@ -43,9 +43,8 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
   const api = useContext(ApiContext);
   const [params, setParams] = useSearchParams<GroupingSearchParams>();
   const by = createMemo(() => (params.by ?? "").split(",").filter((name) => name !== ""));
-  const top = createMemo(
-    (): TopValue => TOP_OPTIONS.find((option) => option.value === params.top)?.value ?? "",
-  );
+  const top = (): TopValue =>
+    TOP_OPTIONS.find((option) => option.value === params.top)?.value ?? "";
 
   const fetched = createRangeFetch(
     untrack(() => props.range),

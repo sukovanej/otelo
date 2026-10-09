@@ -53,7 +53,7 @@ export function createFetch<K, T>(
       structuralSharing: (oldData: unknown, newData: unknown) =>
         Object.isFrozen(newData) ? newData : replaceEqualDeep(oldData, newData),
       refetchInterval: live() ? LIVE_RELOAD_MS : false,
-      refetchOnMount: hasOneReader,
+      refetchOnMount: isOnlyReaderOfKey,
     };
   });
   const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
@@ -88,6 +88,7 @@ export function createPagedFetch<K, T>(
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (page: T) => (isLive ? undefined : pageJoining?.readNextCursor(page)),
       refetchInterval: isLive ? LIVE_RELOAD_MS : false,
+      refetchOnMount: isOnlyReaderOfKey,
     };
   });
   const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
@@ -158,8 +159,9 @@ function memoizeKeyByContent<K>(key: Accessor<K>): Accessor<K> {
   return createMemo(key, { equals: (shown, next) => hashKey([shown]) === hashKey([next]) });
 }
 
-// A second reader takes the answer as shown, since its reload would hold whatever mounted it.
-function hasOneReader<T>(query: Query<T, Error, T>): boolean {
+// A reader joining a key another one shows keeps that answer, since a reload would hold
+// whatever mounted it until the reload lands.
+function isOnlyReaderOfKey(query: Pick<Query, "getObserversCount">): boolean {
   return query.getObserversCount() === 1;
 }
 

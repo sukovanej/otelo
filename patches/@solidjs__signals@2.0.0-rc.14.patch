@@ -1,0 +1,39 @@
+diff --git a/dist/dev-shared.js b/dist/dev-shared.js
+index d165d176b67fb927b6d979a332a2dd69096c8427..d01fa702e9f680f37a491b5c7a160d5dadf4b55d 100644
+--- a/dist/dev-shared.js
++++ b/dist/dev-shared.js
+@@ -1552,7 +1552,7 @@ class GlobalQueue {
+     // have run (lanes.ts); a correction's re-derivations run in one more
+     // pure round — the parent's flights before the parent is judged below.
+     if (GlobalQueue._laneCorrections?.()) runHeap(dirtyQueue, GlobalQueue._update);
+-    const joined = flushTransaction;
++    const joined = flushTransaction !== null ? liveTx(flushTransaction) : null;
+     flushTransaction = null;
+     // The frame's verdict is in: the guesses written since the last seam
+     // open their lane under the frame's transaction (a lane's own flush
+diff --git a/dist/observe/core/scheduler.js b/dist/observe/core/scheduler.js
+index e27de14ad9baedf7c6c337e58128944389e561e2..2fc74a13d0e61ecb19b25b4e7e3f6db76fdbe2b6 100644
+--- a/dist/observe/core/scheduler.js
++++ b/dist/observe/core/scheduler.js
+@@ -459,7 +459,7 @@ class GlobalQueue {
+         // have run (lanes.ts); a correction's re-derivations run in one more
+         // pure round — the parent's flights before the parent is judged below.
+         if (GlobalQueue.Gn?.()) runHeap(dirtyQueue, GlobalQueue.et);
+-        const e = flushTransaction;
++        const e = flushTransaction !== null ? liveTx(flushTransaction) : null;
+         flushTransaction = null;
+         // The frame's verdict is in: the guesses written since the last seam
+         // open their lane under the frame's transaction (a lane's own flush
+diff --git a/dist/prod/core/scheduler.js b/dist/prod/core/scheduler.js
+index bb5daa91d20b3ad01e734e02abf22f846f7e43b0..95f49943a9139607a268f0e147dfcbeece7968d7 100644
+--- a/dist/prod/core/scheduler.js
++++ b/dist/prod/core/scheduler.js
+@@ -444,7 +444,7 @@ class GlobalQueue {
+         // have run (lanes.ts); a correction's re-derivations run in one more
+         // pure round — the parent's flights before the parent is judged below.
+         if (GlobalQueue.an?.()) runHeap(dirtyQueue, GlobalQueue.Ce);
+-        const e = flushTransaction;
++        const e = flushTransaction !== null ? liveTx(flushTransaction) : null;
+         flushTransaction = null;
+         // The frame's verdict is in: the guesses written since the last seam
+         // open their lane under the frame's transaction (a lane's own flush

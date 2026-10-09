@@ -30,4 +30,4 @@ catalog:
 minimumReleaseAge: 60
 
 patchedDependencies:
-  "@tanstack/solid-query@6.0.0-rc.5": patches/@tanstack__solid-query@6.0.0-rc.5.patch
+  "@solidjs/signals@2.0.0-rc.14": patches/@solidjs__signals@2.0.0-rc.14.patch
