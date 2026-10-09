@@ -271,7 +271,7 @@ OpenTelemetry treats a host as a resource of its own and gives host metrics no s
 The indexer sums the points of each series up by the minute in `metric_minute_summaries` and by the hour in `metric_hour_summaries`, so a long range reads fewer rows. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] has the reasons.
 
 - A row is one series and one minute or hour that has points, with the instant it starts in `start_at`: the count, minimum, maximum, sum, and last of the values, and for a `counter` how much it grew and over how many seconds, and for a `histogram` its merged buckets. A summary of a `counter` or a `histogram` holds what each step added, so a query of the summaries reports its temporality as `delta`.
-- Once a minute the indexer summarizes the minutes that ended 2 minutes ago or earlier, so a late batch is in them. An hour is summarized from its 60 minutes once all of them are.
+- Once a minute the indexer summarizes the minutes that ended 2 minutes ago or earlier, so a late batch is in them. While it catches up with the journal, it summarizes only up to 2 minutes before the last frame it has indexed, because a minute it summarized stays as it was. An hour is summarized from its 60 minutes once all of them are.
 - `metric_summary_progress` says up to where the minutes and the hours are summarized. A daemon that was down starts there, or at the oldest point when the table is empty, and summarizes an hour at a time with frames taken in between.
 - The rollup reads the points series by series, through the primary key, so it reads only the points of the minutes it summarizes.
 - A row is written with its key, the series and the start, so summarizing a step again gives the same row.
