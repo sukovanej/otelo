@@ -14,6 +14,7 @@ mod reader;
 mod retention;
 mod rollup;
 mod series;
+mod span_summary;
 mod sqlite;
 mod telemetry_file;
 mod version;

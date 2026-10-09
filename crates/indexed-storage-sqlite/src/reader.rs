@@ -9,6 +9,7 @@ use otelo_indexed_storage::{IndexedAttribute, TimeRange};
 use rusqlite::{Connection, OpenFlags};
 
 use crate::completion_cache::CompletionCache;
+use crate::query::SpanSummaryKeyCache;
 use crate::telemetry_file::{TELEMETRY_FILE_NAME, keep_small_page_cache};
 
 // A context that matches few records makes SQLite scan the whole range, whatever the sample size.
@@ -21,6 +22,7 @@ pub struct Reader {
     times_out_at: Cell<Option<Instant>>,
     completion_time_budget: Duration,
     completion_cache: Arc<CompletionCache>,
+    span_summary_key_cache: Arc<SpanSummaryKeyCache>,
 }
 
 impl Reader {
@@ -42,6 +44,7 @@ impl Reader {
             times_out_at: Cell::new(None),
             completion_time_budget: COMPLETION_TIME_BUDGET,
             completion_cache: Arc::default(),
+            span_summary_key_cache: Arc::default(),
         })
     }
 
@@ -90,6 +93,17 @@ impl Reader {
 
     pub(crate) fn completion_cache(&self) -> &CompletionCache {
         &self.completion_cache
+    }
+
+    pub(crate) fn share_span_summary_key_cache(
+        &mut self,
+        span_summary_key_cache: Arc<SpanSummaryKeyCache>,
+    ) {
+        self.span_summary_key_cache = span_summary_key_cache;
+    }
+
+    pub(crate) fn span_summary_key_cache(&self) -> &SpanSummaryKeyCache {
+        &self.span_summary_key_cache
     }
 
     pub fn set_indexed_attributes(&mut self, attributes: BTreeSet<IndexedAttribute>) {

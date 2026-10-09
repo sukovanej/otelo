@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::iter;
 use std::ops::ControlFlow;
 
 use anyhow::ensure;
 use otelo_indexed_storage::query::{
     MAX_BUCKETS_IN_RANGE, Service, ServiceBucket, ServiceStats, ServiceSummary, Services,
+    SpanGroupingField,
 };
 use otelo_indexed_storage::{Attributes, Severity, SpanKind, SpanStatus};
 
@@ -105,6 +107,10 @@ impl Reader {
         step_ns: i64,
     ) -> anyhow::Result<HashMap<String, ServiceTally>> {
         let mut tallies: HashMap<String, ServiceTally> = HashMap::new();
+        if self.tally_services_from_summaries(scope, step_ns, &mut tallies)? {
+            self.tally_logs(scope.service(), step_ns, &mut tallies)?;
+            return Ok(tallies);
+        }
 
         let (mut where_clause, _) = compile_span_query(self, &http_request_query())?;
         if let Some(service) = scope.service() {
@@ -139,6 +145,63 @@ impl Reader {
         self.count_spans(scope.service(), &mut tallies)?;
         self.tally_logs(scope.service(), step_ns, &mut tallies)?;
         Ok(tallies)
+    }
+
+    fn tally_services_from_summaries(
+        &self,
+        scope: TallyScope,
+        step_ns: i64,
+        tallies: &mut HashMap<String, ServiceTally>,
+    ) -> anyhow::Result<bool> {
+        let scope_expression = scope.service().map(|service| Expression::Compare {
+            field: Field::Builtin(BuiltinField::Service),
+            operator: Operator::Eq,
+            value: Value::String(service.to_owned()),
+        });
+        let Some(request_expression) = http_request_query().expression else {
+            return Ok(false);
+        };
+        let request_expression = Expression::And(
+            iter::once(request_expression)
+                .chain(scope_expression.clone())
+                .collect(),
+        );
+        let request_query = Query {
+            signal: Signal::Spans,
+            expression: Some(request_expression),
+        };
+        let Some(request_rows) =
+            self.read_span_summary_rows(&request_query, &[SpanGroupingField::Service], step_ns)?
+        else {
+            return Ok(false);
+        };
+        let span_query = Query {
+            signal: Signal::Spans,
+            expression: scope_expression,
+        };
+        let Some(span_rows) =
+            self.read_span_summary_rows(&span_query, &[SpanGroupingField::Service], step_ns)?
+        else {
+            return Ok(false);
+        };
+        for row in &request_rows {
+            let tally = tallies.entry(row.key.service.to_string()).or_default();
+            tally.total.requests.add_summary(&row.summary, row.failed());
+            tally
+                .steps
+                .entry(row.start_at.div_euclid(step_ns) * step_ns)
+                .or_default()
+                .requests
+                .add_summary(&row.summary, row.failed());
+        }
+        for row in &span_rows {
+            tallies
+                .entry(row.key.service.to_string())
+                .or_default()
+                .total
+                .spans += row.summary.span_count;
+        }
+        Ok(true)
     }
 
     fn count_spans(

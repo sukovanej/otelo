@@ -7,6 +7,7 @@ mod sample;
 mod services;
 mod span_groups;
 mod span_stats;
+mod span_summaries;
 mod stored_attributes;
 mod traces;
 
@@ -28,6 +29,7 @@ use rusqlite::{Row, ToSql};
 pub use compile::InvalidQuery;
 pub use metrics::{BASELINE_LOOKBACK_NS, metric_kind_from_stored_names, read_series_point};
 pub use sample::RecordSample;
+pub use span_summaries::SpanSummaryKeyCache;
 
 use crate::Reader;
 use crate::reader::timed_out;

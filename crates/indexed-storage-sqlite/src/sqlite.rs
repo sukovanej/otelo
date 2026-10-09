@@ -15,6 +15,7 @@ use crate::completion_cache::CompletionCache;
 use crate::day::Day;
 use crate::indexes::Indexes;
 use crate::lock::TelemetryLock;
+use crate::query::SpanSummaryKeyCache;
 use crate::telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
 use crate::version::OtherStorageVersion;
 use crate::{Config, FrameMapper, Indexer, Reader, index_journal_until_caught_up};
@@ -33,6 +34,7 @@ pub enum ReindexProgress {
 pub struct Sqlite {
     config: Config,
     completion_cache: Arc<CompletionCache>,
+    span_summary_key_cache: Arc<SpanSummaryKeyCache>,
     indexing: watch::Sender<Indexing>,
     _telemetry_lock: TelemetryLock,
 }
@@ -53,6 +55,7 @@ impl Sqlite {
         Ok(Self {
             config,
             completion_cache: Arc::default(),
+            span_summary_key_cache: Arc::default(),
             indexing: watch::Sender::new(Indexing::STARTING),
             _telemetry_lock: telemetry_lock,
         })
@@ -142,6 +145,7 @@ impl Storage for Sqlite {
         reader.set_time_limit(time_limit)?;
         reader.set_indexed_attributes(self.config.indexes.attributes());
         reader.share_completion_cache(Arc::clone(&self.completion_cache));
+        reader.share_span_summary_key_cache(Arc::clone(&self.span_summary_key_cache));
         Ok(Box::new(reader))
     }
 

@@ -242,6 +242,13 @@ pub(super) fn read_traces(
             "q",
             &mut matching,
         )?;
+        if let Some(key_ids) = reader.find_span_summary_keys_of_query(query)? {
+            matching.push_condition_with_param(
+                "matching_span.span_summary_key_id IN (SELECT value FROM json_each(:matching_span_summary_key_ids))",
+                ":matching_span_summary_key_ids",
+                serde_json::to_string(&key_ids)?,
+            );
+        }
         where_clause.push_condition(format!(
             "span.trace_id IN (SELECT matching_span.trace_id
                                FROM {}

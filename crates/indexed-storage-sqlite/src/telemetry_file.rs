@@ -1,11 +1,13 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use anyhow::Context;
+
 use otelo_indexed_storage::{
-    AttributeValue, HistogramPoint, IndexedAttribute, Log, Metric, NumberPoint, Points, Resource,
-    Span,
+    AttributeValue, Attributes, HistogramPoint, IndexedAttribute, Log, Metric, NumberPoint, Points,
+    Resource, Span, is_sql_system, sanitize_sql_query_text,
 };
 use otelo_journal::{Hour, Position};
 use otelo_query::Signal;
@@ -21,6 +23,7 @@ use crate::series::{
     MetricSeriesId, ResourceId, SeriesCache, SeriesIdentity, StoredSeries,
     find_or_insert_resource_id, find_or_insert_series_id,
 };
+use crate::span_summary::{SpanSummaryKey, SpanSummaryWriter};
 use crate::version::{OtherStorageVersion, STORAGE_VERSION};
 
 pub const TELEMETRY_FILE_NAME: &str = "telemetry.sqlite";
@@ -30,6 +33,44 @@ const SCHEMA: &str = include_str!("schema.sql");
 // The logs of one instrumentation scope of a resource make a record group.
 const LOG_GROUP_ATTRIBUTE: &str = "otel.scope.name";
 
+// The OpenTelemetry semantic conventions keep no literal in the text of a SQL query, and an app
+// that writes its values into the text would otherwise give each call a query of its own.
+const DB_SYSTEM_KEYS: [&str; 2] = ["db.system.name", "db.system"];
+const DB_QUERY_TEXT_KEYS: [&str; 2] = ["db.query.text", "db.statement"];
+// The attributes the OpenTelemetry semantic conventions group the duration metrics of HTTP,
+// databases, RPC, and messaging by, and their older names. A summary of spans keeps these, and a
+// query of any other attribute reads the spans.
+const SUMMARY_DIMENSION_KEYS: [&str; 29] = [
+    "http.request.method",
+    "http.route",
+    "http.response.status_code",
+    "http.method",
+    "http.status_code",
+    "error.type",
+    "server.address",
+    "server.port",
+    "url.scheme",
+    "network.protocol.name",
+    "network.protocol.version",
+    "db.system.name",
+    "db.system",
+    "db.namespace",
+    "db.operation.name",
+    "db.collection.name",
+    "db.query.summary",
+    "db.query.text",
+    "db.statement",
+    "db.response.status_code",
+    "db.stored_procedure.name",
+    "rpc.system",
+    "rpc.service",
+    "rpc.method",
+    "rpc.grpc.status_code",
+    "messaging.system",
+    "messaging.operation.name",
+    "messaging.operation.type",
+    "messaging.destination.name",
+];
 // The OS page cache keeps the hot pages, so each connection keeps little of its own.
 const PAGE_CACHE_KIB: i64 = 1024;
 
@@ -50,6 +91,33 @@ impl PointRow<'_> {
             Self::Histogram(point) => point.recorded_at,
         }
     }
+}
+
+fn sanitize_query_texts(attributes: &Attributes) -> Cow<'_, Attributes> {
+    let is_sql = DB_SYSTEM_KEYS.iter().any(|key| {
+        attributes
+            .get(key)
+            .and_then(AttributeValue::as_str)
+            .is_some_and(is_sql_system)
+    });
+    if !is_sql {
+        return Cow::Borrowed(attributes);
+    }
+    let sanitized_texts: Vec<(&str, String)> = DB_QUERY_TEXT_KEYS
+        .iter()
+        .filter_map(|&key| {
+            let text = attributes.get(key)?.as_str()?;
+            Some((key, sanitize_sql_query_text(text)?))
+        })
+        .collect();
+    if sanitized_texts.is_empty() {
+        return Cow::Borrowed(attributes);
+    }
+    let mut attributes = attributes.clone();
+    for (key, sanitized_text) in sanitized_texts {
+        attributes.insert(key, AttributeValue::String(sanitized_text));
+    }
+    Cow::Owned(attributes)
 }
 
 pub fn rows_of_points(points: &Points) -> Vec<PointRow<'_>> {
@@ -113,6 +181,7 @@ struct CachedRows {
     counted_resource_days: HashSet<(Day, ResourceId)>,
     counted_series_days: HashSet<(Day, MetricSeriesId)>,
     attribute_store: AttributeStore,
+    span_summaries: SpanSummaryWriter,
 }
 
 impl TelemetryFile {
@@ -167,6 +236,7 @@ impl TelemetryFile {
             .attribute_store
             .forget_rows_past_retention(deleted_group_ids);
         cached_rows.resource_ids_by_identity_hash.clear();
+        cached_rows.span_summaries = SpanSummaryWriter::default();
         cached_rows.series_cache = SeriesCache::default();
         cached_rows.catalog.forget_days_before(oldest_retained_day);
         cached_rows
@@ -341,13 +411,14 @@ impl CachedRows {
     ) -> anyhow::Result<()> {
         let mut insert_span = transaction.prepare_cached(
             "INSERT INTO spans (trace_id, span_id, parent_span_id, stable_attribute_set_id,
-                                kind, started_at, duration_ns, status_code,
+                                span_summary_key_id, kind, started_at, duration_ns, status_code,
                                 interned_attributes, literal_attributes, events)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
         for span in &records.spans {
             let day = Day::from_unix_nanos(span.started_at);
             self.catalog.count_span_name(catalog_delta, day, &span.name);
+            let attributes = sanitize_query_texts(&span.attributes);
             let encoded = self.attribute_store.encode_attributes(
                 transaction,
                 &mut self.catalog,
@@ -359,13 +430,36 @@ impl CachedRows {
                     day,
                     received_at: records.received_at,
                 },
-                &span.attributes,
+                &attributes,
             )?;
+            let mut summarized_attributes = BTreeMap::new();
+            let mut unsummarized_attribute_key_ids = Vec::new();
+            for (key, value) in &*attributes {
+                let key_id = self.attribute_store.find_key_id(transaction, key)?;
+                if SUMMARY_DIMENSION_KEYS.contains(&key.as_str()) {
+                    summarized_attributes.insert(key_id, value);
+                } else {
+                    unsummarized_attribute_key_ids.push(key_id);
+                }
+            }
+            let summary_key_id = self.span_summaries.find_or_insert_key(
+                transaction,
+                &SpanSummaryKey {
+                    record_group_id: encoded.record_group_id,
+                    kind: span.kind.number(),
+                    status_code: span.status_code.number(),
+                    summarized_attributes: &summarized_attributes,
+                    unsummarized_attribute_key_ids: &unsummarized_attribute_key_ids,
+                },
+            )?;
+            self.span_summaries
+                .add_span(summary_key_id, span.started_at, span.duration_ns);
             insert_span.execute(params![
                 span.trace_id.0,
                 span.span_id.0,
                 span.parent_span_id.map(|id| id.0),
                 encoded.stable_attribute_set_id,
+                summary_key_id,
                 span.kind.number(),
                 span.started_at,
                 span.duration_ns,
@@ -375,7 +469,7 @@ impl CachedRows {
                 serde_json::to_string(&span.events)?,
             ])?;
         }
-        Ok(())
+        self.span_summaries.write_pending(transaction)
     }
 
     fn write_points_and_count_rejected(

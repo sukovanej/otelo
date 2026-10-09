@@ -9,6 +9,7 @@ use otelo_indexed_storage::{AttributeValue, Attributes, SpanStatus};
 use otelo_query::Query;
 
 use super::span_stats::{SpanTally, fill_span_buckets};
+use super::span_summaries::SpanSummaryRow;
 use super::stored_attributes::StoredAttributes;
 use super::traces::{compile_span_query, select_spans};
 use super::{
@@ -47,6 +48,12 @@ impl GroupTally {
     }
 }
 
+struct SummarizedGroup<'a> {
+    spans: SpanTally,
+    steps: HashMap<i64, SpanTally>,
+    first_row: &'a SpanSummaryRow,
+}
+
 struct SpanNameAndAttributes {
     name: String,
     attributes: Attributes,
@@ -69,7 +76,7 @@ fn grouping_column_as_json(
     }
 }
 
-fn list_grouping_columns_as_json(
+pub(super) fn list_grouping_columns_as_json(
     reader: &Reader,
     by: &[SpanGroupingField],
 ) -> anyhow::Result<String> {
@@ -141,6 +148,11 @@ pub(super) fn group_spans(
     limit: usize,
 ) -> anyhow::Result<SpanGroups> {
     reader.check_step(step_ns)?;
+    if let Some(groups) =
+        group_spans_from_summaries(reader, query, by, ranking, step_ns, group_buckets, limit)?
+    {
+        return Ok(groups);
+    }
     let (where_clause, unindexed) = compile_span_query(reader, query)?;
     // The second read of the steps sees what the first saw, so the buckets of
     // a group add up to its count.
@@ -234,6 +246,85 @@ pub(super) fn group_spans(
         truncated,
         unindexed,
     })
+}
+
+fn group_spans_from_summaries(
+    reader: &Reader,
+    query: &Query,
+    by: &[SpanGroupingField],
+    ranking: SpanGroupRanking,
+    step_ns: i64,
+    group_buckets: GroupBuckets,
+    limit: usize,
+) -> anyhow::Result<Option<SpanGroups>> {
+    let Some(rows) = reader.read_span_summary_rows(query, by, step_ns)? else {
+        return Ok(None);
+    };
+    let mut all_spans = SpanTally::default();
+    let mut steps: HashMap<i64, SpanTally> = HashMap::new();
+    let mut groups: HashMap<&GroupingValuesAsJson, SummarizedGroup> = HashMap::new();
+    for row in &rows {
+        let step_at = row.start_at.div_euclid(step_ns) * step_ns;
+        all_spans.add_summary(&row.summary, row.failed());
+        steps
+            .entry(step_at)
+            .or_default()
+            .add_summary(&row.summary, row.failed());
+        let group = groups
+            .entry(&row.grouping_values)
+            .or_insert_with(|| SummarizedGroup {
+                spans: SpanTally::default(),
+                steps: HashMap::new(),
+                first_row: row,
+            });
+        group.spans.add_summary(&row.summary, row.failed());
+        if group_buckets == GroupBuckets::Counted {
+            group
+                .steps
+                .entry(step_at)
+                .or_default()
+                .add_summary(&row.summary, row.failed());
+        }
+    }
+    let mut ranked_groups: Vec<_> = groups
+        .into_iter()
+        .map(|(values, group)| (group.spans.to_span_stats(), values, group))
+        .collect();
+    ranked_groups.sort_by(|(a_stats, a_values, _), (b_stats, b_values, _)| {
+        ranking
+            .compare(a_stats, b_stats)
+            .then_with(|| a_values.cmp(b_values))
+    });
+    let truncated = truncate_to_limit(
+        &mut ranked_groups,
+        count_kept_groups(reader, group_buckets, step_ns, limit),
+    );
+    let range = reader.range();
+    let first_step_at = range.start_at().div_euclid(step_ns) * step_ns;
+    let groups = ranked_groups
+        .into_iter()
+        .map(|(spans, values, group)| {
+            Ok(SpanGroup {
+                values: parse_grouping_values(by, values.clone())?,
+                name: group.first_row.key.name.to_string(),
+                attributes: group.first_row.key.attributes.clone(),
+                spans,
+                buckets: (group_buckets == GroupBuckets::Counted).then(|| {
+                    fill_span_buckets(&group.steps, first_step_at, range.end_at(), step_ns)
+                }),
+            })
+        })
+        .collect::<anyhow::Result<_>>()?;
+    Ok(Some(SpanGroups {
+        start_at: timestamp_from_nanos(range.start_at()),
+        end_at: timestamp_from_nanos(range.end_at()),
+        step_ns,
+        spans: all_spans.to_span_stats(),
+        buckets: fill_span_buckets(&steps, first_step_at, range.end_at(), step_ns),
+        groups,
+        truncated,
+        unindexed: Vec::new(),
+    }))
 }
 
 fn rank_groups(

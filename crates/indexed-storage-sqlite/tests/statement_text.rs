@@ -172,6 +172,8 @@ fn run_queries(reader: &Reader, level: &str, kind: &str, limit: usize) {
 #[test]
 fn a_statement_has_the_same_text_whatever_values_it_reads() {
     let (_directory, reader) = open_reader_over_records();
+    // The first queries of a reader decode the summary keys, and the others read them cached.
+    run_queries(&reader, "error", "client", 1);
     let few = record_statement_texts(|| run_queries(&reader, "error", "client", 1));
     let many = record_statement_texts(|| run_queries(&reader, "info", "server", 3));
     assert_eq!(few, many);
