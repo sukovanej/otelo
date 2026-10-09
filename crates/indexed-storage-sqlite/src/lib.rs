@@ -1,6 +1,10 @@
+mod attribute_encoding;
+mod attribute_profiler;
+mod attribute_store;
 mod catalog;
 mod completion_cache;
 mod day;
+mod distinct_values;
 mod indexer;
 mod indexes;
 mod lock;

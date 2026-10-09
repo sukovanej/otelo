@@ -30,8 +30,8 @@ The statements are strings in the Rust sources of the crate that owns the file.
 - A quantity says its unit: `duration_ns`.
 - A flag says what is true when it is 1: `has_more_values_than_listed`, not `many_values`.
 - A foreign key is the singular of its table and `_id`: `resource_id`, `metric_series_id`.
-- An index is its table and its columns: `logs_logged_at`, `spans_trace_id`. The index of
-  an attribute is `<table>_attribute_<hash>`.
+- An index is its table and its columns: `logs_logged_at`, `spans_trace_id`. The indexes of
+  an attribute are `<table>_interned_attribute_<hash>` and `<table>_literal_attribute_<hash>`.
 
 ## The schema files
 
@@ -72,8 +72,9 @@ The statements are strings in the Rust sources of the crate that owns the file.
   as hex and comes out with `unhex(value)`.
 - The number of an OpenTelemetry enum comes from its type: `SpanKind::Server.number()`,
   never `2`.
-- The path of an attribute comes from `attribute_json_path`, so the expression is the one
-  its index has and SQLite uses the index.
+- The path of an attribute comes from `attribute_json_path`, and the path of a key in
+  `interned_attributes` or `literal_attributes` from `AttributeKeyId::json_path`, so the
+  expression is the one its index has and SQLite uses the index.
 - A string goes in single quotes.
 - `GROUP BY` and `ORDER BY` name their columns, never `1, 2`. To sort by an aggregate,
   name it with `AS`.

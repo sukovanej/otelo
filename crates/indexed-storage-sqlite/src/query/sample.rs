@@ -8,12 +8,16 @@ use otelo_query::{
 use serde::Serialize;
 
 use super::catalog::{MAX_CATALOG_ROWS, value_of_attribute_json};
-use super::compile::{TableAliases, builtin_column, compile_query};
+use super::compile::{
+    EncodedRecordAliases, QueryContext, TableAliases, builtin_column, compile_query,
+};
 use super::logs::compile_log_query;
 use super::metrics::{SERIES_TABLE_ALIASES, where_series_have_points_in_range};
+use super::stored_attributes::StoredAttributes;
 use super::traces::compile_span_query;
-use super::{WhereClause, row_limit_with_one_more};
+use super::{LOG_ALIASES, SPAN_ALIASES, WhereClause, row_limit_with_one_more};
 use crate::Reader;
+use crate::catalog::AttributeOwner;
 use crate::reader::timed_out;
 
 // Every key and most values of mudro's spans show up in its newest 10,000, and reading their
@@ -32,29 +36,55 @@ pub enum RecordSample {
 }
 
 #[derive(Clone, Copy)]
-struct SampledTable {
-    table_with_alias: &'static str,
-    record: &'static str,
-    order_newest_first: &'static str,
+enum SampledTable {
+    EncodedRecords {
+        table: &'static str,
+        aliases: EncodedRecordAliases,
+        order_newest_first: &'static str,
+    },
+    MetricSeries,
 }
 
-const fn sampled_table_of_signal(signal: Signal) -> SampledTable {
-    match signal {
-        Signal::Logs => SampledTable {
-            table_with_alias: "logs log",
-            record: "log",
-            order_newest_first: "log.logged_at DESC",
-        },
-        Signal::Spans => SampledTable {
-            table_with_alias: "spans span",
-            record: "span",
-            order_newest_first: "span.started_at DESC",
-        },
-        Signal::Metrics => SampledTable {
-            table_with_alias: "metric_series",
-            record: "metric_series",
-            order_newest_first: "metric_series.id DESC",
-        },
+impl SampledTable {
+    const fn of_signal(signal: Signal) -> Self {
+        match signal {
+            Signal::Logs => Self::EncodedRecords {
+                table: "logs",
+                aliases: LOG_ALIASES,
+                order_newest_first: "log.logged_at DESC",
+            },
+            Signal::Spans => Self::EncodedRecords {
+                table: "spans",
+                aliases: SPAN_ALIASES,
+                order_newest_first: "span.started_at DESC",
+            },
+            Signal::Metrics => Self::MetricSeries,
+        }
+    }
+
+    const fn record(self) -> &'static str {
+        match self {
+            Self::EncodedRecords { aliases, .. } => aliases.record,
+            Self::MetricSeries => "metric_series",
+        }
+    }
+
+    const fn order_newest_first(self) -> &'static str {
+        match self {
+            Self::EncodedRecords {
+                order_newest_first, ..
+            } => order_newest_first,
+            Self::MetricSeries => "metric_series.id DESC",
+        }
+    }
+
+    fn records_sql(self) -> String {
+        match self {
+            Self::EncodedRecords { table, aliases, .. } => aliases.encoded_records_sql(table),
+            Self::MetricSeries => "metric_series
+                 JOIN resources resource ON resource.id = metric_series.resource_id"
+                .to_owned(),
+        }
     }
 }
 
@@ -81,19 +111,50 @@ impl ValueColumn {
         })
     }
 
-    fn sql_reading_json(&self, record: &str) -> String {
-        match self {
-            Self::RecordAttribute(_) => format!("{record}.attributes -> :value_path"),
-            Self::ResourceAttribute(_) => "resource.attributes -> :value_path".into(),
-            Self::BuiltinColumn(column) => column.clone(),
+    fn read_stored_attributes(
+        &self,
+        reader: &Reader,
+        signal: Signal,
+    ) -> anyhow::Result<StoredAttributes> {
+        match (self, signal) {
+            (Self::RecordAttribute(key), Signal::Logs | Signal::Spans) => {
+                reader.read_stored_attributes(AttributeOwner::from(signal), &[key], &[])
+            }
+            _ => Ok(StoredAttributes::default()),
         }
     }
 
-    fn sql_reading_text(&self, record: &str) -> String {
-        match self {
-            Self::RecordAttribute(_) => format!("{record}.attributes ->> :value_path"),
-            Self::ResourceAttribute(_) => "resource.attributes ->> :value_path".into(),
-            Self::BuiltinColumn(column) => column.clone(),
+    fn sql_reading_json(
+        &self,
+        table: SampledTable,
+        stored_attributes: &StoredAttributes,
+    ) -> String {
+        match (self, table) {
+            (Self::RecordAttribute(key), SampledTable::EncodedRecords { aliases, .. }) => {
+                aliases.attribute_json_sql(key, stored_attributes.stored_key(key))
+            }
+            (Self::RecordAttribute(_), SampledTable::MetricSeries) => {
+                "metric_series.attributes -> :value_path".into()
+            }
+            (Self::ResourceAttribute(_), _) => "resource.attributes -> :value_path".into(),
+            (Self::BuiltinColumn(column), _) => column.clone(),
+        }
+    }
+
+    fn sql_reading_text(
+        &self,
+        table: SampledTable,
+        stored_attributes: &StoredAttributes,
+    ) -> String {
+        match (self, table) {
+            (Self::RecordAttribute(key), SampledTable::EncodedRecords { aliases, .. }) => {
+                aliases.attribute_text_sql(key, stored_attributes.stored_key(key))
+            }
+            (Self::RecordAttribute(_), SampledTable::MetricSeries) => {
+                "metric_series.attributes ->> :value_path".into()
+            }
+            (Self::ResourceAttribute(_), _) => "resource.attributes ->> :value_path".into(),
+            (Self::BuiltinColumn(column), _) => column.clone(),
         }
     }
 
@@ -101,9 +162,13 @@ impl ValueColumn {
         !matches!(self, Self::BuiltinColumn(_))
     }
 
-    fn push_path_param(&self, where_clause: &mut WhereClause) {
-        if let Self::RecordAttribute(key) | Self::ResourceAttribute(key) = self {
-            where_clause.push_param(":value_path", format!("$.\"{key}\""));
+    fn push_path_param(&self, where_clause: &mut WhereClause, table: SampledTable) {
+        match (self, table) {
+            (Self::RecordAttribute(_), SampledTable::EncodedRecords { .. })
+            | (Self::BuiltinColumn(_), _) => {}
+            (Self::RecordAttribute(key) | Self::ResourceAttribute(key), _) => {
+                where_clause.push_param(":value_path", format!("$.\"{key}\""));
+            }
         }
     }
 }
@@ -119,35 +184,34 @@ pub fn sample_records(
     context: &Expression,
     value_prefix_filter: Option<&ValuePrefixFilter>,
 ) -> anyhow::Result<RecordSample> {
-    let SampledTable {
-        table_with_alias,
-        record,
-        order_newest_first,
-    } = sampled_table_of_signal(signal);
+    let table = SampledTable::of_signal(signal);
     let mut where_clause = compile_context(reader, signal, Some(context))?;
     if let Some(ValuePrefixFilter {
         value_column,
         lowercase_value_prefix,
     }) = value_prefix_filter
     {
+        let stored_attributes = value_column.read_stored_attributes(reader, signal)?;
         where_clause.push_condition_with_param(
             &format!(
                 "{} LIKE :value_prefix ESCAPE '\\'",
-                value_column.sql_reading_text(record)
+                value_column.sql_reading_text(table, &stored_attributes)
             ),
             ":value_prefix",
             format!("{}%", escape_like_pattern(lowercase_value_prefix)),
         );
-        value_column.push_path_param(&mut where_clause);
+        value_column.push_path_param(&mut where_clause, table);
     }
     let sql = format!(
-        "SELECT {record}.rowid
-         FROM {table_with_alias}
-         JOIN resources resource ON resource.id = {record}.resource_id
+        "SELECT {}.rowid
+         FROM {}
          WHERE {}
-         ORDER BY {order_newest_first}
+         ORDER BY {}
          LIMIT :limit",
-        where_clause.sql()
+        table.record(),
+        table.records_sql(),
+        where_clause.sql(),
+        table.order_newest_first()
     );
     where_clause.push_param(":limit", i64::try_from(MAX_SAMPLED_RECORDS)?);
     let mut rowids = Vec::new();
@@ -182,8 +246,11 @@ fn compile_context(
             let mut where_clause = where_series_have_points_in_range(reader, Resolution::Raw);
             compile_query(
                 &query,
-                SERIES_TABLE_ALIASES,
-                reader.indexed_attributes(),
+                &QueryContext {
+                    aliases: SERIES_TABLE_ALIASES,
+                    indexed_attributes: reader.indexed_attributes(),
+                    stored_attributes: &StoredAttributes::default(),
+                },
                 "q",
                 &mut where_clause,
             )?;
@@ -215,27 +282,49 @@ pub fn read_sampled_keys(
     resource: bool,
     rowids: &[SampledRowid],
 ) -> anyhow::Result<Vec<KeyInfo>> {
-    let SampledTable {
-        table_with_alias,
-        record,
-        ..
-    } = sampled_table_of_signal(signal);
-    let sql = if resource {
-        format!(
+    let table = SampledTable::of_signal(signal);
+    let (record, records_sql) = (table.record(), table.records_sql());
+    let sql = match (resource, table) {
+        (true, _) => format!(
             "SELECT attribute.key, attribute.type, count(*) AS owner_count
-             FROM resources resource, json_each(resource.attributes) attribute
-             WHERE resource.id IN (SELECT {record}.resource_id
-                                   FROM {table_with_alias}
-                                   WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids)))
+             FROM resources owner_resource, json_each(owner_resource.attributes) attribute
+             WHERE owner_resource.id IN (
+               SELECT resource.id
+               FROM {records_sql}
+               WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids)))
              GROUP BY attribute.key, attribute.type"
-        )
-    } else {
-        format!(
+        ),
+        (false, SampledTable::EncodedRecords { aliases, .. }) => {
+            let stable_attribute_set = aliases.stable_attribute_set;
+            format!(
+                "SELECT attribute.key, attribute.type, count(*) AS owner_count
+                 FROM (SELECT stable_entry.key AS key, stable_entry.type AS type
+                       FROM {records_sql}, json_each({stable_attribute_set}.attributes) stable_entry
+                       WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids))
+                       UNION ALL
+                       SELECT attribute_key.key, json_type(interned_attribute_value.value)
+                       FROM {records_sql}, json_each({record}.interned_attributes) interned_entry
+                       JOIN attribute_keys attribute_key
+                         ON attribute_key.id = CAST(interned_entry.key AS INTEGER)
+                       JOIN interned_attribute_values interned_attribute_value
+                         ON interned_attribute_value.id = interned_entry.value
+                       WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids))
+                       UNION ALL
+                       SELECT attribute_key.key, literal_entry.type
+                       FROM {records_sql}, json_each({record}.literal_attributes) literal_entry
+                       JOIN attribute_keys attribute_key
+                         ON attribute_key.id = CAST(literal_entry.key AS INTEGER)
+                       WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids))) attribute
+                 GROUP BY attribute.key, attribute.type"
+            )
+        }
+        (false, SampledTable::MetricSeries) => {
             "SELECT attribute.key, attribute.type, count(*) AS owner_count
-             FROM {table_with_alias}, json_each({record}.attributes) attribute
-             WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids))
+             FROM metric_series, json_each(metric_series.attributes) attribute
+             WHERE metric_series.rowid IN (SELECT value FROM json_each(:rowids))
              GROUP BY attribute.key, attribute.type"
-        )
+                .to_owned()
+        }
     };
     let rows = reader.collect_rows(&sql, &where_rowids_are(rowids)?, |row| {
         Ok((
@@ -297,24 +386,22 @@ pub fn read_sampled_values(
         RecordSample::NewestMatches(rowids) => (rowids.as_slice(), false),
         RecordSample::NothingFoundInTime => return Ok(FieldValues::default()),
     };
-    let SampledTable {
-        table_with_alias,
-        record,
-        ..
-    } = sampled_table_of_signal(signal);
+    let table = SampledTable::of_signal(signal);
+    let stored_attributes = value_column.read_stored_attributes(reader, signal)?;
     let sql = format!(
         "SELECT {} AS field_value, count(*) AS record_count
-         FROM {table_with_alias}
-         JOIN resources resource ON resource.id = {record}.resource_id
-         WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids))
+         FROM {}
+         WHERE {}.rowid IN (SELECT value FROM json_each(:rowids))
          GROUP BY field_value
          HAVING field_value IS NOT NULL
          ORDER BY record_count DESC, field_value
          LIMIT :limit",
-        value_column.sql_reading_json(record)
+        value_column.sql_reading_json(table, &stored_attributes),
+        table.records_sql(),
+        table.record()
     );
     let mut where_clause = where_rowids_are(rowids)?;
-    value_column.push_path_param(&mut where_clause);
+    value_column.push_path_param(&mut where_clause, table);
     where_clause.push_param(":limit", row_limit_with_one_more(MAX_CATALOG_ROWS)?);
     let rows = reader.collect_rows(&sql, &where_clause, |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -342,9 +429,9 @@ pub fn read_sampled_values(
 }
 
 pub fn column_of_builtin_field(signal: Signal, builtin_field: BuiltinField) -> String {
-    let aliases = TableAliases {
-        record: sampled_table_of_signal(signal).record,
-        resource: "resource",
+    let aliases = match SampledTable::of_signal(signal) {
+        SampledTable::EncodedRecords { aliases, .. } => TableAliases::EncodedRecords(aliases),
+        SampledTable::MetricSeries => SERIES_TABLE_ALIASES,
     };
     builtin_column(aliases, builtin_field)
 }
@@ -355,16 +442,14 @@ pub fn read_whether_sample_has_column(
     column: &str,
     rowids: &[SampledRowid],
 ) -> anyhow::Result<bool> {
-    let SampledTable {
-        table_with_alias,
-        record,
-        ..
-    } = sampled_table_of_signal(signal);
+    let table = SampledTable::of_signal(signal);
     let sql = format!(
         "SELECT EXISTS (SELECT 1
-                        FROM {table_with_alias}
-                        WHERE {record}.rowid IN (SELECT value FROM json_each(:rowids))
-                          AND {column} IS NOT NULL)"
+                        FROM {}
+                        WHERE {}.rowid IN (SELECT value FROM json_each(:rowids))
+                          AND {column} IS NOT NULL)",
+        table.records_sql(),
+        table.record()
     );
     let has_column = reader.collect_rows(&sql, &where_rowids_are(rowids)?, |row| {
         Ok(row.get::<_, bool>(0)?)
@@ -378,18 +463,14 @@ pub fn read_whether_range_has_column(
     signal: Signal,
     column: &str,
 ) -> anyhow::Result<bool> {
-    let SampledTable {
-        table_with_alias,
-        record,
-        ..
-    } = sampled_table_of_signal(signal);
+    let table = SampledTable::of_signal(signal);
     let mut where_clause = compile_context(reader, signal, None)?;
     where_clause.push_condition(format!("{column} IS NOT NULL"));
     let sql = format!(
         "SELECT EXISTS (SELECT 1
-                        FROM {table_with_alias}
-                        JOIN resources resource ON resource.id = {record}.resource_id
+                        FROM {}
                         WHERE {})",
+        table.records_sql(),
         where_clause.sql()
     );
     let found = reader.run_within_completion_time_budget(|| {

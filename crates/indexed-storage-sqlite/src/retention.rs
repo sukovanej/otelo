@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use otelo_query::Signal;
 use rusqlite::params;
 
+use crate::attribute_encoding::RecordGroupId;
 use crate::catalog::AttributeOwner;
 use crate::day::Day;
 use crate::progress::Progress;
@@ -33,7 +34,7 @@ impl OldestRetainedDays {
     }
 
     // A resource belongs to the records of every signal, so it is counted as long as any.
-    fn of_attribute_owner(self, owner: AttributeOwner) -> Day {
+    pub(crate) fn of_attribute_owner(self, owner: AttributeOwner) -> Day {
         match owner {
             AttributeOwner::Log => self.logs,
             AttributeOwner::Span => self.traces,
@@ -159,6 +160,44 @@ impl TelemetryFile {
             )?
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
+        // A set or a value holds the day of its newest record, so no record past the retention
+        // keeps one.
+        for owner in [AttributeOwner::Log, AttributeOwner::Span] {
+            transaction
+                .prepare_cached(
+                    "DELETE FROM stable_attribute_sets
+                     WHERE newest_record_day < ?2
+                       AND record_group_id IN (SELECT id
+                                               FROM record_groups
+                                               WHERE attribute_owner = ?1)",
+                )?
+                .execute(params![
+                    owner.name(),
+                    oldest_retained_days.of_attribute_owner(owner)
+                ])?;
+        }
+        transaction.execute(
+            "DELETE FROM interned_attribute_values WHERE newest_record_day < ?1",
+            [oldest_retained_days.logs.min(oldest_retained_days.traces)],
+        )?;
+        transaction.execute(
+            "DELETE FROM attribute_key_profiles AS attribute_key_profile
+             WHERE NOT EXISTS (SELECT 1
+                               FROM stable_attribute_sets stable_attribute_set
+                               WHERE stable_attribute_set.record_group_id
+                                       = attribute_key_profile.record_group_id)",
+            [],
+        )?;
+        let deleted_group_ids: HashSet<RecordGroupId> = transaction
+            .prepare(
+                "DELETE FROM record_groups AS record_group
+                 WHERE NOT EXISTS (SELECT 1
+                                   FROM stable_attribute_sets stable_attribute_set
+                                   WHERE stable_attribute_set.record_group_id = record_group.id)
+                 RETURNING id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
         let deleted_resource_ids: HashSet<ResourceId> = transaction
             .prepare(
                 "DELETE FROM resources AS resource
@@ -166,11 +205,8 @@ impl TelemetryFile {
                                    FROM metric_series
                                    WHERE metric_series.resource_id = resource.id)
                    AND NOT EXISTS (SELECT 1
-                                   FROM logs log
-                                   WHERE log.resource_id = resource.id)
-                   AND NOT EXISTS (SELECT 1
-                                   FROM spans span
-                                   WHERE span.resource_id = resource.id)
+                                   FROM record_groups record_group
+                                   WHERE record_group.resource_id = resource.id)
                  RETURNING id",
             )?
             .query_map([], |row| row.get(0))?
@@ -206,6 +242,7 @@ impl TelemetryFile {
             oldest_retained_days.of_attribute_owner(AttributeOwner::Resource),
             &deleted_resource_ids,
             &deleted_series_ids,
+            &deleted_group_ids,
         );
         Ok(())
     }

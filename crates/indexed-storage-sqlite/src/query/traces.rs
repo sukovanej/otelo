@@ -8,12 +8,13 @@ use otelo_indexed_storage::{Attributes, SpanKind, SpanStatus, TraceId};
 use otelo_query::{BuiltinField, Expression, Field, Operator, Query, Signal};
 use rusqlite::Row;
 
-use super::compile::{TableAliases, compile_query};
+use super::compile::{EncodedRecordAliases, QueryContext, TableAliases, compile_query};
 use super::{
-    OrderColumn, PageOrder, SortDirection, WhereClause, row_limit_with_one_more, span_id_from_blob,
-    split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
+    OrderColumn, PageOrder, SPAN_ALIASES, SortDirection, WhereClause, row_limit_with_one_more,
+    span_id_from_blob, split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
+use crate::catalog::AttributeOwner;
 
 #[derive(Clone, Copy)]
 struct TraceStats {
@@ -32,16 +33,28 @@ struct RootSpan {
     resource: Attributes,
 }
 
-const SPAN_COLUMNS: &str = "span.trace_id, span.span_id, span.parent_span_id, resource.service,
-    span.name, span.kind, span.started_at, span.duration_ns, span.status_code, span.attributes,
-    span.events, resource.attributes AS resource_attributes";
+const MATCHING_SPAN_ALIASES: EncodedRecordAliases = EncodedRecordAliases {
+    record: "matching_span",
+    stable_attribute_set: "matching_stable_attribute_set",
+    record_group: "matching_record_group",
+    resource: "matching_resource",
+};
 
-fn select_spans(columns: &str, where_clause: &WhereClause) -> String {
+fn span_columns() -> String {
+    format!(
+        "span.trace_id, span.span_id, span.parent_span_id, resource.service, record_group.name,
+         span.kind, span.started_at, span.duration_ns, span.status_code, {} AS attributes,
+         span.events, resource.attributes AS resource_attributes",
+        SPAN_ALIASES.record_attributes_json_sql()
+    )
+}
+
+pub(super) fn select_spans(columns: &str, where_clause: &WhereClause) -> String {
     format!(
         "SELECT {columns}
-         FROM spans span
-         JOIN resources resource ON resource.id = span.resource_id
+         FROM {}
          WHERE {}",
+        SPAN_ALIASES.encoded_records_sql("spans"),
         where_clause.sql()
     )
 }
@@ -109,14 +122,14 @@ pub(super) fn compile_span_query(
 ) -> anyhow::Result<(WhereClause, Vec<String>)> {
     ensure_query_over_spans(query)?;
     let mut where_clause = WhereClause::within_reader_range(reader, "span.started_at");
-    let aliases = TableAliases {
-        record: "span",
-        resource: "resource",
-    };
+    let stored_attributes = reader.read_stored_attributes_of_query(AttributeOwner::Span, query)?;
     let unindexed = compile_query(
         query,
-        aliases,
-        reader.indexed_attributes(),
+        &QueryContext {
+            aliases: TableAliases::EncodedRecords(SPAN_ALIASES),
+            indexed_attributes: reader.indexed_attributes(),
+            stored_attributes: &stored_attributes,
+        },
         "q",
         &mut where_clause,
     )?;
@@ -128,7 +141,7 @@ pub(super) fn explain_spans(reader: &Reader, query: &Query) -> anyhow::Result<Ve
     reader.explain_scan(
         &format!(
             "{} ORDER BY span.started_at DESC",
-            select_spans(SPAN_COLUMNS, &where_clause)
+            select_spans(&span_columns(), &where_clause)
         ),
         &where_clause,
     )
@@ -189,7 +202,7 @@ pub(super) fn read_spans(
          ORDER BY {}
          LIMIT :limit",
         select_spans(
-            &format!("{SPAN_COLUMNS}, {}", order.cursor_columns_sql()),
+            &format!("{}, {}", span_columns(), order.cursor_columns_sql()),
             &where_clause
         ),
         order.order_by_sql()
@@ -217,23 +230,23 @@ pub(super) fn read_traces(
     let mut unindexed = Vec::new();
     if query.expression.is_some() {
         let mut matching = WhereClause::within_reader_range(reader, "matching_span.started_at");
-        let aliases = TableAliases {
-            record: "matching_span",
-            resource: "matching_resource",
-        };
+        let stored_attributes =
+            reader.read_stored_attributes_of_query(AttributeOwner::Span, query)?;
         unindexed = compile_query(
             query,
-            aliases,
-            reader.indexed_attributes(),
+            &QueryContext {
+                aliases: TableAliases::EncodedRecords(MATCHING_SPAN_ALIASES),
+                indexed_attributes: reader.indexed_attributes(),
+                stored_attributes: &stored_attributes,
+            },
             "q",
             &mut matching,
         )?;
         where_clause.push_condition(format!(
             "span.trace_id IN (SELECT matching_span.trace_id
-                               FROM spans matching_span
-                               JOIN resources matching_resource
-                                 ON matching_resource.id = matching_span.resource_id
+                               FROM {}
                                WHERE {})",
+            MATCHING_SPAN_ALIASES.encoded_records_sql("spans"),
             matching.sql()
         ));
         where_clause.absorb_params(matching);
@@ -241,15 +254,16 @@ pub(super) fn read_traces(
     let order = pick_page_order(sort);
     order.push_condition_after(&mut where_clause, page.after.as_ref())?;
     let sql = format!(
-        "SELECT span.trace_id, span.started_at, resource.service, span.name, span.kind,
-                span.duration_ns, span.attributes, resource.attributes AS resource_attributes,
+        "SELECT span.trace_id, span.started_at, resource.service, record_group.name, span.kind,
+                span.duration_ns, {} AS attributes, resource.attributes AS resource_attributes,
                 {}
-         FROM spans span
-         JOIN resources resource ON resource.id = span.resource_id
+         FROM {}
          WHERE {}
          ORDER BY {}
          LIMIT :limit",
+        SPAN_ALIASES.record_attributes_json_sql(),
         order.cursor_columns_sql(),
+        SPAN_ALIASES.encoded_records_sql("spans"),
         where_clause.sql(),
         order.order_by_sql()
     );
@@ -312,7 +326,7 @@ pub(super) fn read_trace(
     where_clause.push_param(":limit", row_limit_with_one_more(limit)?);
     let sql = format!(
         "{} ORDER BY span.started_at LIMIT :limit",
-        select_spans(SPAN_COLUMNS, &where_clause)
+        select_spans(&span_columns(), &where_clause)
     );
     let mut spans = reader.collect_rows(&sql, &where_clause, trace_span_from_row)?;
     let spans_truncated = truncate_to_limit(&mut spans, limit);

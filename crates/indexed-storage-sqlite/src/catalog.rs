@@ -5,6 +5,7 @@ use rusqlite::{Connection, Transaction, params};
 
 use otelo_indexed_storage::{AttributeValue, Attributes};
 
+use crate::attribute_encoding::{AttributeEncoding, AttributeEncodings};
 use crate::day::Day;
 
 pub const MAX_VALUES_PER_KEY_AND_DAY: usize = 200;
@@ -70,6 +71,7 @@ struct KnownKey {
 struct KeyDelta {
     json_type: ValueType,
     record_count: i64,
+    encodings: AttributeEncodings,
 }
 
 #[derive(Default)]
@@ -149,14 +151,27 @@ impl CatalogCache {
         }
     }
 
-    fn count_value(
+    pub fn count_encoded_value(
         &mut self,
         delta: &mut CatalogDelta,
         day: Day,
         owner: AttributeOwner,
         key: &str,
         value: &AttributeValue,
+        encoding: AttributeEncoding,
     ) {
+        self.count_value(delta, day, owner, key, value)
+            .add_encoding(encoding);
+    }
+
+    fn count_value<'a>(
+        &mut self,
+        delta: &'a mut CatalogDelta,
+        day: Day,
+        owner: AttributeOwner,
+        key: &str,
+        value: &AttributeValue,
+    ) -> &'a mut AttributeEncodings {
         let json_type = value.value_type();
         let owned_key = (day, owner, key.to_owned());
         let known = self
@@ -170,26 +185,30 @@ impl CatalogCache {
         if known.json_type != json_type {
             known.json_type = ValueType::Mixed;
         }
-        let key_delta = delta.keys.entry(owned_key).or_insert(KeyDelta {
-            json_type: known.json_type,
+        let known_json_type = known.json_type;
+        let key_delta = delta.keys.entry(owned_key).or_insert_with(|| KeyDelta {
+            json_type: known_json_type,
             record_count: 0,
+            encodings: AttributeEncodings::default(),
         });
         key_delta.json_type = known.json_type;
         key_delta.record_count += 1;
-        let Some(value_json) = completable_value_json(value) else {
+        if let Some(value_json) = completable_value_json(value) {
+            if known.values.contains(&value_json) || known.values.len() < MAX_VALUES_PER_KEY_AND_DAY
+            {
+                known.values.insert(value_json.clone());
+                *delta
+                    .values
+                    .entry((day, owner, key.to_owned(), value_json))
+                    .or_default() += 1;
+            } else {
+                known.has_more_values_than_listed = true;
+            }
+        } else {
             // A string too long to list is still one of the values of the key.
             known.has_more_values_than_listed |= matches!(value, AttributeValue::String(_));
-            return;
-        };
-        if known.values.contains(&value_json) || known.values.len() < MAX_VALUES_PER_KEY_AND_DAY {
-            known.values.insert(value_json.clone());
-            *delta
-                .values
-                .entry((day, owner, key.to_owned(), value_json))
-                .or_default() += 1;
-        } else {
-            known.has_more_values_than_listed = true;
         }
+        &mut key_delta.encodings
     }
 
     pub fn count_span_name(&mut self, delta: &mut CatalogDelta, day: Day, name: &str) {
@@ -207,8 +226,9 @@ impl CatalogCache {
     ) -> rusqlite::Result<()> {
         let mut insert_key = transaction.prepare_cached(
             "INSERT INTO attribute_key_counts
-               (day, attribute_owner, key, json_type, record_count, has_more_values_than_listed)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+               (day, attribute_owner, key, json_type, record_count, has_more_values_than_listed,
+                has_stable_values, has_interned_values, has_literal_values)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?8, ?9, ?10)
              ON CONFLICT (day, attribute_owner, key) DO UPDATE SET
                record_count = record_count + excluded.record_count,
                json_type = CASE
@@ -216,13 +236,17 @@ impl CatalogCache {
                  ELSE ?7
                END,
                has_more_values_than_listed =
-                 max(has_more_values_than_listed, excluded.has_more_values_than_listed)",
+                 max(has_more_values_than_listed, excluded.has_more_values_than_listed),
+               has_stable_values = max(has_stable_values, excluded.has_stable_values),
+               has_interned_values = max(has_interned_values, excluded.has_interned_values),
+               has_literal_values = max(has_literal_values, excluded.has_literal_values)",
         )?;
         for (
             owned_key,
             KeyDelta {
                 json_type,
                 record_count,
+                encodings,
             },
         ) in delta.keys
         {
@@ -238,7 +262,10 @@ impl CatalogCache {
                 json_type.name(),
                 record_count,
                 has_more_values_than_listed,
-                ValueType::Mixed.name()
+                ValueType::Mixed.name(),
+                encodings.has_stable_values,
+                encodings.has_interned_values,
+                encodings.has_literal_values,
             ])?;
         }
         let mut insert_value = transaction.prepare_cached(

@@ -4,12 +4,15 @@ use std::path::Path;
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    HistogramPoint, IndexedAttribute, Log, Metric, NumberPoint, Points, Resource, Span,
+    AttributeValue, HistogramPoint, IndexedAttribute, Log, Metric, NumberPoint, Points, Resource,
+    Span,
 };
 use otelo_journal::{Hour, Position};
 use otelo_query::Signal;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use crate::attribute_encoding::RecordGroupId;
+use crate::attribute_store::{AttributeStore, RecordOfGroup};
 use crate::catalog::{AttributeOwner, CatalogCache, CatalogDelta};
 use crate::day::Day;
 use crate::indexes::apply_indexes_to_telemetry_file;
@@ -23,6 +26,9 @@ use crate::version::{OtherStorageVersion, STORAGE_VERSION};
 pub const TELEMETRY_FILE_NAME: &str = "telemetry.sqlite";
 
 const SCHEMA: &str = include_str!("schema.sql");
+
+// The logs of one instrumentation scope of a resource make a record group.
+const LOG_GROUP_ATTRIBUTE: &str = "otel.scope.name";
 
 // The OS page cache keeps the hot pages, so each connection keeps little of its own.
 const PAGE_CACHE_KIB: i64 = 1024;
@@ -56,6 +62,7 @@ pub fn rows_of_points(points: &Points) -> Vec<PointRow<'_>> {
 }
 
 pub struct ResourceRecords<'a> {
+    pub received_at: i64,
     pub resource: &'a Resource,
     pub logs: Vec<&'a Log>,
     pub spans: Vec<&'a Span>,
@@ -105,6 +112,7 @@ struct CachedRows {
     // A resource and a series outlive a day, and the catalog counts them once on each day.
     counted_resource_days: HashSet<(Day, ResourceId)>,
     counted_series_days: HashSet<(Day, MetricSeriesId)>,
+    attribute_store: AttributeStore,
 }
 
 impl TelemetryFile {
@@ -152,8 +160,12 @@ impl TelemetryFile {
         oldest_retained_day: Day,
         deleted_resource_ids: &HashSet<ResourceId>,
         deleted_series_ids: &HashSet<MetricSeriesId>,
+        deleted_group_ids: &HashSet<RecordGroupId>,
     ) {
         let cached_rows = &mut self.cached_rows;
+        cached_rows
+            .attribute_store
+            .forget_rows_past_retention(deleted_group_ids);
         cached_rows.resource_ids_by_identity_hash.clear();
         cached_rows.series_cache = SeriesCache::default();
         cached_rows.catalog.forget_days_before(oldest_retained_day);
@@ -170,7 +182,7 @@ impl TelemetryFile {
     pub(crate) fn apply_indexes(
         &self,
         attributes: &BTreeSet<IndexedAttribute>,
-    ) -> rusqlite::Result<()> {
+    ) -> anyhow::Result<()> {
         apply_indexes_to_telemetry_file(&self.connection, attributes)
     }
 
@@ -263,57 +275,8 @@ impl CachedRows {
                     );
                 }
             }
-            let mut insert_log = transaction.prepare_cached(
-                "INSERT INTO logs (logged_at, resource_id, severity_number, body, trace_id, span_id,
-                                   attributes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?;
-            for log in &records.logs {
-                self.catalog.count_attributes(
-                    &mut catalog_delta,
-                    Day::from_unix_nanos(log.logged_at),
-                    AttributeOwner::Log,
-                    &log.attributes,
-                );
-                insert_log.execute(params![
-                    log.logged_at,
-                    resource_id,
-                    log.severity_number.number(),
-                    log.body,
-                    log.trace_context.trace_id().map(|trace_id| trace_id.0),
-                    log.trace_context.span_id().map(|span_id| span_id.0),
-                    log.attributes.to_json(),
-                ])?;
-            }
-            let mut insert_span = transaction.prepare_cached(
-                "INSERT INTO spans (trace_id, span_id, parent_span_id, resource_id, name, kind,
-                                    started_at, duration_ns, status_code, attributes, events)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            )?;
-            for span in &records.spans {
-                let day = Day::from_unix_nanos(span.started_at);
-                self.catalog.count_attributes(
-                    &mut catalog_delta,
-                    day,
-                    AttributeOwner::Span,
-                    &span.attributes,
-                );
-                self.catalog
-                    .count_span_name(&mut catalog_delta, day, &span.name);
-                insert_span.execute(params![
-                    span.trace_id.0,
-                    span.span_id.0,
-                    span.parent_span_id.map(|id| id.0),
-                    resource_id,
-                    span.name,
-                    span.kind.number(),
-                    span.started_at,
-                    span.duration_ns,
-                    span.status_code.number(),
-                    span.attributes.to_json(),
-                    serde_json::to_string(&span.events)?,
-                ])?;
-            }
+            self.write_logs(transaction, &mut catalog_delta, records, resource_id)?;
+            self.write_spans(transaction, &mut catalog_delta, records, resource_id)?;
             rejected_points += self.write_points_and_count_rejected(
                 transaction,
                 &mut catalog_delta,
@@ -323,6 +286,96 @@ impl CachedRows {
         }
         self.catalog.write_delta(transaction, catalog_delta)?;
         Ok(rejected_points)
+    }
+
+    fn write_logs(
+        &mut self,
+        transaction: &Transaction,
+        catalog_delta: &mut CatalogDelta,
+        records: &ResourceRecords,
+        resource_id: ResourceId,
+    ) -> anyhow::Result<()> {
+        let mut insert_log = transaction.prepare_cached(
+            "INSERT INTO logs (logged_at, stable_attribute_set_id, severity_number, body,
+                               trace_id, span_id, interned_attributes, literal_attributes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for log in &records.logs {
+            let encoded = self.attribute_store.encode_attributes(
+                transaction,
+                &mut self.catalog,
+                catalog_delta,
+                &RecordOfGroup {
+                    attribute_owner: AttributeOwner::Log,
+                    resource_id,
+                    name: log
+                        .attributes
+                        .get(LOG_GROUP_ATTRIBUTE)
+                        .and_then(AttributeValue::as_str)
+                        .unwrap_or_default(),
+                    day: Day::from_unix_nanos(log.logged_at),
+                    received_at: records.received_at,
+                },
+                &log.attributes,
+            )?;
+            insert_log.execute(params![
+                log.logged_at,
+                encoded.stable_attribute_set_id,
+                log.severity_number.number(),
+                log.body,
+                log.trace_context.trace_id().map(|trace_id| trace_id.0),
+                log.trace_context.span_id().map(|span_id| span_id.0),
+                encoded.interned_attributes,
+                encoded.literal_attributes,
+            ])?;
+        }
+        Ok(())
+    }
+
+    fn write_spans(
+        &mut self,
+        transaction: &Transaction,
+        catalog_delta: &mut CatalogDelta,
+        records: &ResourceRecords,
+        resource_id: ResourceId,
+    ) -> anyhow::Result<()> {
+        let mut insert_span = transaction.prepare_cached(
+            "INSERT INTO spans (trace_id, span_id, parent_span_id, stable_attribute_set_id,
+                                kind, started_at, duration_ns, status_code,
+                                interned_attributes, literal_attributes, events)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        )?;
+        for span in &records.spans {
+            let day = Day::from_unix_nanos(span.started_at);
+            self.catalog.count_span_name(catalog_delta, day, &span.name);
+            let encoded = self.attribute_store.encode_attributes(
+                transaction,
+                &mut self.catalog,
+                catalog_delta,
+                &RecordOfGroup {
+                    attribute_owner: AttributeOwner::Span,
+                    resource_id,
+                    name: &span.name,
+                    day,
+                    received_at: records.received_at,
+                },
+                &span.attributes,
+            )?;
+            insert_span.execute(params![
+                span.trace_id.0,
+                span.span_id.0,
+                span.parent_span_id.map(|id| id.0),
+                encoded.stable_attribute_set_id,
+                span.kind.number(),
+                span.started_at,
+                span.duration_ns,
+                span.status_code.number(),
+                encoded.interned_attributes,
+                encoded.literal_attributes,
+                serde_json::to_string(&span.events)?,
+            ])?;
+        }
+        Ok(())
     }
 
     fn write_points_and_count_rejected(

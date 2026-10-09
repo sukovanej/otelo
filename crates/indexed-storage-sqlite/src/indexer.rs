@@ -312,7 +312,7 @@ impl IndexerState {
             match (self.map_frame)(signal, &frame.request) {
                 Ok(batch) => {
                     frame_counts.indexed += 1;
-                    batches.push(batch);
+                    batches.push((frame.received_at, batch));
                 }
                 Err(error) => {
                     frame_counts.undecodable += 1;
@@ -324,7 +324,9 @@ impl IndexerState {
             }
         }
         let (resource_records, mut record_counts) =
-            self.select_retained_records(batches.iter().flatten());
+            self.select_retained_records(batches.iter().flat_map(|(received_at, batch)| {
+                batch.iter().map(move |records| (*received_at, records))
+            }));
         let rejected_points =
             self.file
                 .write_indexed_frames(&resource_records, signal, last_frame.position_after)?;
@@ -357,7 +359,7 @@ impl IndexerState {
 
     fn select_retained_records<'a>(
         &self,
-        records: impl Iterator<Item = &'a Records>,
+        records: impl Iterator<Item = (i64, &'a Records)>,
     ) -> (Vec<ResourceRecords<'a>>, RecordCounts) {
         let today = Day::today();
         let oldest_retained_days = self.config.oldest_retained_days(today);
@@ -369,8 +371,9 @@ impl IndexerState {
         };
         let mut record_counts = RecordCounts::default();
         let mut resource_records = Vec::new();
-        for records in records {
+        for (received_at, records) in records {
             let mut retained = ResourceRecords {
+                received_at,
                 resource: &records.resource,
                 logs: Vec::new(),
                 spans: Vec::new(),

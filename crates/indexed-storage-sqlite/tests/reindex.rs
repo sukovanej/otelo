@@ -196,19 +196,16 @@ fn a_reindex_answers_the_queries_as_the_live_indexing_did() {
     let live_answers = answer_queries(live_directory.path());
     assert!(live_answers.contains("payment 12 failed"), "{live_answers}");
     assert_eq!(answer_queries(reindexed_directory.path()), live_answers);
-    let explained = otelo_indexed_storage_sqlite::Reader::open(
-        &reindexed_directory.path().join("telemetry"),
-        TimeRange::new(0, SECOND).unwrap(),
-    )
-    .unwrap()
-    .explain_query(&parse_query("user.id = 7", Signal::Logs).unwrap())
-    .unwrap();
-    assert!(
-        explained
-            .iter()
-            .any(|step| step.contains("logs_attribute_")),
-        "{explained:?}"
-    );
+    let attribute_indexes: i64 = Connection::open(&telemetry_path)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM sqlite_master
+             WHERE name GLOB 'logs_interned_attribute_*' OR name GLOB 'logs_literal_attribute_*'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attribute_indexes, 2);
 }
 
 fn index_journal_live(

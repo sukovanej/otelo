@@ -156,7 +156,11 @@ fn reads_back_each_kind_across_a_day_boundary() {
     );
     let names: Vec<(i64, String)> = query_pairs(
         connection,
-        "SELECT started_at, name FROM spans ORDER BY started_at",
+        "SELECT span.started_at, record_group.name
+         FROM spans span
+         JOIN stable_attribute_sets stable_attribute_set ON stable_attribute_set.id = span.stable_attribute_set_id
+         JOIN record_groups record_group ON record_group.id = stable_attribute_set.record_group_id
+         ORDER BY span.started_at",
     );
     assert_eq!(
         names,

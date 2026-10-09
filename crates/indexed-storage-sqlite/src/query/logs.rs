@@ -10,12 +10,13 @@ use otelo_indexed_storage::query::{
 use otelo_query::{Query, Signal};
 use rusqlite::Row;
 
-use super::compile::{TableAliases, compile_query};
+use super::compile::{QueryContext, TableAliases, compile_query};
 use super::{
-    OrderColumn, PageOrder, SortDirection, WhereClause, row_limit_with_one_more, span_id_from_blob,
-    split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
+    LOG_ALIASES, OrderColumn, PageOrder, SortDirection, WhereClause, row_limit_with_one_more,
+    span_id_from_blob, split_page, timestamp_from_nanos, trace_id_from_blob, truncate_to_limit,
 };
 use crate::Reader;
+use crate::catalog::AttributeOwner;
 
 const MAX_SAMPLES_PER_GROUP: usize = 3;
 
@@ -34,30 +35,34 @@ pub(super) fn compile_log_query(
         query.signal
     );
     let mut where_clause = WhereClause::within_reader_range(reader, "log.logged_at");
-    let aliases = TableAliases {
-        record: "log",
-        resource: "resource",
-    };
+    let stored_attributes = reader.read_stored_attributes_of_query(AttributeOwner::Log, query)?;
     let unindexed = compile_query(
         query,
-        aliases,
-        reader.indexed_attributes(),
+        &QueryContext {
+            aliases: TableAliases::EncodedRecords(LOG_ALIASES),
+            indexed_attributes: reader.indexed_attributes(),
+            stored_attributes: &stored_attributes,
+        },
         "q",
         &mut where_clause,
     )?;
     Ok((where_clause, unindexed))
 }
 
-const LOG_LINE_COLUMNS: &str = "log.logged_at, resource.service, log.severity_number, log.body,
-    log.trace_id, log.span_id, log.attributes,
-    resource.attributes AS resource_attributes";
+fn log_line_columns() -> String {
+    format!(
+        "log.logged_at, resource.service, log.severity_number, log.body, log.trace_id,
+         log.span_id, {} AS attributes, resource.attributes AS resource_attributes",
+        LOG_ALIASES.record_attributes_json_sql()
+    )
+}
 
 pub(super) fn explain_logs(reader: &Reader, query: &Query) -> anyhow::Result<Vec<String>> {
     let (where_clause, _) = compile_log_query(reader, query)?;
     reader.explain_scan(
         &format!(
             "{} ORDER BY log.logged_at DESC",
-            select_logs(LOG_LINE_COLUMNS, &where_clause)
+            select_logs(&log_line_columns(), &where_clause)
         ),
         &where_clause,
     )
@@ -75,9 +80,9 @@ pub(super) fn quote_fts_words(text: &str) -> Option<String> {
 fn select_logs(columns: &str, where_clause: &WhereClause) -> String {
     format!(
         "SELECT {columns}
-         FROM logs log
-         JOIN resources resource ON resource.id = log.resource_id
+         FROM {}
          WHERE {}",
+        LOG_ALIASES.encoded_records_sql("logs"),
         where_clause.sql()
     )
 }
@@ -122,7 +127,8 @@ pub(super) fn read_logs(
          LIMIT :limit",
         select_logs(
             &format!(
-                "{LOG_LINE_COLUMNS}, {}",
+                "{}, {}",
+                log_line_columns(),
                 NEWEST_LOGS_FIRST.cursor_columns_sql()
             ),
             &where_clause

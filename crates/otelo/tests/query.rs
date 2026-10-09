@@ -268,13 +268,25 @@ fn the_cli_reads_what_the_api_serves() {
 
     let (errors, _) = run_otelo_and_parse_json(&daemon, &["logs", "--raw", "level >= error"]);
     assert_eq!(errors["logs"].as_array().unwrap().len(), 1);
+    // So few logs keep user.id in their stable sets, which need no index of the key.
     let (user_logs, stderr) = run_otelo_and_parse_json(
         &daemon,
-        &["logs", "--raw", "user.id", "=", "7", "OR", "user.id = 9"],
+        &[
+            "logs",
+            "--raw",
+            "user.id",
+            "=",
+            "7",
+            "OR",
+            "user.id = 9 OR session.id = 9",
+        ],
     );
     assert_eq!(user_logs["logs"][0]["body"], "user 7 signed in");
-    assert_eq!(user_logs["unindexed"], json!(["user.id"]));
-    assert!(stderr.contains("otelo index add logs user.id"), "{stderr}");
+    assert_eq!(user_logs["unindexed"], json!(["session.id"]));
+    assert!(
+        stderr.contains("otelo index add logs session.id"),
+        "{stderr}"
+    );
 
     let (traces, _) = run_otelo_and_parse_json(&daemon, &["traces", "error = true"]);
     assert_eq!(
@@ -500,17 +512,18 @@ fn an_index_is_stored_and_applied_to_the_day_files() {
         rusqlite::Connection::open(&telemetry_file_path)
             .unwrap()
             .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE name GLOB 'logs_attribute_*'",
+                "SELECT count(*) FROM sqlite_master
+                 WHERE name GLOB 'logs_interned_attribute_*' OR name GLOB 'logs_literal_attribute_*'",
                 [],
                 |row| row.get(0),
             )
             .unwrap()
     };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while count_attribute_indexes() == 0 && std::time::Instant::now() < deadline {
+    while count_attribute_indexes() < 2 && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    assert_eq!(count_attribute_indexes(), 1);
+    assert_eq!(count_attribute_indexes(), 2);
     stop_daemon(daemon, StopSignal::Term);
 
     let daemon = start_daemon(dir.path());
