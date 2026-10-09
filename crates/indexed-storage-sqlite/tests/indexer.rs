@@ -234,15 +234,17 @@ fn gauge_batch(recorded_at: i64) -> Batch {
     }]
 }
 
-fn count_summarized_minutes(telemetry_directory: &Path) -> i64 {
+fn count_summaries(telemetry_directory: &Path, table: &str) -> i64 {
     Connection::open(telemetry_directory.join(TELEMETRY_FILE_NAME))
         .unwrap()
         .query_row(
-            "SELECT count(*)
-             FROM metric_minute_summaries summary
-             JOIN metric_series ON metric_series.id = summary.metric_series_id
-             WHERE metric_series.name = 'queue.depth'",
-            [],
+            &format!(
+                "SELECT count(*)
+                 FROM {table} summary
+                 JOIN metric_series ON metric_series.id = summary.metric_series_id
+                 WHERE metric_series.name = ?1"
+            ),
+            ["queue.depth"],
             |row| row.get(0),
         )
         .unwrap()
@@ -281,5 +283,12 @@ fn rolls_up_only_the_minutes_it_has_indexed_while_it_catches_up() {
         .unwrap()
         == Progress::MoreIsDue
     {}
-    assert_eq!(count_summarized_minutes(&telemetry_directory), 120);
+    assert_eq!(
+        count_summaries(&telemetry_directory, "metric_minute_summaries"),
+        120
+    );
+    assert_eq!(
+        count_summaries(&telemetry_directory, "metric_hour_summaries"),
+        2
+    );
 }
