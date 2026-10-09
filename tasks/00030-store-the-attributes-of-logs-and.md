@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: in_review
 created: 2026-10-08T22:05:18Z
 ---
 # Store the attributes of logs and spans by how often their values repeat
