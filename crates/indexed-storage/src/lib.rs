@@ -10,6 +10,7 @@ mod metric;
 mod otel;
 pub mod query;
 mod range;
+mod sql;
 mod storage;
 mod summary;
 
@@ -30,6 +31,7 @@ pub use meters::{
 pub use metric::{HistogramPoint, Metric, MetricKind, NumberPoint, Points, Temporality};
 pub use otel::{Severity, SpanId, SpanKind, SpanStatus, TraceContext, TraceId};
 pub use range::TimeRange;
+pub use sql::{is_sql_system, sanitize_sql_query_text};
 pub use storage::{RangeQueries, Storage, StorageSize};
 pub use summary::{Change, Level, SeriesPoint, SeriesSteps, StepSummary};
 

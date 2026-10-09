@@ -156,6 +156,46 @@ fn deletes_the_rows_of_one_signal_and_leaves_the_others() {
 }
 
 #[test]
+fn retention_of_the_spans_deletes_their_summaries_and_the_keys_left_without_spans() {
+    let directory = tempfile::tempdir().unwrap();
+    write_batches(
+        directory.path(),
+        vec![
+            records(
+                "old",
+                Vec::new(),
+                vec![span(three_days_ago(), "GET /")],
+                Vec::new(),
+            ),
+            records("api", Vec::new(), vec![span(now(), "GET /")], Vec::new()),
+        ],
+    );
+    delete_past_retention(directory.path(), |config| {
+        config.traces_retention_days = days(2);
+    });
+    for table in [
+        "span_minute_summaries",
+        "span_hour_summaries",
+        "span_summary_keys",
+    ] {
+        assert_eq!(
+            count_rows(directory.path(), &format!("SELECT count(*) FROM {table}")),
+            1,
+            "{table}"
+        );
+    }
+    let services = reader_of_the_week(directory.path())
+        .list_services(HOUR, 10)
+        .unwrap();
+    let names: Vec<&str> = services
+        .services
+        .iter()
+        .map(|service| service.service.as_str())
+        .collect();
+    assert_eq!(names, ["api"]);
+}
+
+#[test]
 fn a_deleted_log_no_longer_matches_a_full_text_search() {
     let directory = tempfile::tempdir().unwrap();
     write_batches(

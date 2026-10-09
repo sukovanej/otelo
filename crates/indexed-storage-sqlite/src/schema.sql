@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS spans (
   -- 8 bytes. NULL for a root span.
   parent_span_id BLOB,
   stable_attribute_set_id INTEGER NOT NULL REFERENCES stable_attribute_sets (id),
+  -- The summary the span adds to, so a query reads the spans of only the summaries that cannot
+  -- answer it.
+  span_summary_key_id INTEGER NOT NULL REFERENCES span_summary_keys (id),
   -- The OpenTelemetry span kind: 0 unspecified, 1 internal, 2 server, 3 client,
   -- 4 producer, 5 consumer.
   kind INTEGER NOT NULL,
@@ -126,6 +129,51 @@ CREATE INDEX IF NOT EXISTS spans_trace_id ON spans (trace_id);
 CREATE INDEX IF NOT EXISTS spans_started_at ON spans (started_at);
 CREATE INDEX IF NOT EXISTS spans_stable_attribute_set_id_started_at
   ON spans (stable_attribute_set_id, started_at);
+CREATE INDEX IF NOT EXISTS spans_span_summary_key_id_started_at
+  ON spans (span_summary_key_id, started_at);
+
+-- The spans that a summary adds up share these: everything a query of the summaries can filter
+-- or group by.
+CREATE TABLE IF NOT EXISTS span_summary_keys (
+  id INTEGER PRIMARY KEY,
+  -- xxh3 of the other columns.
+  identity_hash INTEGER NOT NULL UNIQUE,
+  -- The service and the name of the spans.
+  record_group_id INTEGER NOT NULL REFERENCES record_groups (id),
+  kind INTEGER NOT NULL,
+  status_code INTEGER NOT NULL,
+  -- A JSON object from the attribute_keys id to the value, of the attributes the OpenTelemetry
+  -- semantic conventions group a metric by.
+  summarized_attributes TEXT NOT NULL,
+  -- A JSON array of the attribute_keys ids of the other attributes the spans had.
+  unsummarized_attribute_key_ids TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS span_minute_summaries (
+  span_summary_key_id INTEGER NOT NULL REFERENCES span_summary_keys (id),
+  -- The start of the minute, in Unix nanoseconds.
+  start_at INTEGER NOT NULL,
+  span_count INTEGER NOT NULL,
+  duration_sum_ns INTEGER NOT NULL,
+  duration_min_ns INTEGER NOT NULL,
+  duration_max_ns INTEGER NOT NULL,
+  -- The counts of an exponential histogram of the durations at scale 6, as varints: the count
+  -- of zero durations, then pairs of the bucket index after the one before and its count.
+  duration_histogram BLOB NOT NULL,
+  PRIMARY KEY (span_summary_key_id, start_at)
+) WITHOUT ROWID;
+
+-- The columns are those of span_minute_summaries, for an hour.
+CREATE TABLE IF NOT EXISTS span_hour_summaries (
+  span_summary_key_id INTEGER NOT NULL REFERENCES span_summary_keys (id),
+  start_at INTEGER NOT NULL,
+  span_count INTEGER NOT NULL,
+  duration_sum_ns INTEGER NOT NULL,
+  duration_min_ns INTEGER NOT NULL,
+  duration_max_ns INTEGER NOT NULL,
+  duration_histogram BLOB NOT NULL,
+  PRIMARY KEY (span_summary_key_id, start_at)
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS metric_series (
   id INTEGER PRIMARY KEY,

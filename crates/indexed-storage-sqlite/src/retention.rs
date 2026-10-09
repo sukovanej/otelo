@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use otelo_query::Signal;
-use rusqlite::params;
+use rusqlite::{Transaction, params};
 
 use crate::attribute_encoding::RecordGroupId;
 use crate::catalog::AttributeOwner;
@@ -9,6 +9,7 @@ use crate::day::Day;
 use crate::progress::Progress;
 use crate::rollup::SummaryTable;
 use crate::series::{MetricSeriesId, ResourceId};
+use crate::span_summary::SPAN_SUMMARY_TABLES;
 use crate::telemetry_file::TelemetryFile;
 
 // Small transactions keep the write-ahead log small, and a batch waits for one at most.
@@ -72,6 +73,11 @@ impl TelemetryFile {
         if deleted_spans == MAX_DELETED_ROWS_PER_TRANSACTION {
             return Ok(Progress::MoreIsDue);
         }
+        if self.delete_span_summaries_before(oldest_retained_days.traces.start_at())?
+            == Progress::MoreIsDue
+        {
+            return Ok(Progress::MoreIsDue);
+        }
         if self.delete_metric_rows_before(oldest_retained_days.metrics.start_at())?
             == Progress::MoreIsDue
         {
@@ -103,6 +109,26 @@ impl TelemetryFile {
             tracing::debug!(table, deleted_rows, "deleted rows past the retention");
         }
         Ok(deleted_rows)
+    }
+
+    fn delete_span_summaries_before(&self, oldest_retained_at: i64) -> anyhow::Result<Progress> {
+        for table in SPAN_SUMMARY_TABLES {
+            let deleted_rows = self.connection().execute(
+                &format!(
+                    "DELETE FROM {table}
+                     WHERE (span_summary_key_id, start_at) IN (
+                       SELECT summary.span_summary_key_id, summary.start_at
+                       FROM {table} summary
+                       WHERE summary.start_at < ?1
+                       LIMIT {MAX_DELETED_ROWS_PER_TRANSACTION})"
+                ),
+                [oldest_retained_at],
+            )?;
+            if deleted_rows == MAX_DELETED_ROWS_PER_TRANSACTION {
+                return Ok(Progress::MoreIsDue);
+            }
+        }
+        Ok(Progress::CaughtUp)
     }
 
     // One series at a time, so each DELETE reads the primary key.
@@ -180,6 +206,7 @@ impl TelemetryFile {
             "DELETE FROM interned_attribute_values WHERE newest_record_day < ?1",
             [oldest_retained_days.logs.min(oldest_retained_days.traces)],
         )?;
+        delete_unreferenced_span_summary_keys(&transaction)?;
         transaction.execute(
             "DELETE FROM attribute_key_profiles AS attribute_key_profile
              WHERE NOT EXISTS (SELECT 1
@@ -194,6 +221,9 @@ impl TelemetryFile {
                  WHERE NOT EXISTS (SELECT 1
                                    FROM stable_attribute_sets stable_attribute_set
                                    WHERE stable_attribute_set.record_group_id = record_group.id)
+                   AND NOT EXISTS (SELECT 1
+                                   FROM span_summary_keys span_summary_key
+                                   WHERE span_summary_key.record_group_id = record_group.id)
                  RETURNING id",
             )?
             .query_map([], |row| row.get(0))?
@@ -211,25 +241,7 @@ impl TelemetryFile {
             )?
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
-        for owner in [
-            AttributeOwner::Log,
-            AttributeOwner::Span,
-            AttributeOwner::MetricSeries,
-            AttributeOwner::Resource,
-        ] {
-            let oldest_retained_day = oldest_retained_days.of_attribute_owner(owner);
-            for table in ["attribute_key_counts", "attribute_value_counts"] {
-                transaction
-                    .prepare_cached(&format!(
-                        "DELETE FROM {table} WHERE attribute_owner = ?1 AND day < ?2"
-                    ))?
-                    .execute(params![owner.name(), oldest_retained_day])?;
-            }
-        }
-        transaction.execute(
-            "DELETE FROM span_name_counts WHERE day < ?1",
-            [oldest_retained_days.traces],
-        )?;
+        delete_counts_before(&transaction, oldest_retained_days)?;
         transaction.commit()?;
         if !deleted_series_ids.is_empty() || !deleted_resource_ids.is_empty() {
             tracing::debug!(
@@ -276,4 +288,48 @@ impl TelemetryFile {
             .connection()
             .pragma_query_value(None, "freelist_count", |row| row.get(0))?)
     }
+}
+
+// A key outlives its spans by its summaries, and its record group outlives it.
+fn delete_unreferenced_span_summary_keys(transaction: &Transaction) -> anyhow::Result<()> {
+    transaction.execute(
+        "DELETE FROM span_summary_keys AS span_summary_key
+         WHERE NOT EXISTS (SELECT 1
+                           FROM spans span
+                           WHERE span.span_summary_key_id = span_summary_key.id)
+           AND NOT EXISTS (SELECT 1
+                           FROM span_minute_summaries summary
+                           WHERE summary.span_summary_key_id = span_summary_key.id)
+           AND NOT EXISTS (SELECT 1
+                           FROM span_hour_summaries summary
+                           WHERE summary.span_summary_key_id = span_summary_key.id)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn delete_counts_before(
+    transaction: &Transaction,
+    oldest_retained_days: OldestRetainedDays,
+) -> anyhow::Result<()> {
+    for owner in [
+        AttributeOwner::Log,
+        AttributeOwner::Span,
+        AttributeOwner::MetricSeries,
+        AttributeOwner::Resource,
+    ] {
+        let oldest_retained_day = oldest_retained_days.of_attribute_owner(owner);
+        for table in ["attribute_key_counts", "attribute_value_counts"] {
+            transaction
+                .prepare_cached(&format!(
+                    "DELETE FROM {table} WHERE attribute_owner = ?1 AND day < ?2"
+                ))?
+                .execute(params![owner.name(), oldest_retained_day])?;
+        }
+    }
+    transaction.execute(
+        "DELETE FROM span_name_counts WHERE day < ?1",
+        [oldest_retained_days.traces],
+    )?;
+    Ok(())
 }

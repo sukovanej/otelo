@@ -23,6 +23,7 @@ pub struct RecordOfGroup<'a> {
 }
 
 pub struct EncodedAttributes {
+    pub record_group_id: RecordGroupId,
     pub stable_attribute_set_id: StableAttributeSetId,
     pub interned_attributes: String,
     pub literal_attributes: String,
@@ -134,6 +135,7 @@ impl AttributeStore {
             record.day,
         )?;
         Ok(EncodedAttributes {
+            record_group_id: group_id,
             stable_attribute_set_id,
             interned_attributes: serde_json::to_string(&interned_value_ids)?,
             literal_attributes: serde_json::to_string(&literal_values)?,
@@ -195,6 +197,14 @@ impl AttributeStore {
             .profiler
             .find_group(group_id)
             .expect("the group was just inserted"))
+    }
+
+    pub fn find_key_id(
+        &mut self,
+        connection: &Connection,
+        key: &str,
+    ) -> anyhow::Result<AttributeKeyId> {
+        find_or_insert_key_id(connection, &mut self.key_ids, key)
     }
 
     fn find_or_insert_interned_value(
