@@ -115,6 +115,9 @@ erDiagram
   metric_series ||--o{ metric_points : "metric_series_id"
   metric_series ||--o{ metric_minute_summaries : "metric_series_id"
   metric_series ||--o{ metric_hour_summaries : "metric_series_id"
+  span_summary_keys ||--o{ spans : "span_summary_key_id"
+  span_summary_keys ||--o{ span_minute_summaries : "span_summary_key_id"
+  span_summary_keys ||--o{ span_hour_summaries : "span_summary_key_id"
 
   resources {
     INTEGER id PK
@@ -139,6 +142,7 @@ erDiagram
     BLOB span_id "8 bytes"
     BLOB parent_span_id "8 bytes, NULL for a root"
     INTEGER resource_id FK
+    INTEGER span_summary_key_id FK
     TEXT name
     INTEGER kind "OTel span kind"
     INTEGER started_at "Unix ns"
@@ -146,6 +150,33 @@ erDiagram
     INTEGER status_code "OTel status code"
     TEXT attributes "JSON object"
     TEXT events "JSON array"
+  }
+  span_summary_keys {
+    INTEGER id PK
+    INTEGER identity_hash "xxh3 of the other columns, UNIQUE"
+    INTEGER record_group_id FK "the service and the span name"
+    INTEGER kind "OTel span kind"
+    INTEGER status_code "OTel status code"
+    TEXT summarized_attributes "JSON object of attribute_keys id to value"
+    TEXT unsummarized_attribute_key_ids "JSON array of the other attribute_keys ids"
+  }
+  span_minute_summaries {
+    INTEGER span_summary_key_id PK
+    INTEGER start_at PK "Unix ns"
+    INTEGER span_count
+    INTEGER duration_sum_ns
+    INTEGER duration_min_ns
+    INTEGER duration_max_ns
+    BLOB duration_histogram "scale 6, varints"
+  }
+  span_hour_summaries {
+    INTEGER span_summary_key_id PK
+    INTEGER start_at PK "Unix ns"
+    INTEGER span_count
+    INTEGER duration_sum_ns
+    INTEGER duration_min_ns
+    INTEGER duration_max_ns
+    BLOB duration_histogram "scale 6, varints"
   }
   metric_series {
     INTEGER id PK
@@ -277,6 +308,18 @@ The indexer sums the points of each series up by the minute in `metric_minute_su
 - A row is written with its key, the series and the start, so summarizing a step again gives the same row.
 - The logic that sums points up by step is one type in `otelo-indexed-storage`. The query of the raw points and the rollups both use it, so a minute of summaries equals a minute of raw points.
 
+## Span summaries
+
+The indexer adds each span to a summary of the spans like it, by the minute in `span_minute_summaries` and by the hour in `span_hour_summaries`, so the services, a service, its routes and database queries, and a span widget read the summaries and not every span of the range.
+
+- A summary key is the record group of the span, its service and name, its kind and status, the values of the attributes the OpenTelemetry semantic conventions group the duration metrics of HTTP, databases, RPC, and messaging by, and the names of its other attributes. The list is `SUMMARY_DIMENSION_KEYS` in `telemetry_file.rs`: `http.request.method`, `http.route`, `http.response.status_code`, `error.type`, `server.address`, `db.system.name`, `db.namespace`, `db.operation.name`, `db.collection.name`, `db.query.text`, and the rest. A port, a size, or an id is not on it, so a week of mudro's 333,370 spans makes 901 keys.
+- Each span holds the id of its key in `spans.span_summary_key_id`, indexed with the time.
+- A summary row holds the count, the sum, the minimum, and the maximum of the durations, and an exponential histogram of them at scale 6. A bucket grows by 2^(1/64), so a percentile, the middle of its bucket, is off by 0.6% at most. The indexer writes the rows in the transaction of the spans, so they are never behind them, and adds a late span to the row of its minute.
+- A query of spans matches its filter and grouping against each key. A key it misses is skipped. A key whose fields answer the query reads its rows: whole hours from the hours when the step is a whole number of hours, whole minutes from the minutes, and the spans of the minutes the range cuts. A key that left out a field the query reads, such as `url.path`, reads its spans through the index on `span_summary_key_id`. `has(x)` needs only the names, so a summary answers it. Past 2,000 such keys, the query reads every span of the range.
+- The reader keeps the keys decoded, shared by every reader of the daemon, and reads only the new ones, or all of them again once retention deleted one.
+- `/api/traces` reads only the spans of the keys its filter can match, so the failed traces of a service read its failed spans.
+- For a SQL `db.system.name`, or the older `db.system`, the indexer replaces the literals of `db.query.text` and `db.statement` with `?` and collapses a list of them, `IN (1, 2, 3)` into `IN (?)`, as the semantic conventions ask of instrumentation. A query whose values are bound keeps its text. The journal keeps the text as the app sent it.
+
 ## Retention
 
 Each signal has its own setting in the indexer's `Config`: `logs_retention_days`, `traces_retention_days`, and `metrics_retention_days`, 7 days by default. A day counts whole, so 7 days keep today and the 6 days before it. The indexer skips a record older than the retention of its signal, or more than a day ahead, and a whole frame received before the retention.
@@ -286,7 +329,7 @@ When the daemon starts, and then once an hour, the indexer deletes what is past 
 | Signal | Deletes |
 |---|---|
 | logs | `logs` by `logged_at`, through its index. The trigger deletes the row from `log_body_search`. |
-| traces | `spans` by `started_at`, through its index |
+| traces | `spans` by `started_at`, through its index, then the two span summary tables by `start_at`, then the summary keys that no span or summary refers to, before their record groups |
 | metrics | `metric_points` and the two summary tables, one series at a time by its primary key, then the series that have no rows left |
 
 - A resource that no row refers to is deleted with the metrics. `logs` and `spans` have an index on `resource_id` and the time, so the check reads an index and not the tables.
@@ -306,7 +349,7 @@ When the daemon starts, and then once an hour, the indexer deletes what is past 
 The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serves. The Rust types of the daemon make its OpenAPI spec, which `otelo openapi` prints. `packages/api` of the UI keeps it in `openapi.json` and generates its TypeScript types from it with `mise run api:generate`. A Rust test fails when `openapi.json` is behind the spec, and a test of `packages/api` fails when the types are behind `openapi.json`, so a change to the API reaches the UI's types. Every CLI command prints a table to a terminal and JSON otherwise, and `--json` and `--table` override that. Every query has a row limit. A cut result says so and names the flag that narrows it. Agents read what humans read, so the output stays small by default:
 
 - `otelo logs` groups lines by message template first, with counts, and prints samples. `--raw` prints lines. `/api/logs/counts` counts the lines a query keeps over the range and by step, and groups them by `service`, `level`, attributes, or `resource.<key>`, each group with its own steps. The groups rank by their count of lines, the most first, or the fewest first with `order=lowest`, and the limit keeps the first. A first read counts the lines of each group, and a second tallies the steps of the groups the limit kept, both in one read transaction so the steps of a group add up to its count. A `level` groups every severity number of it, so `info` holds 9 to 12.
-- `otelo spans` lists spans. `otelo spans --by` and `/api/spans/groups` group the spans a query keeps by the values of attributes, `service`, `name`, or `resource.<key>`, with the count, errors, total time, and p50, p95, and p99 latency of each group, and the name and the attributes of its newest span. The groups rank by `rank`: the total `time` of their spans, the default, or their `count`, `errors`, `error_rate`, `p50`, `p95`, or `p99`. `order=lowest` puts the lowest first, and the limit keeps the first, so `rank=p95&order=lowest` names the fastest routes of all the routes and not of the busiest. The daemon ranks every group it tallied, before the limit, and `otelo spans --by` takes `--rank` and `--order`. A group lacks a name its spans lack. With `group_buckets`, each group also has the numbers of each step. A second read of the spans tallies them for the groups the limit kept, in the same read transaction as the first, so the memory grows with the limit and not with the count of groups. An answer with steps for each group, here and in `/api/logs/counts`, keeps fewer groups than the limit when their steps would pass 100,000, so a fine step over a long range cannot ask for millions of buckets. The answer has the same numbers for all the spans, over the range and by step. A value keeps its JSON type, so a bool is `true` and not `1`. The groups take the attribute values as the spans have them, so an app that puts values into `db.query.text` instead of parameters gets a group for each value. `otelo traces` lists the traces that have a matching span, by root span, duration, and error flag. `otelo spans` and `otelo traces` list the newest first, and `--sort oldest`, `longest`, or `shortest` and the `sort` of `/api/spans` and `/api/traces` change the order, so the limit keeps the slowest of the range and not the slowest of the newest. A trace sorts by its root span, and a tie goes newest first. `otelo trace <id>` prints the span tree.
+- `otelo spans` lists spans. `otelo spans --by` and `/api/spans/groups` group the spans a query keeps by the values of attributes, `service`, `name`, or `resource.<key>`, with the count, errors, total time, and p50, p95, and p99 latency of each group, and the name and the attributes of its newest span. The groups rank by `rank`: the total `time` of their spans, the default, or their `count`, `errors`, `error_rate`, `p50`, `p95`, or `p99`. `order=lowest` puts the lowest first, and the limit keeps the first, so `rank=p95&order=lowest` names the fastest routes of all the routes and not of the busiest. The daemon ranks every group it tallied, before the limit, and `otelo spans --by` takes `--rank` and `--order`. A group lacks a name its spans lack. With `group_buckets`, each group also has the numbers of each step. A second read of the spans tallies them for the groups the limit kept, in the same read transaction as the first, so the memory grows with the limit and not with the count of groups. An answer with steps for each group, here and in `/api/logs/counts`, keeps fewer groups than the limit when their steps would pass 100,000, so a fine step over a long range cannot ask for millions of buckets. The answer has the same numbers for all the spans, over the range and by step. A value keeps its JSON type, so a bool is `true` and not `1`. The groups take the attribute values as the spans have them. The indexer takes the literals out of the text of a SQL query, so an app that puts values into `db.query.text` instead of parameters still gets a group for each query, as the Span summaries section says. `otelo traces` lists the traces that have a matching span, by root span, duration, and error flag. `otelo spans` and `otelo traces` list the newest first, and `--sort oldest`, `longest`, or `shortest` and the `sort` of `/api/spans` and `/api/traces` change the order, so the limit keeps the slowest of the range and not the slowest of the newest. A trace sorts by its root span, and a tie goes newest first. `otelo trace <id>` prints the span tree.
 - `otelo metrics` lists the series. `otelo metric <name>` prints one metric at a step that fits the range: the count, minimum, average, maximum, and last value of each step for a `gauge` and an `updown`, the rate for a `counter`, and the percentiles for a `histogram`.
 - A range of 6 hours at most reads the raw points. A range of 14 days at most reads the summaries by the minute, and a longer one those by the hour. `--resolution raw`, `1m`, or `1h` picks one. A step of summaries is rounded up to whole minutes or hours, and the answer says which step and which points it read.
 - The rate of a counter is its increase between two neighbouring points, divided by the time between them and not by the step, so a 30-second step over points a minute apart stays right. A cumulative value that goes down is a restart, and the increase counts from zero. The query also reads the 5 minutes before the range, so the first step has a point to count from.
@@ -314,7 +357,7 @@ The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serv
 - Two exponential points always merge. Both go down to the lower scale, where each step joins neighbouring buckets in pairs. The API returns every distribution with explicit bounds, and joins the buckets of an exponential one until 64 are left. The percentiles are estimated before that. An explicit and an exponential point in one step do not merge, and the step keeps the newer one.
 - `otelo metric --by` and the `by` of `/api/metrics/{name}` group the series of a metric by attributes, `service`, or `resource.<key>`, and combine the series of a group in each step: a `gauge` takes their average, an `updown` adds them up, a `counter` adds up its rates, and a `histogram` merges its buckets. The minimum and the maximum of series that add up are the sums of theirs, since their points do not line up in time. A series with no point in a step adds nothing to it. Series of different kinds or units never combine, and histogram points of different explicit bounds do not merge, so the step keeps one of them.
 - The groups come highest first, or lowest first with `order=lowest` and `--order lowest`, by their value over the range: the average of a `gauge` and an `updown`, the rate of a `counter`, and the sum of the values of a `histogram`, which for a duration is the total time. `--top N` keeps the first N groups and combines the rest into one group `other`, and `--limit` drops the rest. Without `--by` each series is its own group, so `otelo metric process.memory.usage --top 5` names the 5 services with the most memory. A group needs every series of the metric, so a query reads up to 2,000 series and says so when it stops there.
-- `otelo services` lists the services that sent spans or logs, the most requests first, with their requests, errors, p50, p95, and p99 latency, spans of any kind, logs, and error logs. A service that sent spans but no requests is listed with none, and its page shows it instead of saying it sent nothing. `otelo service <name>` prints the same for one service, its routes, and its database queries. A request is a span of the server kind with `http.request.method`. The routes are its requests grouped by `http.request.method` and `http.route`, and the database queries its spans with `db.system.name` grouped by `db.system.name`, `db.namespace`, and `db.query.text`, both from `/api/spans/groups`. The percentiles come from buckets that each grow by 2%, so an estimate is off by 1% at most and the memory does not grow with the count of spans. `--buckets` adds the numbers of each step.
+- `otelo services` lists the services that sent spans or logs, the most requests first, with their requests, errors, p50, p95, and p99 latency, spans of any kind, logs, and error logs. A service that sent spans but no requests is listed with none, and its page shows it instead of saying it sent nothing. `otelo service <name>` prints the same for one service, its routes, and its database queries. A request is a span of the server kind with `http.request.method`. The routes are its requests grouped by `http.request.method` and `http.route`, and the database queries its spans with `db.system.name` grouped by `db.system.name`, `db.namespace`, and `db.query.text`, both from `/api/spans/groups`. The numbers come from the span summaries, and the percentiles from buckets that each grow by 2^(1/64), so an estimate is off by 0.6% at most and the memory does not grow with the count of spans. `--buckets` adds the numbers of each step.
 
 The logs page of the UI takes the same query, with completion from `/api/complete`, and a range of a preset or a custom `since` and `until`. It shows lines, or the message templates with their counts and samples. A line opens to its attributes and its resource, and a button next to a value adds `key = value` or `key != value` to the query. A template adds its fixed words to the query as `body ~ "…"` to show its lines. The page says which compared attributes have no index and can add one. Live mode reloads every 5 seconds. The query, the range, and the view live in the URL, so a link opens the same page.
 
