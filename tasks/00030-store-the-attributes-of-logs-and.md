@@ -1,6 +1,8 @@
 ---
 status: in_review
 created: 2026-10-08T22:05:18Z
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/69
 ---
 # Store the attributes of logs and spans by how often their values repeat
 
