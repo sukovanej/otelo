@@ -31,7 +31,7 @@ For each group and key, the indexer keeps an exact set of up to 64 value hashes 
 - Literal: the rest. A number is stable or literal, never interned: an interned number costs a value row and its index entry, about 30 B, to save 2 to 4 B on the row.
 - A key the group has not seen yet: interned for a string, literal for a number, until the next classification.
 
-The indexer classifies a group at 32 records, again each time its count doubles, and then at least every 4,096 records or every hour of records. It also classifies at once when a stable key passes 64 distinct values since the last classification, or when the stable sets of the group pass the cap. The counts start over at each classification, so a profile describes recent records. A key turns stable only at 64 distinct values or fewer and stops being stable only past 128, so a key near the limit does not flip back and forth.
+The indexer classifies a group at 32 records, again each time its count doubles, and then at least every 4,096 records or every hour of records. It also classifies at once when a stable key passes 128 distinct values since the last classification, by its HyperLogLog, or when the stable sets of the group pass the cap. A classification happens in the transaction of the records it follows, so `attribute_key_profiles` never disagrees with the rows after a crash. The counts start over at each classification, so a profile describes recent records. A key turns stable only at 64 distinct values or fewer and stops being stable only past 128, so a key near the limit does not flip back and forth.
 
 The profiler measures time by the `received_at` of the frames, not the clock, so `otelo reindex` makes the same choices from the same journal.
 
