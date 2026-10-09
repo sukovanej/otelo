@@ -1,5 +1,5 @@
 ---
-status: in_review
+status: done
 created: 2026-10-08T22:05:18Z
 pull_requests:
 - https://github.com/sukovanej/otelo/pull/69
