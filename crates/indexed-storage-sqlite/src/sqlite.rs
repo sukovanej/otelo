@@ -16,6 +16,7 @@ use crate::day::Day;
 use crate::indexes::Indexes;
 use crate::lock::TelemetryLock;
 use crate::query::SpanSummaryKeyCache;
+use crate::retention::RetentionDays;
 use crate::telemetry_file::{TELEMETRY_FILE_NAME, TelemetryFile};
 use crate::version::OtherStorageVersion;
 use crate::{Config, FrameMapper, Indexer, Reader, index_journal_until_caught_up};
@@ -42,11 +43,12 @@ pub struct Sqlite {
 impl Sqlite {
     pub fn open(
         data_directory: &Path,
+        retention_days: RetentionDays,
         indexed_attributes: BTreeSet<IndexedAttribute>,
     ) -> anyhow::Result<Self> {
         limit_sqlite_heap();
         let telemetry_lock = TelemetryLock::acquire(data_directory)?;
-        let config = build_config(data_directory, indexed_attributes);
+        let config = build_config(data_directory, retention_days, indexed_attributes);
         if let Some(other_version) = delete_telemetry_of_other_storage_version(&config.directory)? {
             tracing::warn!("{other_version}, so the indexer builds it again from the journal");
         }
@@ -81,13 +83,18 @@ impl Sqlite {
 
 pub fn reindex_from_journal(
     telemetry_lock: &TelemetryLock,
+    retention_days: RetentionDays,
     indexed_attributes: BTreeSet<IndexedAttribute>,
     journal: Arc<dyn Journal>,
     map_frame: FrameMapper,
     mut report_progress: impl FnMut(ReindexProgress),
 ) -> anyhow::Result<()> {
     limit_sqlite_heap();
-    let config = build_config(telemetry_lock.data_directory(), indexed_attributes);
+    let config = build_config(
+        telemetry_lock.data_directory(),
+        retention_days,
+        indexed_attributes,
+    );
     if let Some(other_version) = delete_telemetry_of_other_storage_version(&config.directory)? {
         report_progress(ReindexProgress::DeletedOtherStorageVersion {
             found_version: other_version.found_version,
@@ -120,8 +127,15 @@ fn limit_sqlite_heap() {
     }
 }
 
-fn build_config(data_directory: &Path, indexed_attributes: BTreeSet<IndexedAttribute>) -> Config {
-    let mut config = Config::new(data_directory.join(TELEMETRY_DIRECTORY_NAME));
+fn build_config(
+    data_directory: &Path,
+    retention_days: RetentionDays,
+    indexed_attributes: BTreeSet<IndexedAttribute>,
+) -> Config {
+    let mut config = Config::new(
+        data_directory.join(TELEMETRY_DIRECTORY_NAME),
+        retention_days,
+    );
     config.indexes = Indexes::new(indexed_attributes);
     config
 }

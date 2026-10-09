@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
@@ -18,11 +17,10 @@ use tokio::sync::watch;
 use crate::day::Day;
 use crate::indexes::{Indexes, VersionedAttributes};
 use crate::progress::Progress;
-use crate::retention::OldestRetainedDays;
+use crate::retention::{OldestRetainedDays, RetentionDays};
 use crate::series::MAX_SERIES_PER_METRIC;
 use crate::telemetry_file::{ResourceRecords, TelemetryFile, rows_of_points};
 
-const DEFAULT_RETENTION_DAYS: NonZeroU16 = NonZeroU16::new(7).expect("seven is not zero");
 const REJECTION_REPORT_INTERVAL: Duration = Duration::from_mins(1);
 const RETENTION_INTERVAL: Duration = Duration::from_hours(1);
 const ROLLUP_INTERVAL: Duration = Duration::from_mins(1);
@@ -38,33 +36,23 @@ pub type FrameMapper = Arc<dyn Fn(Signal, &[u8]) -> anyhow::Result<Batch> + Send
 #[derive(Clone)]
 pub struct Config {
     pub directory: PathBuf,
-    pub logs_retention_days: NonZeroU16,
-    pub traces_retention_days: NonZeroU16,
-    pub metrics_retention_days: NonZeroU16,
+    pub retention_days: RetentionDays,
     pub indexes: Indexes,
 }
 
 impl Config {
     #[must_use]
-    pub fn new(directory: PathBuf) -> Self {
+    pub fn new(directory: PathBuf, retention_days: RetentionDays) -> Self {
         Self {
             directory,
-            logs_retention_days: DEFAULT_RETENTION_DAYS,
-            traces_retention_days: DEFAULT_RETENTION_DAYS,
-            metrics_retention_days: DEFAULT_RETENTION_DAYS,
+            retention_days,
             indexes: Indexes::new(BTreeSet::new()),
         }
     }
 
     #[must_use]
     pub fn oldest_retained_days(&self, today: Day) -> OldestRetainedDays {
-        let oldest_retained_day =
-            |retention_days: NonZeroU16| today.add_days(1 - i64::from(retention_days.get()));
-        OldestRetainedDays {
-            logs: oldest_retained_day(self.logs_retention_days),
-            traces: oldest_retained_day(self.traces_retention_days),
-            metrics: oldest_retained_day(self.metrics_retention_days),
-        }
+        self.retention_days.oldest_retained_days(today)
     }
 }
 

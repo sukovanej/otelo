@@ -11,6 +11,7 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::own::{self, Destination};
+use crate::retention::Retention;
 use crate::ui;
 use otelo_api::{self as api, Api};
 use otelo_host::{Collector, HostIdentity};
@@ -89,6 +90,7 @@ pub fn run_daemon(args: ServeArgs) -> anyhow::Result<()> {
         "--unsafe-no-auth needs a loopback address for --listen, not {}",
         args.api_addr
     );
+    let retention = Retention::from_defaults()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .max_blocking_threads(MAX_BLOCKING_THREADS)
@@ -122,7 +124,7 @@ pub fn run_daemon(args: ServeArgs) -> anyhow::Result<()> {
                     shutdown.cancel();
                 }
             });
-            let result = serve_until_shutdown(args, listeners, host, shutdown).await;
+            let result = serve_until_shutdown(args, retention, listeners, host, shutdown).await;
             if let Some(own_telemetry) = own_telemetry {
                 tokio::task::spawn_blocking(move || own_telemetry.shut_down_exporters())
                     .await
@@ -134,6 +136,7 @@ pub fn run_daemon(args: ServeArgs) -> anyhow::Result<()> {
 
 async fn serve_until_shutdown(
     args: ServeArgs,
+    retention: Retention,
     listeners: Listeners,
     host: HostIdentity,
     shutdown: CancellationToken,
@@ -151,13 +154,18 @@ async fn serve_until_shutdown(
             args.data_dir.display()
         );
     }
-    let storage = Sqlite::open(&args.data_dir, state.indexed_attributes()?)?;
+    let storage = Sqlite::open(
+        &args.data_dir,
+        retention.index_days(),
+        state.indexed_attributes()?,
+    )?;
     let OpenedJournal {
         journal,
         threads: journal_threads,
         synced_ends,
     } = JournalFiles::open(otelo_journal_files::Config::new(
         args.data_dir.join(JOURNAL_DIRECTORY_NAME),
+        retention.journal_days(),
     ))?;
     let journal: Arc<dyn Journal> = journal;
     let meters = Arc::new(PipelineMeters::default());

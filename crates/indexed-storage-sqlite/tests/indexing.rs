@@ -57,7 +57,12 @@ fn wait_for_indexing(
 #[test]
 fn the_indexer_reports_how_far_it_has_read_until_it_catches_up() {
     let data_directory = tempfile::tempdir().unwrap();
-    let storage = Sqlite::open(data_directory.path(), BTreeSet::new()).unwrap();
+    let storage = Sqlite::open(
+        data_directory.path(),
+        common::INDEX_RETENTION_DAYS,
+        BTreeSet::new(),
+    )
+    .unwrap();
     let opened = common::open_journal(data_directory.path());
     let hour_ago = now_unix_nanos() - HOUR_NS;
     let frames: Vec<(u32, i64)> = (0..FRAME_COUNT)

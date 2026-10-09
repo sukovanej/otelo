@@ -7,6 +7,7 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 
 use common::{Daemon, StopSignal, send_get_request, start_daemon, stop_daemon};
+use otelo::retention::Retention;
 use otelo_indexed_storage::{
     Attributes, Log, Metric, NumberPoint, PipelineMeters, Points, Records, Resource, Severity,
     Span, SpanId, SpanKind, SpanStatus, TraceContext, TraceId, now_unix_nanos,
@@ -96,8 +97,10 @@ fn write_telemetry(data: &Path) {
     };
     // The frame lives in a journal of its own, which the daemon does not read again.
     let journal_directory = tempfile::tempdir().unwrap();
+    let retention = Retention::from_defaults().unwrap();
     let opened = JournalFiles::open(otelo_journal_files::Config::new(
         journal_directory.path().into(),
+        retention.journal_days(),
     ))
     .unwrap();
     let ticket = opened
@@ -112,7 +115,7 @@ fn write_telemetry(data: &Path) {
         .unwrap();
     let map_frame: FrameMapper = Arc::new(move |_, _| Ok(vec![records.clone()]));
     index_journal_until_caught_up(
-        Config::new(data.join("telemetry")),
+        Config::new(data.join("telemetry"), retention.index_days()),
         opened.journal,
         map_frame,
         Arc::new(PipelineMeters::default()),

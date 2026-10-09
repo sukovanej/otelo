@@ -118,7 +118,7 @@ impl Fixture {
             &get_users,
         )];
         common::index_batches(
-            Config::new(directory.path().to_owned()),
+            Config::new(directory.path().to_owned(), common::INDEX_RETENTION_DAYS),
             vec![vec![
                 records("api", &json!({"host.name": "a"}), api_spans),
                 records("worker", &json!({"host.name": "b"}), worker_spans),

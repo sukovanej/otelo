@@ -101,7 +101,7 @@ fn open_reader_over_records() -> (tempfile::TempDir, Reader) {
         metrics: Vec::new(),
     };
     common::index_batches(
-        Config::new(directory.path().to_owned()),
+        Config::new(directory.path().to_owned(), common::INDEX_RETENTION_DAYS),
         vec![vec![records]],
     );
     let reader = Reader::open(

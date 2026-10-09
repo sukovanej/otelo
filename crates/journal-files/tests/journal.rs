@@ -1,5 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ use otelo_query::Signal;
 
 const NANOS_PER_HOUR: i64 = 3_600 * 1_000_000_000;
 const NANOS_PER_DAY: i64 = 24 * NANOS_PER_HOUR;
+const RETENTION_DAYS: NonZeroU16 = NonZeroU16::new(30).expect("thirty is not zero");
 
 fn now() -> i64 {
     i64::try_from(jiff::Timestamp::now().as_nanosecond()).unwrap()
@@ -19,7 +21,7 @@ fn still_open_after_a_restart() -> i64 {
 }
 
 fn open_journal(directory: &Path) -> (Arc<JournalFiles>, JournalThreads) {
-    let opened = JournalFiles::open(Config::new(directory.to_owned())).unwrap();
+    let opened = JournalFiles::open(Config::new(directory.to_owned(), RETENTION_DAYS)).unwrap();
     (opened.journal, opened.threads)
 }
 
@@ -277,7 +279,8 @@ async fn size_adds_up_the_segments_of_every_signal() {
 #[tokio::test]
 async fn each_sync_sends_its_end_to_the_indexer() {
     let directory = tempfile::tempdir().unwrap();
-    let opened = JournalFiles::open(Config::new(directory.path().to_owned())).unwrap();
+    let opened =
+        JournalFiles::open(Config::new(directory.path().to_owned(), RETENTION_DAYS)).unwrap();
     let received_at = now();
     append_log_request(&opened.journal, received_at, b"first").await;
     let frames = read_log_frames(&opened.journal, None);

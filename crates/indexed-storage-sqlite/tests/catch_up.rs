@@ -81,7 +81,12 @@ fn count_catch_ups(
 ) -> usize {
     logged_messages.0.lock().unwrap().clear();
     let data_directory = tempfile::tempdir().unwrap();
-    let storage = Sqlite::open(data_directory.path(), BTreeSet::new()).unwrap();
+    let storage = Sqlite::open(
+        data_directory.path(),
+        common::INDEX_RETENTION_DAYS,
+        BTreeSet::new(),
+    )
+    .unwrap();
     let opened = common::open_journal(data_directory.path());
     common::append_numbered_frames(
         opened.journal.as_ref(),

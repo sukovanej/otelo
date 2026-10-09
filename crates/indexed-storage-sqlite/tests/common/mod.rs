@@ -1,13 +1,24 @@
 #![allow(dead_code, reason = "each test file uses a part")]
 
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::sync::Arc;
 
 use otelo_indexed_storage::{Batch, PipelineMeters, PipelineReading, now_unix_nanos};
-use otelo_indexed_storage_sqlite::{Config, FrameMapper, index_journal_until_caught_up};
+use otelo_indexed_storage_sqlite::{
+    Config, FrameMapper, RetentionDays, index_journal_until_caught_up,
+};
 use otelo_journal::Journal;
 use otelo_journal_files::{JournalFiles, OpenedJournal};
 use otelo_query::Signal;
+
+pub const INDEX_RETENTION_DAYS: RetentionDays = RetentionDays {
+    logs: SEVEN_DAYS,
+    traces: SEVEN_DAYS,
+    metrics: SEVEN_DAYS,
+};
+pub const JOURNAL_RETENTION_DAYS: NonZeroU16 = NonZeroU16::new(30).expect("thirty is not zero");
+const SEVEN_DAYS: NonZeroU16 = NonZeroU16::new(7).expect("seven is not zero");
 
 // A frame holds the number of its batch, and the mapper hands the batch back.
 pub fn map_numbered_frames(batches: Vec<Batch>) -> FrameMapper {
@@ -36,7 +47,11 @@ pub fn append_numbered_frames(journal: &dyn Journal, signal: Signal, numbers: &[
 }
 
 pub fn open_journal(directory: &Path) -> OpenedJournal {
-    JournalFiles::open(otelo_journal_files::Config::new(directory.join("journal"))).unwrap()
+    JournalFiles::open(otelo_journal_files::Config::new(
+        directory.join("journal"),
+        JOURNAL_RETENTION_DAYS,
+    ))
+    .unwrap()
 }
 
 pub fn index_batches(config: Config, batches: Vec<Batch>) {

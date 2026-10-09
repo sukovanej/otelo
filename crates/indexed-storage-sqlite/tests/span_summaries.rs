@@ -36,7 +36,7 @@ fn span(span_id_byte: u8, started_at: i64, attributes: &Value) -> Span {
 
 fn write_spans(directory: &std::path::Path, spans: Vec<Span>) {
     common::index_batches(
-        Config::new(directory.to_owned()),
+        Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS),
         vec![vec![Records {
             resource: Resource {
                 service: "api".into(),

@@ -105,14 +105,14 @@ fn write_spans(directory: &Path, spans: Vec<Span>) {
 }
 
 fn write_spans_with_indexes(directory: &Path, spans: Vec<Span>, indexes: &Indexes) {
-    let mut config = Config::new(directory.to_owned());
+    let mut config = Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS);
     config.indexes = indexes.clone();
     common::index_batches_of_signal(config, Signal::Spans, vec![batch_of_spans(spans)]);
 }
 
 fn write_logs(directory: &Path, logs: Vec<Log>) {
     common::index_batches_of_signal(
-        Config::new(directory.to_owned()),
+        Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS),
         Signal::Logs,
         vec![batch_of_logs(logs)],
     );
@@ -608,7 +608,7 @@ fn an_hour_of_frames_classifies_a_quiet_group() {
         .collect();
     common::append_numbered_frames(opened.journal.as_ref(), Signal::Spans, &frames);
     index_journal_until_caught_up(
-        Config::new(directory.path().to_owned()),
+        Config::new(directory.path().to_owned(), common::INDEX_RETENTION_DAYS),
         opened.journal,
         common::map_numbered_frames(batches),
         Arc::new(PipelineMeters::default()),
@@ -800,9 +800,9 @@ fn retention_deletes_the_sets_and_values_that_only_old_records_have() {
     );
 
     // Logs and spans share the interned values, which stay for the longer of their retentions.
-    let mut config = Config::new(directory.path().to_owned());
-    config.traces_retention_days = NonZeroU16::new(2).unwrap();
-    config.logs_retention_days = NonZeroU16::new(2).unwrap();
+    let mut config = Config::new(directory.path().to_owned(), common::INDEX_RETENTION_DAYS);
+    config.retention_days.traces = NonZeroU16::new(2).unwrap();
+    config.retention_days.logs = NonZeroU16::new(2).unwrap();
     let mut file = TelemetryFile::open(directory.path()).unwrap();
     while file
         .delete_next_past_retention(config.oldest_retained_days(Day::today()))

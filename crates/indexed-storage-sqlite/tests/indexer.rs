@@ -79,7 +79,7 @@ fn an_indexer_that_stopped_mid_transaction_resumes_with_every_frame_once() {
         Ok(crashing_batches[number as usize].clone())
     });
     let crashed = std::thread::spawn({
-        let config = Config::new(telemetry_directory.clone());
+        let config = Config::new(telemetry_directory.clone(), common::INDEX_RETENTION_DAYS);
         let journal = Arc::clone(&opened.journal);
         move || {
             index_journal_until_caught_up(
@@ -96,7 +96,7 @@ fn an_indexer_that_stopped_mid_transaction_resumes_with_every_frame_once() {
     assert_eq!(read_log_bodies(&telemetry_directory).len(), 64);
 
     index_journal_until_caught_up(
-        Config::new(telemetry_directory.clone()),
+        Config::new(telemetry_directory.clone(), common::INDEX_RETENTION_DAYS),
         Arc::clone(&opened.journal) as _,
         common::map_numbered_frames(batches),
         Arc::new(PipelineMeters::default()),
@@ -125,7 +125,7 @@ fn skips_the_frames_received_before_the_retention() {
     );
     let meters = Arc::new(PipelineMeters::default());
     index_journal_until_caught_up(
-        Config::new(telemetry_directory.clone()),
+        Config::new(telemetry_directory.clone(), common::INDEX_RETENTION_DAYS),
         Arc::clone(&opened.journal) as _,
         common::map_numbered_frames(numbered_log_batches(3)),
         Arc::clone(&meters),
@@ -159,7 +159,7 @@ fn skips_a_frame_that_does_not_decode() {
     common::append_numbered_frames(opened.journal.as_ref(), Signal::Logs, &received_now(1));
     let meters = Arc::new(PipelineMeters::default());
     index_journal_until_caught_up(
-        Config::new(telemetry_directory.clone()),
+        Config::new(telemetry_directory.clone(), common::INDEX_RETENTION_DAYS),
         Arc::clone(&opened.journal) as _,
         common::map_numbered_frames(numbered_log_batches(1)),
         Arc::clone(&meters),
@@ -178,7 +178,7 @@ fn indexes_each_frame_once_the_journal_synced_it() {
     let opened = common::open_journal(directory.path());
     let meters = Arc::new(PipelineMeters::default());
     let indexer = Indexer::spawn(
-        Config::new(telemetry_directory.clone()),
+        Config::new(telemetry_directory.clone(), common::INDEX_RETENTION_DAYS),
         Arc::clone(&opened.journal) as _,
         opened.synced_ends,
         common::map_numbered_frames(numbered_log_batches(3)),
@@ -267,7 +267,7 @@ fn rolls_up_only_the_minutes_it_has_indexed_while_it_catches_up() {
         &numbered_received_ats,
     );
     let indexer = Indexer::spawn(
-        Config::new(telemetry_directory.clone()),
+        Config::new(telemetry_directory.clone(), common::INDEX_RETENTION_DAYS),
         Arc::clone(&opened.journal) as _,
         opened.synced_ends,
         common::map_numbered_frames(recorded_ats.into_iter().map(gauge_batch).collect()),

@@ -15,7 +15,6 @@ use crate::recovery::recover_segments;
 use crate::segment::SegmentDirectory;
 use crate::signal_log::SignalLog;
 
-const DEFAULT_RETENTION_DAYS: NonZeroU16 = NonZeroU16::new(30).expect("thirty is not zero");
 const NANOS_PER_DAY: i64 = 24 * 3_600 * 1_000_000_000;
 
 #[derive(Clone)]
@@ -26,10 +25,10 @@ pub struct Config {
 
 impl Config {
     #[must_use]
-    pub const fn new(directory: PathBuf) -> Self {
+    pub const fn new(directory: PathBuf, retention_days: NonZeroU16) -> Self {
         Self {
             directory,
-            retention_days: DEFAULT_RETENTION_DAYS,
+            retention_days,
         }
     }
 

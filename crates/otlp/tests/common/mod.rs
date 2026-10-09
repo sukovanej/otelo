@@ -1,12 +1,15 @@
 #![allow(dead_code, reason = "each test file uses a part")]
 
 use std::net::SocketAddr;
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::sync::Arc;
 
 use otelo_indexed_storage::query::{LogLine, PageRequest, SpanSort, TraceSpan};
 use otelo_indexed_storage::{Indexing, PipelineMeters, RangeQueries, TimeRange, now_unix_nanos};
-use otelo_indexed_storage_sqlite::{Config, FrameMapper, Indexer, Reader, TELEMETRY_FILE_NAME};
+use otelo_indexed_storage_sqlite::{
+    Config, FrameMapper, Indexer, Reader, RetentionDays, TELEMETRY_FILE_NAME,
+};
 use otelo_journal::{Journal, SyncedEndInbox};
 use otelo_journal_files::{JournalFiles, JournalThreads};
 use otelo_otlp::Intake;
@@ -17,6 +20,14 @@ use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+const INDEX_RETENTION_DAYS: RetentionDays = RetentionDays {
+    logs: SEVEN_DAYS,
+    traces: SEVEN_DAYS,
+    metrics: SEVEN_DAYS,
+};
+const JOURNAL_RETENTION_DAYS: NonZeroU16 = NonZeroU16::new(30).expect("thirty is not zero");
+const SEVEN_DAYS: NonZeroU16 = NonZeroU16::new(7).expect("seven is not zero");
 
 pub struct Receiver {
     pub runtime: Runtime,
@@ -40,9 +51,11 @@ pub struct TestJournal {
 
 impl TestJournal {
     pub fn open_in(directory: &Path) -> Self {
-        let opened =
-            JournalFiles::open(otelo_journal_files::Config::new(directory.join("journal")))
-                .unwrap();
+        let opened = JournalFiles::open(otelo_journal_files::Config::new(
+            directory.join("journal"),
+            JOURNAL_RETENTION_DAYS,
+        ))
+        .unwrap();
         Self {
             journal: opened.journal,
             threads: Some(opened.threads),
@@ -76,7 +89,7 @@ impl Receiver {
         let meters = Arc::new(PipelineMeters::default());
         let map_frame: FrameMapper = Arc::new(otelo_otlp::map::map_journal_frame);
         let indexer = Indexer::spawn(
-            Config::new(directory.to_owned()),
+            Config::new(directory.to_owned(), INDEX_RETENTION_DAYS),
             Arc::clone(&journal.journal),
             journal.synced_ends.take().unwrap(),
             map_frame,

@@ -139,7 +139,12 @@ fn a_reindex_answers_the_queries_as_the_live_indexing_did() {
     let live_directory = tempfile::tempdir().unwrap();
     let user_id = IndexedAttribute::new(IndexedSignal::Logs, "user.id").unwrap();
     let indexed_attributes = BTreeSet::from([user_id]);
-    let storage = Sqlite::open(live_directory.path(), indexed_attributes.clone()).unwrap();
+    let storage = Sqlite::open(
+        live_directory.path(),
+        common::INDEX_RETENTION_DAYS,
+        indexed_attributes.clone(),
+    )
+    .unwrap();
     let batches = append_signal_batches(opened.journal.as_ref());
     let indexer = storage
         .spawn_indexer(
@@ -154,7 +159,14 @@ fn a_reindex_answers_the_queries_as_the_live_indexing_did() {
     drop(storage);
 
     let reindexed_directory = tempfile::tempdir().unwrap();
-    drop(Sqlite::open(reindexed_directory.path(), BTreeSet::new()).unwrap());
+    drop(
+        Sqlite::open(
+            reindexed_directory.path(),
+            common::INDEX_RETENTION_DAYS,
+            BTreeSet::new(),
+        )
+        .unwrap(),
+    );
     let telemetry_path = reindexed_directory
         .path()
         .join("telemetry")
@@ -167,6 +179,7 @@ fn a_reindex_answers_the_queries_as_the_live_indexing_did() {
     let mut progress = Vec::new();
     reindex_from_journal(
         &telemetry_lock,
+        common::INDEX_RETENTION_DAYS,
         indexed_attributes,
         Arc::clone(&opened.journal) as _,
         common::map_numbered_frames(batches),
@@ -214,7 +227,12 @@ fn index_journal_live(
     indexed_attributes: BTreeSet<IndexedAttribute>,
     batches: Vec<Batch>,
 ) {
-    let storage = Sqlite::open(data_directory, indexed_attributes).unwrap();
+    let storage = Sqlite::open(
+        data_directory,
+        common::INDEX_RETENTION_DAYS,
+        indexed_attributes,
+    )
+    .unwrap();
     let opened = common::open_journal(journal_directory);
     let indexer = storage
         .spawn_indexer(
@@ -245,7 +263,14 @@ fn the_storage_of_the_daemon_builds_an_index_of_another_storage_version_again() 
     );
 
     let rebuilt_directory = tempfile::tempdir().unwrap();
-    drop(Sqlite::open(rebuilt_directory.path(), BTreeSet::new()).unwrap());
+    drop(
+        Sqlite::open(
+            rebuilt_directory.path(),
+            common::INDEX_RETENTION_DAYS,
+            BTreeSet::new(),
+        )
+        .unwrap(),
+    );
     let telemetry_path = rebuilt_directory
         .path()
         .join("telemetry")
@@ -286,7 +311,12 @@ fn the_storage_of_the_daemon_builds_an_index_of_another_storage_version_again() 
 #[test]
 fn a_reindex_refuses_to_run_next_to_the_daemon() {
     let directory = tempfile::tempdir().unwrap();
-    let storage = Sqlite::open(directory.path(), BTreeSet::new()).unwrap();
+    let storage = Sqlite::open(
+        directory.path(),
+        common::INDEX_RETENTION_DAYS,
+        BTreeSet::new(),
+    )
+    .unwrap();
     let error = TelemetryLock::acquire(directory.path()).err().unwrap();
     assert!(
         error.to_string().starts_with("another otelo holds "),

@@ -40,7 +40,10 @@ fn write_metrics(directory: &Path, metrics: Vec<Metric>) {
         spans: Vec::new(),
         metrics,
     }];
-    common::index_batches(Config::new(directory.to_owned()), vec![batch]);
+    common::index_batches(
+        Config::new(directory.to_owned(), common::INDEX_RETENTION_DAYS),
+        vec![batch],
+    );
 }
 
 fn roll_up_all_due(directory: &Path, now: i64) -> usize {
