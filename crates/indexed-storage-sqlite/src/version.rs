@@ -15,8 +15,7 @@ impl fmt::Display for OtherStorageVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "telemetry.sqlite has storage version {} and this otelo writes {STORAGE_VERSION}. \
-             Stop otelo and run otelo reindex.",
+            "telemetry.sqlite has storage version {} and this otelo writes {STORAGE_VERSION}",
             self.found_version
         )
     }

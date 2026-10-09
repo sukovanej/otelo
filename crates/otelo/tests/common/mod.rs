@@ -14,6 +14,7 @@ pub struct Daemon {
     pub otlp_http_addr: String,
     pub otlp_grpc_addr: String,
     pub password: String,
+    pub stderr_until_listening: String,
 }
 
 impl Drop for Daemon {
@@ -78,14 +79,16 @@ fn spawn_daemon(data_dir: &Path, args: &[&str], password: String) -> Daemon {
         .spawn()
         .unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut stderr_until_listening = String::new();
     let mut line = String::new();
     loop {
         line.clear();
         assert_ne!(
             stderr.read_line(&mut line).unwrap(),
             0,
-            "exited before it listened"
+            "exited before it listened: {stderr_until_listening}"
         );
+        stderr_until_listening.push_str(&line);
         if line.contains("listening") {
             break;
         }
@@ -103,6 +106,7 @@ fn spawn_daemon(data_dir: &Path, args: &[&str], password: String) -> Daemon {
         child,
         stderr,
         password,
+        stderr_until_listening,
     }
 }
 

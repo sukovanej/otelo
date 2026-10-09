@@ -188,10 +188,20 @@ impl IndexerState {
         let mut next_report_at = Instant::now() + REJECTION_REPORT_INTERVAL;
         let mut next_retention_at = Instant::now();
         let mut next_rollup_at = Instant::now();
+        let mut catch_up_started_at = Some(Instant::now());
         loop {
             self.apply_index_changes();
             due_signals
                 .retain(|&signal| self.index_next_frames_or_log(signal) == Progress::MoreIsDue);
+            if due_signals.is_empty()
+                && !self.has_failed_journal_read()
+                && let Some(started_at) = catch_up_started_at.take()
+            {
+                tracing::info!(
+                    seconds = started_at.elapsed().as_secs_f64(),
+                    "caught up with the journal"
+                );
+            }
             let timeout = if due_signals.is_empty() {
                 next_report_at
                     .min(next_retention_at)
@@ -238,6 +248,12 @@ impl IndexerState {
             while self.index_next_frames_or_log(signal) == Progress::MoreIsDue {}
         }
         self.report_rejected_points();
+    }
+
+    fn has_failed_journal_read(&self) -> bool {
+        self.cursors
+            .iter()
+            .any(|cursor| matches!(cursor.journal_read, JournalRead::FailedAt(_)))
     }
 
     fn note_synced_end(&mut self, synced_end: SyncedEnd) {
