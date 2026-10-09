@@ -27,7 +27,7 @@ For each group and key, the indexer keeps an exact set of up to 64 value hashes 
 - Stable: at most 64 distinct values, each on at least 20 records on average. The product of the value counts of the stable keys of a group stays at most 4,096, so the stable sets of a group cannot multiply without bound.
 - Interned: a string, array, or map whose values repeat at least twice on average.
 - Literal: the rest. A number is stable or literal, never interned: an interned number costs a value row and its index entry, about 30 B, to save 2 to 4 B on the row.
-- A key the group has not seen yet: interned for a string, literal for a number, until the next classification.
+- A key without a profile goes into the stable set. A constant key then never takes another encoding, and a varying one leaves the set at the first classification, or once it passes 128 values.
 
 The indexer classifies a group at 32 records, again each time its count doubles, and then at least every 4,096 records or every hour of records. It also classifies at once when a stable key passes 128 distinct values since the last classification, by its HyperLogLog, or when the stable sets of the group pass the cap. A classification happens in the transaction of the records it follows, so `attribute_key_profiles` never disagrees with the rows after a crash. The counts start over at each classification, so a profile describes recent records. A key turns stable only at 64 distinct values or fewer and stops being stable only past 128, so a key near the limit does not flip back and forth.
 
@@ -145,7 +145,7 @@ WHERE span.started_at BETWEEN :since AND :until
 - `has(key)` checks for the key in the stable sets and in the two row columns.
 - A service or a span name filters the record groups.
 - Grouping by an attribute groups by the stable set, the interned value id, and the literal, and reads the text of the values only for the groups the limit keeps.
-- A record reads back as its stable set, its interned values, and its literals, merged in Rust. The daemon keeps the keys, the record groups, and the stable sets in memory (44, 179, and 1,306 rows on mudro) and reads the values of a page with `json_each(:ids)`.
+- A record reads back as one JSON object, from a subquery that joins its stable set, its interned values, and its literals.
 
 ## Indexed attributes
 
@@ -175,6 +175,8 @@ A Python prototype built the layout from the spans of the copy. It used the rule
 | `attributes` and a `span_attributes` link per attribute | 122 MB |
 | Adaptive, one profile for all spans | 68 MB |
 | Adaptive, a profile per group | 46 MB |
+
+The implementation, fed the 242,270 spans of the mudro copy, made a file of 48.8 MB, against 261 MB for the spans and their indexes before. Every span read back with the attributes it had, and 14 filters matched the same spans as `json_extract` on the old file, in 6 to 200 ms instead of 180 to 430 ms.
 
 | Query | Today | Adaptive |
 |---|---|---|
