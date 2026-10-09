@@ -4,6 +4,8 @@ created: 2026-10-03T14:55:04Z
 parent: ./00001-collect-and-query-telemetry.md
 tags:
 - feature
+pull_requests:
+- https://github.com/sukovanej/otelo/pull/73
 ---
 # Rebuild the index from a journal of OTLP
 
