@@ -264,8 +264,8 @@ The same freeze reproduces with the unpatched hook, the router and no otelo code
 
 ## Issue to file on solidjs/solid
 
-Title: `[2.0 rc.14] A cleanup write to a held signal during a landing leaves settle() joined to the landed transaction, and no later write commits`
+Title: `[2.0 rc.14] A cleanup write to a held signal during the seam leaves its join set past the flush, and later writes are held in that transaction`
 
-Body: the "The bug" and "Repro" sections above, then this paragraph:
+Body: the "The bug", "Tests for the fix" and "Repro" sections above, then this paragraph. Or open a pull request with the fix and the tests, and the same text.
 
 > Found through `@tanstack/solid-query` 6.0.0-rc.5, whose `useBaseQuery` does all three: its fetch inside the data projection fires a cache event that writes its `version` signal, and its cleanup removes the observer, so `observerRemoved` writes `version` again. With `@solidjs/router`, the router then reads the old location in `onSettled` and stops updating the history, so every navigation after closing such a component renders its page while the URL stays put. Related: TanStack/query#11903.
