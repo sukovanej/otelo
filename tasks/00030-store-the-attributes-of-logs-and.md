@@ -12,86 +12,89 @@ The indexer profiles each attribute key within a group of similar records, and s
 
 ## Encodings
 
-A group is a resource and a span name, or a resource and the instrumentation scope of a log.
+A record group is a resource and a span name, or a resource and the instrumentation scope of a log. `record_groups` keeps one row for each.
 
 | Encoding | Where the value lives | Keys on mudro |
 |---|---|---|
-| stable | once in a template, which the row points to | `code.file.path`, `code.line.number`, `http.route`, `thread.name`, `busy_ns` on SQL spans |
-| interned | once in `attribute_values`, and the row holds its id | `db.query.text`, `db.statement`, `url.path`, `client.address` |
+| stable | once in a stable set, which the row points to | `code.file.path`, `code.line.number`, `http.route`, `thread.name`, `busy_ns` on SQL spans |
+| interned | once in `interned_attribute_values`, and the row holds its id | `db.query.text`, `db.statement`, `url.path`, `client.address` |
 | literal | on the row | `busy_ns` on `match woke` spans, `db.sqlite.vm_steps`, `http.response.body.size` |
 
-The resource and the name are part of the template, so a span row carries neither, and `spans_resource_id_started_at` goes.
+A stable set belongs to one record group, so a span row carries neither its resource nor its name, and `spans_resource_id_started_at` goes.
 
 ## The profiler
 
 For each group and key, the indexer keeps an exact set of up to 64 value hashes and a 64-byte HyperLogLog. On mudro that is about 200 groups of 20 keys, under 3 MB.
 
-- Stable: at most 64 distinct values, each on at least 20 records on average. The product of the value counts of the stable keys of a group stays at most 4,096, so the templates of a group cannot multiply without bound.
+- Stable: at most 64 distinct values, each on at least 20 records on average. The product of the value counts of the stable keys of a group stays at most 4,096, so the stable sets of a group cannot multiply without bound.
 - Interned: a string, array, or map whose values repeat at least twice on average.
 - Literal: the rest. A number is stable or literal, never interned: an interned number costs a value row and its index entry, about 30 B, to save 2 to 4 B on the row.
 - A key the group has not seen yet: interned for a string, literal for a number, until the next classification.
 
-The indexer classifies a group at 32 records, again each time its count doubles, and then at least every 4,096 records or every hour of records. It also classifies at once when a stable key passes 64 distinct values since the last classification, or when the templates of the group pass the cap. The counts start over at each classification, so a profile describes recent records. A key turns stable only at 64 distinct values or fewer and stops being stable only past 128, so a key near the limit does not flip back and forth.
+The indexer classifies a group at 32 records, again each time its count doubles, and then at least every 4,096 records or every hour of records. It also classifies at once when a stable key passes 64 distinct values since the last classification, or when the stable sets of the group pass the cap. The counts start over at each classification, so a profile describes recent records. A key turns stable only at 64 distinct values or fewer and stops being stable only past 128, so a key near the limit does not flip back and forth.
 
 The profiler measures time by the `received_at` of the frames, not the clock, so `otelo reindex` makes the same choices from the same journal.
 
-The encoding only decides where a new record puts a value. Templates and values never change once written, so a reclassification rewrites no row, and rows of one key in different encodings sit side by side. A wrong or missing profile makes records larger, never wrong.
+The encoding only decides where a new record puts a value. Stable sets and interned values never change once written, so a reclassification rewrites no row, and rows of one key in different encodings sit side by side. A wrong or missing profile makes records larger, never wrong.
 
 ## Schema
 
 ```mermaid
 erDiagram
-  resources ||--o{ attribute_templates : "resource_id"
-  attribute_templates ||--o{ spans : "attribute_template_id"
-  attribute_templates ||--o{ logs : "attribute_template_id"
-  attribute_keys ||--o{ attribute_profiles : "attribute_key_id"
-  resources ||--o{ attribute_profiles : "resource_id"
+  resources ||--o{ record_groups : "resource_id"
+  record_groups ||--o{ stable_attribute_sets : "record_group_id"
+  record_groups ||--o{ attribute_key_profiles : "record_group_id"
+  attribute_keys ||--o{ attribute_key_profiles : "attribute_key_id"
+  stable_attribute_sets ||--o{ spans : "stable_attribute_set_id"
+  stable_attribute_sets ||--o{ logs : "stable_attribute_set_id"
 
   attribute_keys {
     INTEGER id PK
     TEXT key "UNIQUE"
   }
-  attribute_values {
+  interned_attribute_values {
     INTEGER id PK
     INTEGER identity_hash "xxh3 of the value, UNIQUE"
     TEXT value "JSON"
-    TEXT last_used_day "UTC date of the newest record that has it"
+    TEXT newest_record_day "UTC date of the newest record that has it"
   }
-  attribute_templates {
+  record_groups {
     INTEGER id PK
-    INTEGER identity_hash "xxh3 of owner, resource, name, attributes, UNIQUE"
     TEXT attribute_owner "log or span"
     INTEGER resource_id FK
     TEXT name "span name, or the scope of a log"
-    TEXT attributes "JSON object of the stable attributes"
-    TEXT last_used_day "UTC date of the newest record that has it"
   }
-  attribute_profiles {
-    TEXT attribute_owner PK "log or span"
-    INTEGER resource_id PK,FK
-    TEXT name PK
+  stable_attribute_sets {
+    INTEGER id PK
+    INTEGER identity_hash "xxh3 of the record group and the attributes, UNIQUE"
+    INTEGER record_group_id FK
+    TEXT attributes "JSON object of the stable attributes"
+    TEXT newest_record_day "UTC date of the newest record that has it"
+  }
+  attribute_key_profiles {
+    INTEGER record_group_id PK,FK
     INTEGER attribute_key_id PK,FK
     TEXT encoding "stable, interned, or literal"
     INTEGER record_count "since the classification before"
-    INTEGER distinct_value_count "HyperLogLog estimate"
+    INTEGER distinct_value_count "exact up to 64, a HyperLogLog estimate above"
     INTEGER classified_at "Unix ns"
   }
   spans {
     BLOB trace_id
     BLOB span_id
     BLOB parent_span_id
-    INTEGER attribute_template_id FK
+    INTEGER stable_attribute_set_id FK
     INTEGER kind
     INTEGER started_at "Unix ns"
     INTEGER duration_ns
     INTEGER status_code
-    TEXT interned_attributes "JSON: attribute_keys id to attribute_values id"
+    TEXT interned_attributes "JSON: attribute_keys id to interned_attribute_values id"
     TEXT literal_attributes "JSON: attribute_keys id to the value"
     TEXT events "JSON array"
   }
   logs {
     INTEGER logged_at "Unix ns"
-    INTEGER attribute_template_id FK
+    INTEGER stable_attribute_set_id FK
     INTEGER severity_number
     TEXT body
     BLOB trace_id
@@ -101,9 +104,9 @@ erDiagram
   }
 ```
 
-- `spans` and `logs` lose `resource_id`, `spans` loses `name`, and both lose `attributes`. Their index on the resource and the time becomes one on `attribute_template_id` and the time.
+- `spans` and `logs` lose `resource_id`, `spans` loses `name`, and both lose `attributes`. Their index on the resource and the time becomes one on `stable_attribute_set_id` and the time.
 - `attribute_key_counts` gains `has_stable_values`, `has_interned_values`, and `has_literal_values`: 1 once a record of the day kept the key in that encoding.
-- `attribute_templates` has an index on `resource_id`, so a query of a service finds its templates first.
+- `record_groups` is unique on `attribute_owner`, `resource_id`, and `name`, and `stable_attribute_sets` has an index on `record_group_id`. A query of a service or a span name finds its record groups, then their stable sets.
 - Span events keep their JSON. They are 0.5 MB on mudro.
 
 ## Queries
@@ -112,7 +115,7 @@ The compiler ORs the flags of the days of the range in `attribute_key_counts`, a
 
 | Encoding | First | Then the rows |
 |---|---|---|
-| stable | the templates whose attributes match | `attribute_template_id IN (…)` |
+| stable | the stable sets whose attributes match | `stable_attribute_set_id IN (…)` |
 | interned | the value by `identity_hash`, or the values that match `~` or `>` | `interned_attributes ->> '$."<key id>"'` = the id, or `IN (…)` |
 | literal | | `literal_attributes ->> '$."<key id>"'` compared to the value |
 
@@ -121,15 +124,19 @@ SELECT …
 FROM spans span
 WHERE span.started_at BETWEEN :since AND :until
   AND (
-    span.attribute_template_id IN (
+    span.stable_attribute_set_id IN (
       SELECT id
-      FROM attribute_templates
-      WHERE attribute_owner = 'span'
+      FROM stable_attribute_sets
+      WHERE record_group_id IN (
+          SELECT id
+          FROM record_groups
+          WHERE attribute_owner = 'span'
+        )
         AND attributes ->> '$."db.query.text"' = :value
     )
     OR span.interned_attributes ->> '$."12"' = (
       SELECT id
-      FROM attribute_values
+      FROM interned_attribute_values
       WHERE identity_hash = :value_hash
     )
   )
@@ -137,19 +144,19 @@ WHERE span.started_at BETWEEN :since AND :until
 
 - A number still matches the same number sent as a string: the lookup takes the hashes of both.
 - `!=` and `NOT` negate the whole OR, so they keep the records that lack the key, as today.
-- `has(key)` checks for the key in the templates and in the two row columns.
-- A service or a span name filters the templates.
-- Grouping by an attribute groups by the template, the value id, and the literal, and reads the text of the values only for the groups the limit keeps.
-- A record reads back as its template, its interned values, and its literals, merged in Rust. The daemon keeps the keys and the templates in memory (44 and 1,306 rows on mudro) and reads the values of a page with `json_each(:ids)`.
+- `has(key)` checks for the key in the stable sets and in the two row columns.
+- A service or a span name filters the record groups.
+- Grouping by an attribute groups by the stable set, the interned value id, and the literal, and reads the text of the values only for the groups the limit keeps.
+- A record reads back as its stable set, its interned values, and its literals, merged in Rust. The daemon keeps the keys, the record groups, and the stable sets in memory (44, 179, and 1,306 rows on mudro) and reads the values of a page with `json_each(:ids)`.
 
 ## Indexed attributes
 
-A stable key needs no index of its own: `spans_attribute_template_id_started_at` covers it, and the UI counts it as indexed. `otelo index add` makes a partial expression index on each of the two row columns:
+A stable key needs no index of its own: `spans_stable_attribute_set_id_started_at` covers it, and the UI counts it as indexed. `otelo index add` makes a partial expression index on each of the two row columns:
 
 ```sql
-CREATE INDEX "spans_attribute_<hash>_interned" ON spans (json_extract(interned_attributes, '$."12"'))
+CREATE INDEX "spans_interned_attribute_<hash>" ON spans (json_extract(interned_attributes, '$."12"'))
   WHERE json_extract(interned_attributes, '$."12"') IS NOT NULL;
-CREATE INDEX "spans_attribute_<hash>_literal" ON spans (json_extract(literal_attributes, '$."12"'))
+CREATE INDEX "spans_literal_attribute_<hash>" ON spans (json_extract(literal_attributes, '$."12"'))
   WHERE json_extract(literal_attributes, '$."12"') IS NOT NULL;
 ```
 
@@ -157,7 +164,7 @@ The index holds only the rows that have the key in that encoding, and SQLite use
 
 ## Retention
 
-The indexer sets `last_used_day` of a template or a value to the day of the newest record that uses it, once a day for each, from a set in memory. Retention deletes the templates and the values whose `last_used_day` is past the longer of the retentions of logs and spans, after it deletes the rows. `attribute_profiles` rows of a group with no records in the retention go too.
+The indexer sets `newest_record_day` of a stable set or an interned value to the day of the newest record that uses it, once a day for each, from a set in memory. Retention deletes the stable sets and the interned values whose `newest_record_day` is past the longer of the retentions of logs and spans, after it deletes the rows. A record group with no stable set left goes too, with its `attribute_key_profiles` rows.
 
 ## Measured on the mudro spans
 
@@ -173,7 +180,7 @@ A Python prototype built the layout from the spans of the copy. It used the rule
 
 | Query | Today | Adaptive |
 |---|---|---|
-| A key filter that reads the templates only | 140 ms | under 10 ms |
+| A key filter that reads the stable sets only | 140 ms | under 10 ms |
 | Group by `db.query.text`, interned branch only | 800 ms | 130 ms |
 | Delete the oldest day | 430 ms | 100 ms |
 
