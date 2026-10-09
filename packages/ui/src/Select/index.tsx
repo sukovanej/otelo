@@ -1,12 +1,4 @@
-import {
-  createMemo,
-  createProjection,
-  createSignal,
-  createUniqueId,
-  flush,
-  For,
-  Show,
-} from "solid-js";
+import { createMemo, createSignal, createUniqueId, flush, For, Show } from "solid-js";
 
 import { ChevronIcon, CloseIcon } from "@otelo/icons";
 
@@ -67,10 +59,6 @@ export default function Select<T extends string>(props: SelectProps<T>) {
   const chosenValues = (): ReadonlyArray<T> =>
     props.selection === "single" ? [props.value] : props.values;
   const listboxId = createUniqueId();
-  const chosenByValue = createProjection<Partial<Record<string, true>>>(
-    () => Object.fromEntries(chosenValues().map((value) => [value, true])),
-    {},
-  );
   const isField = () =>
     props.selection === "multiple" ||
     props.typedValue !== undefined ||
@@ -81,6 +69,11 @@ export default function Select<T extends string>(props: SelectProps<T>) {
       : props.options,
   );
   const groups = createMemo(() => groupSelectOptions(listedOptions(), search()));
+  const groupTitles = createMemo(() => groups().map((group) => group.title), {
+    equals: haveSameTitles,
+  });
+  const listGroupOptions = (title: string) =>
+    groups().find((group) => group.title === title)?.options ?? [];
   const typedOption = createMemo((): SelectOption<T> | undefined => {
     const text = search().trim();
     const value = text === "" ? undefined : props.typedValue?.(text);
@@ -366,26 +359,25 @@ export default function Select<T extends string>(props: SelectProps<T>) {
             onKeyDown={onListKeyDown}
           >
             <For
-              each={groups()}
-              keyed={false}
+              each={groupTitles()}
               fallback={
                 <Show when={!typedOption()}>
                   <div class="px-2 py-1 text-muted">No match</div>
                 </Show>
               }
             >
-              {(group) => (
-                <div role="group" aria-label={group().title || undefined}>
-                  <Show when={group().title}>
+              {(title) => (
+                <div role="group" aria-label={title || undefined}>
+                  <Show when={title}>
                     <div class="px-2 pt-1.5 pb-0.5 text-2xs font-semibold tracking-[0.04em] text-muted uppercase">
-                      {group().title}
+                      {title}
                     </div>
                   </Show>
-                  <For each={group().options} keyed={false}>
+                  <For each={listGroupOptions(title)} keyed={keyOptionRow}>
                     {(groupOption) => (
                       <SelectListOption
                         option={groupOption()}
-                        chosen={chosenByValue[groupOption().value] === true}
+                        chosen={chosenValues().includes(groupOption().value)}
                         onPick={() => pickValue(groupOption().value)}
                       />
                     )}
@@ -407,4 +399,12 @@ export default function Select<T extends string>(props: SelectProps<T>) {
       </Show>
     </div>
   );
+}
+
+function keyOptionRow<T extends string>(option: SelectOption<T>): string {
+  return JSON.stringify([option.value, option.label]);
+}
+
+function haveSameTitles(previous: ReadonlyArray<string>, next: ReadonlyArray<string>): boolean {
+  return previous.length === next.length && previous.every((title, index) => title === next[index]);
 }

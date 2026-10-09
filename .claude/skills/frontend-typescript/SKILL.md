@@ -97,7 +97,16 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   and a second click builds on the old value. The `latest()` read sits in the control's
   own JSX: a memo or projection derived from a held value stays held, even when it reads
   through `latest()`. A handler that builds the next value on a held one reads it through
-  `latest()` too, as `list.addTerm` does. `loading()` shows the wait.
+  `latest()` too, as `list.addTerm` does. `loading()` shows the wait. A fetch that joins a
+  key another one shows skips the reload on mount, or the reload holds whatever mounted
+  it, such as the widget editor.
+- **A form whose edits feed a preview** puts the preview behind `<Loading on={…}>`, keyed
+  on what the form edits, as `WidgetEditor` does. Its fallback is the skeleton the widget
+  draws until its first answer, `DashboardWidgetSkeleton` around the `ChartSkeleton` of viz.
+  Each edit then commits at once and the form reads its state plainly. Never read such a
+  form through `latest()`: a `<Show>` whose condition flips during the hold mounts its
+  branch on the new value, the branch's accessor re-checks the old one and throws, and the
+  whole app stops updating.
 - **A loading flag renders as text** in an element that stays mounted, as `PageBar` does. In
   rc.14 an element that `<Show>` or a ternary mounts from `loading()` keeps the pending value
   after the answer lands.
@@ -106,20 +115,29 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   index, so a selection keeps `snapshot(row)`, as `TracesPage` does.
 - **A list of objects a memo builds anew** goes through `<For keyed={false}>`, or keyed
   by a stable field, as `Table` keys rows by `rowKey`. Keyed by identity, every refresh
-  throws away and rebuilds each row.
+  throws away and rebuilds each row. A list that can come from a `latest()` value has a key
+  that covers everything its row shows, since a kept row keeps showing its old item through
+  the hold. `RangePicker` keys its label parts by position, dimness and text, and `Select`
+  keys its options by value and label.
 - **A `<For>` row reads `index()` in its JSX** or in a `<Show>` condition. The row function
   itself runs untracked.
 - **One value compared in every row**, a selection or an open item, is a
   `createProjection` map that each row reads by its own key, as `Table` does with
-  `selectedKey`. A change then re-runs the two rows that flipped.
+  `selectedKey`. A change then re-runs the two rows that flipped. A component whose value
+  can come from `latest()` compares in each row instead, as `Select` does, since the
+  projection stays held.
 - **Every read of fetched data sits under an `<Errored>`**: `FetchErrorBoundary` around
   content, and an `<Errored fallback={…}>` drawing the same element without the data
   elsewhere. A request that fails for a new key with no boundary above leaves the hold
   open, and the page stops answering. A view keyed on what it fetches, as `TracePage`
   keys `TraceView` by the trace id, never changes key, so its reads need no boundary.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
-  remove listeners and abort requests, and leave signals untouched. In rc.13 a signal
-  write during disposal held every later update, and the router froze with it.
+  remove listeners and abort requests, and leave signals untouched. Libraries still write
+  in theirs, the solid-query hook among them. In rc.14 such a write to a held signal
+  kept the scheduler joined to its transaction past the flush. Later writes were then
+  held in it, for good once it had landed, so the router stopped updating the URL.
+  `patches/` drops that join when the transaction lands and when the flush ends. Drop the
+  patch once Solid ships the fix (SIN-31).
 
 The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 

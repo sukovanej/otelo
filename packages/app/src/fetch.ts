@@ -1,6 +1,7 @@
 import {
   hashKey,
   type InfiniteData,
+  type Query,
   type QueryClient,
   replaceEqualDeep,
   useInfiniteQuery,
@@ -52,6 +53,7 @@ export function createFetch<K, T>(
       structuralSharing: (oldData: unknown, newData: unknown) =>
         Object.isFrozen(newData) ? newData : replaceEqualDeep(oldData, newData),
       refetchInterval: live() ? LIVE_RELOAD_MS : false,
+      refetchOnMount: isOnlyReaderOfKey,
     };
   });
   const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
@@ -86,6 +88,7 @@ export function createPagedFetch<K, T>(
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (page: T) => (isLive ? undefined : pageJoining?.readNextCursor(page)),
       refetchInterval: isLive ? LIVE_RELOAD_MS : false,
+      refetchOnMount: isOnlyReaderOfKey,
     };
   });
   const answered = createMemo((wasAnswered) => wasAnswered === true || query.isSuccess);
@@ -154,6 +157,12 @@ export function freezeDeeply<T>(value: T): T {
 
 function memoizeKeyByContent<K>(key: Accessor<K>): Accessor<K> {
   return createMemo(key, { equals: (shown, next) => hashKey([shown]) === hashKey([next]) });
+}
+
+// A reader joining a key another one shows keeps that answer, since a reload would hold
+// whatever mounted it until the reload lands.
+function isOnlyReaderOfKey(query: Pick<Query, "getObserversCount">): boolean {
+  return query.getObserversCount() === 1;
 }
 
 function isInfiniteData(data: unknown): data is InfiniteData<unknown> {

@@ -28,3 +28,6 @@ catalog:
 # Wait an hour before installing a new release, not the day pnpm defaults to, so
 # new versions arrive fast and a hijacked release caught in its first hour never does.
 minimumReleaseAge: 60
+
+patchedDependencies:
+  "@solidjs/signals@2.0.0-rc.14": patches/@solidjs__signals@2.0.0-rc.14.patch

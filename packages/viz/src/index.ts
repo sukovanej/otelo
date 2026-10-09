@@ -3,6 +3,7 @@
 // package's `src`.
 
 export { default as ChartPanel } from "./ChartPanel";
+export { default as ChartSkeleton } from "./ChartSkeleton";
 export type { SeriesColor } from "./color";
 export type { Column } from "./column";
 export { default as Meter } from "./Meter";
