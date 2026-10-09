@@ -27,7 +27,7 @@ flowchart LR
 - One indexer thread owns every write to `telemetry.sqlite`, and reads what it writes from the journal. A burst of telemetry makes the indexer lag, and nothing is dropped.
 - SQLite in WAL mode, in one file, `telemetry/telemetry.sqlite`. Each signal has its own retention, 7 days by default, and retention deletes rows. The 1-minute and 1-hour rollups of the metrics are kept as long as the raw points. [[../tasks/00008-roll-up-metrics-to-1-minute-and-1.md]] explains the rollups.
 - No command runs SQL from a user, so the names of the tables and columns stay private to `otelo-indexed-storage-sqlite`.
-- `telemetry.sqlite` carries a storage version, and nothing migrates a file of another one. `otelo reindex` builds it again from the journal, as the Indexer section says.
+- `telemetry.sqlite` carries a storage version, and nothing migrates a file of another one. The daemon builds it again from the journal as it runs, as the Indexer section says.
 - A query is one connection to the file. The query API caps a range at the retention of its signal, and a range that reads two signals, such as a service, at the shorter of the two.
 - The indexer keeps one connection open. Each connection keeps a page cache of 1 MB, and the daemon caps the heap of SQLite at 16 MB with `sqlite3_hard_heap_limit64`. The OS page cache keeps the hot pages.
 - `service` is the OTel `service.name` resource attribute. The host collector builds its OTLP requests itself, so it names its services itself.
@@ -77,11 +77,12 @@ sequenceDiagram
 - When the daemon stops, the journal stops after its last sync, and the indexer indexes what it synced before it ends.
 - Between transactions the indexer applies the indexed attributes, deletes past the retention, and rolls the metrics up.
 
-### Storage version and `otelo reindex`
+### Storage version and the rebuild
 
-- `STORAGE_VERSION` in `version.rs` goes into `PRAGMA user_version` when the file is made. `otelo serve` does not start on another version, or on a file without one: `telemetry.sqlite has storage version 3 and this otelo writes 4. Stop otelo and run otelo reindex.`
+- `STORAGE_VERSION` in `version.rs` goes into `PRAGMA user_version` when the file is made. A file of another version, or a file without one, does not open: `telemetry.sqlite has storage version 3 and this otelo writes 4`.
+- `otelo serve` deletes a `telemetry.sqlite` of another version, logs that warning with `so the indexer builds it again from the journal`, and makes the file again before it listens. The receiver journals what arrives from the first request, and the indexer goes through the journal from the start of each retention, oldest first, as it does after a daemon that was down. Until it catches up, a query sees the oldest hours and not the newest. The indexer logs `caught up with the journal` with the seconds it took, once each start. On the journal of mudro-prod, 38 MB over 6 days, a rebuild took 21 s on a laptop.
 - A test keeps the xxh3 of `schema.sql` next to `STORAGE_VERSION`, so a change of the schema bumps both. A change of the mapping that changes what is stored bumps the version by hand.
-- The daemon and `otelo reindex` both lock `telemetry/telemetry.lock`, so the command refuses to run next to a daemon. The lock is taken before the journal opens, because opening it recovers its segments.
+- `otelo reindex` does the same rebuild with the daemon stopped, and returns when it is done. The daemon and `otelo reindex` both lock `telemetry/telemetry.lock`, so the command refuses to run next to a daemon. The lock is taken before the journal opens, because opening it recovers its segments.
 - `otelo reindex` deletes a `telemetry.sqlite` of another version, makes it again with the indexed attributes of `state.sqlite`, and indexes the journal from the start of each retention, printing each signal and hour. A file of the current version goes on from its positions, so a reindex that stopped halfway goes on where it stopped.
 - The rollups catch up from their cursors in the next `otelo serve`, as after a daemon that was down.
 
