@@ -193,3 +193,9 @@ The implementation, fed the 242,270 spans of the mudro copy, made a file of 48.8
 
 - `metric_points` (112 MB on mudro, 32 B a point) and `metric_minute_summaries` (48 MB). Points in hourly chunks of a series would take about 4 B a point. That is a task of its own.
 - mudro sends `db.statement` next to an equal `db.query.text` on every database span. Interning stores the text once, and mudro's instrumentation is where to drop the old name.
+
+## Comments
+
+### 2026-10-09T07:07:01Z by Milan Suk via claude-code
+
+> Departs from the plan: a key without a profile starts stable, not interned or literal, so constant keys never leave interned or literal flags on their first day; and a record reads back through an SQL subquery, not a merge in Rust.
