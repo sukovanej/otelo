@@ -80,7 +80,7 @@ sequenceDiagram
 ### Storage version and the rebuild
 
 - `STORAGE_VERSION` in `version.rs` goes into `PRAGMA user_version` when the file is made. A file of another version, or a file without one, does not open: `telemetry.sqlite has storage version 3 and this otelo writes 4`.
-- `otelo serve` deletes a `telemetry.sqlite` of another version, logs that warning with `so the indexer builds it again from the journal`, and makes the file again before it listens. The receiver journals what arrives from the first request, and the indexer goes through the journal from the start of each retention, oldest first, as it does after a daemon that was down. Until it catches up, a query sees the oldest hours and not the newest. The indexer logs `caught up with the journal` with the seconds it took, once each start. On the journal of mudro-prod, 38 MB over 6 days, a rebuild took 21 s on a laptop.
+- `otelo serve` deletes a `telemetry.sqlite` of another version, logs that warning with `so the indexer builds it again from the journal`, and makes the file again before it listens. The receiver journals what arrives from the first request, and the indexer goes through the journal from the start of each retention, oldest first, as it does after a daemon that was down. Until it catches up, a query sees the oldest hours and not the newest. The indexer logs `caught up with the journal` with the seconds it took, once each start. On the journal of mudro-prod, 38 MB over 6 days, a rebuild took 21 s in a container limited to one core of an M-series laptop and 200 MB, with a peak RSS of 41 MB, while the receiver answered every request in about the same 95 ms as before and after.
 - A test keeps the xxh3 of `schema.sql` next to `STORAGE_VERSION`, so a change of the schema bumps both. A change of the mapping that changes what is stored bumps the version by hand.
 - `otelo reindex` does the same rebuild with the daemon stopped, and returns when it is done. The daemon and `otelo reindex` both lock `telemetry/telemetry.lock`, so the command refuses to run next to a daemon. The lock is taken before the journal opens, because opening it recovers its segments.
 - `otelo reindex` deletes a `telemetry.sqlite` of another version, makes it again with the indexed attributes of `state.sqlite`, and indexes the journal from the start of each retention, printing each signal and hour. A file of the current version goes on from its positions, so a reindex that stopped halfway goes on where it stopped.
@@ -108,12 +108,8 @@ The receiver and the indexer count into one set of meters, and the host collecto
 
 ```mermaid
 erDiagram
-  resources ||--o{ record_groups : "resource_id"
-  record_groups ||--o{ stable_attribute_sets : "record_group_id"
-  record_groups ||--o{ attribute_key_profiles : "record_group_id"
-  attribute_keys ||--o{ attribute_key_profiles : "attribute_key_id"
-  stable_attribute_sets ||--o{ logs : "stable_attribute_set_id"
-  stable_attribute_sets ||--o{ spans : "stable_attribute_set_id"
+  resources ||--o{ logs : "resource_id"
+  resources ||--o{ spans : "resource_id"
   resources ||--o{ metric_series : "resource_id"
   logs ||--|| log_body_search : "rowid"
   metric_series ||--o{ metric_points : "metric_series_id"
@@ -126,46 +122,14 @@ erDiagram
     TEXT service
     TEXT attributes "JSON object"
   }
-  attribute_keys {
-    INTEGER id PK
-    TEXT key "UNIQUE"
-  }
-  record_groups {
-    INTEGER id PK
-    TEXT attribute_owner "log or span"
-    INTEGER resource_id FK
-    TEXT name "span name, or otel.scope.name of a log"
-  }
-  stable_attribute_sets {
-    INTEGER id PK
-    INTEGER identity_hash "xxh3 of the record group and the attributes, UNIQUE"
-    INTEGER record_group_id FK
-    TEXT attributes "JSON object of the stable attributes"
-    TEXT newest_record_day "UTC date"
-  }
-  interned_attribute_values {
-    INTEGER id PK
-    INTEGER identity_hash "xxh3 of the value, UNIQUE"
-    TEXT value "JSON"
-    TEXT newest_record_day "UTC date"
-  }
-  attribute_key_profiles {
-    INTEGER record_group_id PK,FK
-    INTEGER attribute_key_id PK,FK
-    TEXT encoding "stable, interned, literal"
-    INTEGER record_count
-    INTEGER distinct_value_count "exact up to 64, HyperLogLog above"
-    INTEGER classified_at "Unix ns, received_at of the frame"
-  }
   logs {
     INTEGER logged_at "Unix ns"
-    INTEGER stable_attribute_set_id FK
+    INTEGER resource_id FK
     INTEGER severity_number "OTel severity number"
     TEXT body
     BLOB trace_id "16 bytes, NULL outside a span"
     BLOB span_id "8 bytes, NULL outside a span"
-    TEXT interned_attributes "JSON: attribute_keys id to interned_attribute_values id"
-    TEXT literal_attributes "JSON: attribute_keys id to the value"
+    TEXT attributes "JSON object"
   }
   log_body_search {
     TEXT body "FTS5 over logs.body"
@@ -174,13 +138,13 @@ erDiagram
     BLOB trace_id "16 bytes"
     BLOB span_id "8 bytes"
     BLOB parent_span_id "8 bytes, NULL for a root"
-    INTEGER stable_attribute_set_id FK
+    INTEGER resource_id FK
+    TEXT name
     INTEGER kind "OTel span kind"
     INTEGER started_at "Unix ns"
     INTEGER duration_ns
     INTEGER status_code "OTel status code"
-    TEXT interned_attributes "JSON: attribute_keys id to interned_attribute_values id"
-    TEXT literal_attributes "JSON: attribute_keys id to the value"
+    TEXT attributes "JSON object"
     TEXT events "JSON array"
   }
   metric_series {
@@ -247,33 +211,11 @@ erDiagram
 ```
 
 - A name says what a table or a column holds without its comment, and takes the OpenTelemetry name where OpenTelemetry has one: `severity_number`, `status_code`, `aggregation_temporality`.
-- `metric_points`, the two summary tables, the three count tables, and `attribute_key_profiles` are `WITHOUT ROWID`. A trigger keeps `log_body_search` in step with `logs`, on an insert and on a delete.
+- `metric_points`, the two summary tables, and the three count tables are `WITHOUT ROWID`. A trigger keeps `log_body_search` in step with `logs`, on an insert and on a delete.
 - The file is made with `auto_vacuum = INCREMENTAL`, so it can give pages back to the disk.
-- `resources` has an index on `service`, `record_groups` a unique one on `resource_id`, `attribute_owner`, and `name`, `stable_attribute_sets` one on `record_group_id`, and `logs` and `spans` one on `stable_attribute_set_id` and the time. A query of one service or span name finds its groups and their sets first, and reads only their rows of the range.
-- A log or a span has no `resource_id` and a span no `name`: both come from the record group of its stable set.
+- `resources` has an index on `service`, and `logs` and `spans` one on `resource_id` and the time. A query of one service finds its resources first and reads only their rows of the range. Without the index on `service`, SQLite reads every row of the range through the index on the time, and checks the service of each.
 
-In Rust, attributes are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. Every JSON of attributes in the file is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes, and its attributes stay JSON in `events`.
-
-### Attribute encodings
-
-The attributes of a log or a span repeat: on mudro, the 242,270 spans of 4.7 days took 188 MB of JSON, and most keys of one span name hold one value or a few. The indexer profiles each key within a record group, the logs of one `otel.scope.name` or the spans of one name of a resource, and stores it in one of three encodings ([[../tasks/00030-store-the-attributes-of-logs-and.md]]):
-
-| Encoding | Where the value lives | Keys on mudro |
-|---|---|---|
-| stable | once in a stable set of the group, which the row points to | `code.file.path`, `http.route`, `thread.name`, `busy_ns` of SQL spans, always 0 |
-| interned | once in `interned_attribute_values`, and the row holds its id | `db.query.text`, `url.path`, `client.address` |
-| literal | on the row | `idle_ns`, `db.sqlite.vm_steps`, `busy_ns` of a timer |
-
-- A number, a bool, or a null is stable or literal, never interned: its id would take more bytes than the value.
-- A key without a profile goes into the stable set, so a constant key never takes another encoding.
-- For each group and key the indexer counts the records and their distinct values: exactly up to 64, then with a HyperLogLog of 64 bytes. It keeps at most 2,000 groups in memory.
-- It classifies a group at 32 records, at each doubling up to 4,096, then every 4,096 records, and after an hour of `received_at`. It classifies at once when a stable key passes 128 distinct values, or when the group made more than 4,096 stable sets since the last classification. The counts start over at each classification.
-- A key becomes stable at 64 distinct values or fewer, each on 20 records or more on average, and stays stable up to 128. The product of the value counts of the stable keys of a group stays at most 4,096. A string, array, or map whose values repeat twice on average is interned, and the rest is literal.
-- A classification writes `attribute_key_profiles` in the transaction of the records, so a restarted indexer goes on with the encodings it left, and a reindex makes the same choices from the same journal.
-- A classification rewrites no row. `attribute_key_counts` marks the encodings a key had on each day in `has_stable_values`, `has_interned_values`, and `has_literal_values`, and a query looks for the key in each encoding it had in the range.
-- A record reads back as one JSON object: a subquery joins its stable set, its interned values, and its literals.
-
-On the mudro spans, the spans and their indexes went from 261 MB to 48 MB, every span read back with the attributes it had, and a filter on one key read 2 to 40 times faster.
+The `attributes` columns hold JSON objects. In Rust they are `Attributes`, a map of `AttributeValue`, which mirrors the `AnyValue` of OpenTelemetry: null, bool, int, double, string, array, and map. The JSON of the columns is the JSON of those types, so `json_extract` reads what the Rust code writes. A span event is a `SpanEvent` with its time, name, and attributes.
 
 ## OTLP receiver
 
@@ -345,11 +287,9 @@ When the daemon starts, and then once an hour, the indexer deletes what is past 
 |---|---|
 | logs | `logs` by `logged_at`, through its index. The trigger deletes the row from `log_body_search`. |
 | traces | `spans` by `started_at`, through its index |
-| logs and traces | the stable sets of each owner whose `newest_record_day` is past its retention, the interned values past the longer of the two, the record groups without a set and their profiles |
 | metrics | `metric_points` and the two summary tables, one series at a time by its primary key, then the series that have no rows left |
 
-- The indexer writes the day of the newest record into a stable set or an interned value, at most once a day for each, so no record past the retention keeps one. A foreign key stops the deletion of a set that a row still has.
-- A resource that no series and no record group refers to is deleted with the metrics.
+- A resource that no row refers to is deleted with the metrics. `logs` and `spans` have an index on `resource_id` and the time, so the check reads an index and not the tables.
 - The catalog deletes the days past the retention of their signal. A resource belongs to every signal, so its keys stay as long as the longest retention.
 - Deleted pages go to the freelist, and new rows reuse them, so the file keeps its size without a `VACUUM`. When the freelist passes a quarter of the file, after a retention was lowered, the indexer runs `PRAGMA incremental_vacuum` in steps of 2,048 pages.
 
@@ -378,7 +318,7 @@ The CLI and the UI use the same HTTP query API, which the `otelo-api` crate serv
 
 The logs page of the UI takes the same query, with completion from `/api/complete`, and a range of a preset or a custom `since` and `until`. It shows lines, or the message templates with their counts and samples. A line opens to its attributes and its resource, and a button next to a value adds `key = value` or `key != value` to the query. A template adds its fixed words to the query as `body ~ "…"` to show its lines. The page says which compared attributes have no index and can add one. Live mode reloads every 5 seconds. The query, the range, and the view live in the URL, so a link opens the same page.
 
-The traces page takes a span query the same way. It lists the traces that have a matching span, by root span, span count, and duration, or the spans themselves. A click on Time or Duration sorts both lists by it, newest or longest first, and a second click turns the order around. The daemon sorts, and the sort lives in the URL. A span opens beside the list with its attributes, resource, and events, the same filter buttons, and a link to its trace. A trace opens in a modal over the list as a waterfall: each span under its parent, a bar where it runs on the time of the trace, and a fold for the children. A second tab shows the logs that carry the trace ID. The open trace lives in the URL of the list, so Back closes it. Each trace also has its own page, with the tab and the selected span in its URL, and the modal links to that page to share. A log line on the logs page links to its trace. The pages read what a span is from the OpenTelemetry conventions. An HTTP span shows its method, route, and status code on badges, in place of the words of the span name that say the same. A database span shows the icon of its system, such as PostgreSQL or Redis, and its query as the span has it, or its name when it has no query, with the first word on a badge when it is letters alone, such as `SELECT`. One function splits the text, so the traces pages, the database queries of a service, and its modal show a query the same way. Every span starts with an icon of what it is, a globe, the icon of a database system or a plain database, or a plain span, so the names of a list line up. Each span shows its kind on a badge, and each service the icon of its language from `telemetry.sdk.language`, or of code when the language is unknown. The icons live in the `@otelo/icons` package. So the list of traces can do the same, `/api/traces` returns the kind, the attributes, and the resource of each root span.
+The traces page takes a span query the same way. It lists the traces that have a matching span, by root span, span count, and duration, or the spans themselves. A click on Time or Duration sorts both lists by it, newest or longest first, and a second click turns the order around. The daemon sorts, and the sort lives in the URL. A span opens beside the list with its attributes, resource, and events, the same filter buttons, and a link to its trace. A trace opens in a modal over the list as a waterfall: each span under its parent, a bar where it runs on the time of the trace, and a fold for the children. A second tab shows the logs that carry the trace ID. The open trace lives in the URL of the list, so Back closes it. Each trace also has its own page, with the tab and the selected span in its URL, and the modal links to that page to share. A log line on the logs page links to its trace. The pages read what a span is from the OpenTelemetry conventions. An HTTP span shows its method, route, and status code on badges, in place of the words of the span name that say the same. A database span shows the icon of its system, such as PostgreSQL or Redis, and its query as the span has it, or its name when it has no query, with the first word on a badge when it is letters alone, such as `SELECT`. One function splits the text, so the traces pages, the database queries of a service, and its modal show a query the same way. Every span starts with an icon of what it is, a globe, the icon of a database system or a plain database, or a plain span, so the names of a list line up. Each span shows its kind on a badge, and each service the icon of its language from `telemetry.sdk.language`, or of code when the language is unknown. The icons live in the `@otelo/icons` package. So the list of traces can do the same, `/api/traces` returns the kind, the attributes, and the resource of each root span. The tables of the pages read `/api/logs/rows`, `/api/spans/rows`, and `/api/traces/rows`, which return only what a row shows: its time, service, name or body, numbers, the HTTP and database attributes that draw a span, and the resource keys that name the language. A line or a span opens beside the list from `/api/logs/{id}` or `/api/traces/{trace_id}/spans/{span_id}`, with every attribute and event. The `id` of a line is its rowid in the index, so `otelo reindex` changes it. The CLI reads `/api/logs`, `/api/spans`, and `/api/traces`, which return whole records.
 
 The services page of the UI, its start page, lists the services of the range with the same numbers and a bar chart of the requests of each one, failed ones on top. A click on a column name sorts by it. A service opens its own page: the numbers of the range, then charts of the requests, the latency percentiles, the error rate, and the logs over the range, and its routes, each shown like a span, with the icon and badges of the attributes of its newest request. A route opens in a modal over the page, with its numbers, its requests, latency, and error rate over the range from `/api/spans/groups` with the span query of the route, and its newest 50 spans from `/api/spans` with the same query, each of which opens its trace. The query adds a term for each value of the group, and `NOT has(<key>)` for a value the group lacks. The open modal lives in the URL as its span query, so Back closes it. Its CPU and memory follow, from the `process.*` metrics the host collector stores under the name of the unit: the CPU time as a share of one core, and the memory of its processes with the memory of its cgroup beside it on Linux. The page reads only the series without `telemetry.sdk.name`, so process metrics an app sends from its own SDK do not add up with them. A service whose unit has another name has none of them, and the page says so and names the three metrics. Its database queries follow: the time they take and their count over the range, and a table of them by database and query text. A query opens in the same modal as a route. The newest failed traces and the templates of the error logs close the page, with links to the traces and logs pages that show all of them. Dragging across a chart zooms the range to that stretch. The range and live mode live in the URL, and a link from one page to the other keeps the range.
 
@@ -420,6 +360,6 @@ The indexer counts the attribute keys of each signal and of the resources by UTC
 
 ## Indexed attributes
 
-`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the indexer. Within a second the indexer creates two partial expression indexes on the table, once: on `json_extract(interned_attributes, '$."<key id>"')` and on `json_extract(literal_attributes, '$."<key id>"')`, each `WHERE` the expression `IS NOT NULL`. They are named `logs_interned_attribute_<hash>` and `logs_literal_attribute_<hash>`, after the table and a hash of the key. `otelo index remove` drops them. The query compiler writes the same expressions, and turns an interned value into its id before the query, so SQLite uses the indexes, also for an `OR` of indexed keys. A stable key needs no index: the index on `stable_attribute_set_id` and the time finds its rows. A query on another key still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
+`otelo index add logs user.id` stores the key in `state.sqlite` and hands the set to the indexer. Within a second the indexer creates an expression index on `json_extract(attributes, '$."user.id"')` on the table, once. The index is named `logs_attribute_<hash>`, after its table and a hash of the key. `otelo index remove` drops it. The query compiler writes the same expression, so SQLite uses the index, also for an `OR` of indexed keys. A query on a key without an index still runs by reading the range, and the response names the key, so the CLI says which index would help. Only logs and spans take indexes; resources and series are small.
 
 Until UI auth exists, the daemon listens on `127.0.0.1` only, and a laptop reaches it through an SSH tunnel.
