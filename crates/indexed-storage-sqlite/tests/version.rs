@@ -54,8 +54,7 @@ fn a_file_of_another_version_does_not_open() {
     assert_eq!(
         error.to_string(),
         format!(
-            "telemetry.sqlite has storage version {} and this otelo writes {STORAGE_VERSION}. \
-             Stop otelo and run otelo reindex.",
+            "telemetry.sqlite has storage version {} and this otelo writes {STORAGE_VERSION}",
             STORAGE_VERSION + 1
         )
     );

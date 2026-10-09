@@ -43,6 +43,9 @@ impl Sqlite {
         limit_sqlite_heap();
         let telemetry_lock = TelemetryLock::acquire(data_directory)?;
         let config = build_config(data_directory, indexed_attributes);
+        if let Some(other_version) = delete_telemetry_of_other_storage_version(&config.directory)? {
+            tracing::warn!("{other_version}, so the indexer builds it again from the journal");
+        }
         // A reader needs the file, and opens it before the indexer has written to it.
         TelemetryFile::open(&config.directory)?;
         Ok(Self {
@@ -72,14 +75,10 @@ pub fn reindex_from_journal(
 ) -> anyhow::Result<()> {
     limit_sqlite_heap();
     let config = build_config(telemetry_lock.data_directory(), indexed_attributes);
-    if let Err(error) = TelemetryFile::open(&config.directory) {
-        let Some(other_version) = error.downcast_ref::<OtherStorageVersion>() else {
-            return Err(error);
-        };
+    if let Some(other_version) = delete_telemetry_of_other_storage_version(&config.directory)? {
         report_progress(ReindexProgress::DeletedOtherStorageVersion {
             found_version: other_version.found_version,
         });
-        delete_database(&config.directory.join(TELEMETRY_FILE_NAME))?;
     }
     index_journal_until_caught_up(
         config,
@@ -88,6 +87,17 @@ pub fn reindex_from_journal(
         Arc::new(PipelineMeters::default()),
         |signal, hour| report_progress(ReindexProgress::IndexedHour { signal, hour }),
     )
+}
+
+fn delete_telemetry_of_other_storage_version(
+    directory: &Path,
+) -> anyhow::Result<Option<OtherStorageVersion>> {
+    let other_version = match TelemetryFile::open(directory) {
+        Ok(_) => return Ok(None),
+        Err(error) => error.downcast::<OtherStorageVersion>()?,
+    };
+    delete_database(&directory.join(TELEMETRY_FILE_NAME))?;
+    Ok(Some(other_version))
 }
 
 fn limit_sqlite_heap() {

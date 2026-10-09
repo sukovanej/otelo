@@ -2,7 +2,10 @@
 
 mod common;
 
-use common::{StopSignal, send_get_request, start_daemon, start_daemon_with_args, stop_daemon};
+use common::{
+    Daemon, StopSignal, send_get_request, start_daemon, start_daemon_with_args, stop_daemon,
+};
+use otelo_indexed_storage_sqlite::{STORAGE_VERSION, TELEMETRY_FILE_NAME};
 
 #[test]
 fn health_answers_200() {
@@ -157,7 +160,12 @@ fn traces_itself() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(bodies, ["listening", "stopping"]);
+    // The indexer catches up on its own thread, before or after the daemon listens.
+    let (catch_ups, lifecycle): (Vec<&String>, Vec<&String>) = bodies
+        .iter()
+        .partition(|body| *body == "caught up with the journal");
+    assert_eq!(lifecycle, ["listening", "stopping"]);
+    assert_eq!(catch_ups.len(), 1, "{bodies:?}");
 }
 
 #[test]
@@ -233,43 +241,61 @@ fn collects_the_metrics_of_its_host_when_it_starts() {
     assert!(with_host.count() >= 2, "{resource_attributes:?}");
 }
 
-#[test]
-fn does_not_start_on_telemetry_of_another_storage_version() {
-    let dir = tempfile::tempdir().unwrap();
-    common::make_password(dir.path());
-    std::fs::create_dir_all(dir.path().join("telemetry")).unwrap();
-    let connection =
-        rusqlite::Connection::open(dir.path().join("telemetry/telemetry.sqlite")).unwrap();
-    connection
-        .execute_batch("CREATE TABLE logs (body TEXT NOT NULL)")
-        .unwrap();
-    drop(connection);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_otelo"))
-        .args([
-            "serve",
-            "--listen",
-            "127.0.0.1:0",
-            "--otlp-http",
-            "127.0.0.1:0",
-        ])
-        .args([
-            "--otlp-grpc",
-            "127.0.0.1:0",
-            "--own-telemetry",
-            "off",
-            "--data",
-        ])
-        .arg(dir.path())
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains(&format!(
-            "telemetry.sqlite has storage version 0 and this otelo writes {}. Stop otelo and run \
-             otelo reindex.",
-            otelo_indexed_storage_sqlite::STORAGE_VERSION
-        )),
-        "{stderr}"
+fn send_log(daemon: &Daemon, body: &str) {
+    let logged_at = otelo_indexed_storage::now_unix_nanos().to_string();
+    let request = format!(
+        r#"{{"resourceLogs": [{{"scopeLogs": [{{"logRecords": [
+            {{"timeUnixNano": "{logged_at}", "body": {{"stringValue": "{body}"}}}}
+        ]}}]}}]}}"#
     );
+    let response = ureq::post(format!("http://{}/v1/logs", daemon.otlp_http_addr))
+        .header("Content-Type", "application/json")
+        .send(request)
+        .unwrap();
+    assert_eq!(response.status(), 200);
+}
+
+#[test]
+fn the_daemon_builds_the_telemetry_of_another_storage_version_again_as_it_receives() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(dir.path());
+    send_log(&daemon, "cart is empty");
+    stop_daemon(daemon, StopSignal::Term);
+    let telemetry_path = dir.path().join("telemetry").join(TELEMETRY_FILE_NAME);
+    rusqlite::Connection::open(&telemetry_path)
+        .unwrap()
+        .pragma_update(None, "user_version", STORAGE_VERSION + 1)
+        .unwrap();
+
+    let daemon = start_daemon(dir.path());
+    let warning = format!(
+        "telemetry.sqlite has storage version {} and this otelo writes {STORAGE_VERSION}, \
+         so the indexer builds it again from the journal",
+        STORAGE_VERSION + 1
+    );
+    assert!(
+        daemon.stderr_until_listening.contains(&warning),
+        "{}",
+        daemon.stderr_until_listening
+    );
+    send_log(&daemon, "cart is full");
+    let daemon_stderr =
+        daemon.stderr_until_listening.clone() + &stop_daemon(daemon, StopSignal::Term);
+    assert!(
+        daemon_stderr.contains("caught up with the journal"),
+        "{daemon_stderr}"
+    );
+    let connection = rusqlite::Connection::open(&telemetry_path).unwrap();
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORAGE_VERSION);
+    let bodies: Vec<String> = connection
+        .prepare("SELECT body FROM logs ORDER BY logged_at")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(bodies, ["cart is empty", "cart is full"]);
 }

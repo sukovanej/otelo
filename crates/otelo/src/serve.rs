@@ -103,6 +103,7 @@ pub fn run_daemon(args: ServeArgs) -> anyhow::Result<()> {
                 &host,
             )?;
             own::install_tracing_subscriber(own_telemetry.as_ref());
+            own::log_panics_as_errors();
             let shutdown = CancellationToken::new();
             let signal = listen_for_shutdown_signal().context("listen for SIGTERM")?;
             tokio::spawn({
