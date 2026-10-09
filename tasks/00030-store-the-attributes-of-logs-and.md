@@ -1,8 +1,6 @@
 ---
 status: in_progress
 created: 2026-10-08T22:05:18Z
-tags:
-- draft
 ---
 # Store the attributes of logs and spans by how often their values repeat
 
