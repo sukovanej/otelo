@@ -5,17 +5,20 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use otelo_indexed_storage::{
-    Attributes, Batch, FrameCounts, Log, PipelineMeters, Records, Resource, Severity, TraceContext,
-    now_unix_nanos,
+    Attributes, Batch, FrameCounts, Log, Metric, NumberPoint, PipelineMeters, Points, Records,
+    Resource, Severity, TraceContext, now_unix_nanos,
 };
 use otelo_indexed_storage_sqlite::{
-    Config, Day, FrameMapper, Indexer, TELEMETRY_FILE_NAME, index_journal_until_caught_up,
+    Config, Day, FrameMapper, Indexer, Progress, TELEMETRY_FILE_NAME, TelemetryFile,
+    index_journal_until_caught_up,
 };
 use otelo_journal::Journal;
 use otelo_query::Signal;
 use rusqlite::Connection;
 
-const NANOS_PER_DAY: i64 = 86_400 * 1_000_000_000;
+const NANOS_PER_SECOND: i64 = 1_000_000_000;
+const NANOS_PER_HOUR: i64 = 3_600 * NANOS_PER_SECOND;
+const NANOS_PER_DAY: i64 = 24 * NANOS_PER_HOUR;
 
 fn numbered_log_batches(count: u32) -> Vec<Batch> {
     let logged_at = Day::today().start_at();
@@ -209,4 +212,83 @@ fn indexes_each_frame_once_the_journal_synced_it() {
     assert_eq!(logs_reading.records.written, 3);
     assert_eq!(logs_reading.index_lag, Duration::ZERO);
     assert!(logs_reading.index_transactions.count() >= 2);
+}
+
+fn gauge_batch(recorded_at: i64) -> Batch {
+    vec![Records {
+        resource: Resource {
+            service: "api".into(),
+            attributes: Attributes::new(),
+        },
+        logs: Vec::new(),
+        spans: Vec::new(),
+        metrics: vec![Metric {
+            name: "queue.depth".into(),
+            unit: "1".into(),
+            attributes: Attributes::new(),
+            points: Points::Gauge(vec![NumberPoint {
+                recorded_at,
+                value: 1.0,
+            }]),
+        }],
+    }]
+}
+
+fn count_summaries(telemetry_directory: &Path, table: &str) -> i64 {
+    Connection::open(telemetry_directory.join(TELEMETRY_FILE_NAME))
+        .unwrap()
+        .query_row(
+            &format!(
+                "SELECT count(*)
+                 FROM {table} summary
+                 JOIN metric_series ON metric_series.id = summary.metric_series_id
+                 WHERE metric_series.name = ?1"
+            ),
+            ["queue.depth"],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn rolls_up_only_the_minutes_it_has_indexed_while_it_catches_up() {
+    let directory = tempfile::tempdir().unwrap();
+    let telemetry_directory = directory.path().join("telemetry");
+    let opened = common::open_journal(directory.path());
+    let first_recorded_at = (now_unix_nanos().div_euclid(NANOS_PER_HOUR) - 3) * NANOS_PER_HOUR;
+    let recorded_ats: Vec<i64> = (0..720)
+        .map(|number| first_recorded_at + number * 10 * NANOS_PER_SECOND)
+        .collect();
+    let numbered_received_ats: Vec<(u32, i64)> = (0..).zip(recorded_ats.iter().copied()).collect();
+    common::append_numbered_frames(
+        opened.journal.as_ref(),
+        Signal::Metrics,
+        &numbered_received_ats,
+    );
+    let indexer = Indexer::spawn(
+        Config::new(telemetry_directory.clone()),
+        Arc::clone(&opened.journal) as _,
+        opened.synced_ends,
+        common::map_numbered_frames(recorded_ats.into_iter().map(gauge_batch).collect()),
+        Arc::new(PipelineMeters::default()),
+    )
+    .unwrap();
+    opened.threads.stop_and_join().unwrap();
+    indexer.join().unwrap();
+
+    let mut file = TelemetryFile::open(&telemetry_directory).unwrap();
+    let oldest_point_at = Day::today().add_days(-6).start_at();
+    while file
+        .roll_up_next_due(now_unix_nanos(), oldest_point_at)
+        .unwrap()
+        == Progress::MoreIsDue
+    {}
+    assert_eq!(
+        count_summaries(&telemetry_directory, "metric_minute_summaries"),
+        120
+    );
+    assert_eq!(
+        count_summaries(&telemetry_directory, "metric_hour_summaries"),
+        2
+    );
 }

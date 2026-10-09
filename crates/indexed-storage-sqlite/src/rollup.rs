@@ -53,8 +53,13 @@ impl SummaryTable {
 
 impl TelemetryFile {
     // At most an hour of minutes and one hour at a time, so the indexer takes frames in between.
-    pub fn roll_up_next_due(&mut self, now: i64, oldest_point_at: i64) -> anyhow::Result<Progress> {
-        let minutes_due_until = (now - LATE_BATCH_WAIT_NS).div_euclid(MINUTE_NS) * MINUTE_NS;
+    pub fn roll_up_next_due(
+        &mut self,
+        indexed_until_at: i64,
+        oldest_point_at: i64,
+    ) -> anyhow::Result<Progress> {
+        let minutes_due_until =
+            (indexed_until_at - LATE_BATCH_WAIT_NS).div_euclid(MINUTE_NS) * MINUTE_NS;
         let Some(minutes_summarized_until) = self.read_minutes_summarized_until(oldest_point_at)?
         else {
             return Ok(Progress::CaughtUp);

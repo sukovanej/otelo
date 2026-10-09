@@ -17,6 +17,12 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- While the indexer caught up with the journal, the metric rollups ran ahead of
+  it. They marked minutes and hours as done before their points were indexed,
+  and a chart over more than a few hours showed nothing for them. A rebuild of
+  the storage lost the rollups of nearly every day it rebuilt. The rollups now
+  stop at the last frame the indexer has read. The storage version goes to 4,
+  so the daemon builds `telemetry.sqlite` again, with the rollups it lost.
 - A thread of the daemon that panicked, such as the indexer, printed to stderr
   only, and nothing in otelo's own logs showed it. The panic is now an error
   log with its message, thread, file, line, and backtrace.
