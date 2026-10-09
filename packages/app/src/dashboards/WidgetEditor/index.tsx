@@ -1,4 +1,4 @@
-import { createSignal, latest, Show, untrack } from "solid-js";
+import { createSignal, Loading, Show, untrack } from "solid-js";
 
 import type { Widget, WidgetDisplay } from "@otelo/api";
 import { Button, CloseButton, Modal, Select, Tabs } from "@otelo/ui";
@@ -6,10 +6,12 @@ import { Button, CloseButton, Modal, Select, Tabs } from "@otelo/ui";
 import { fieldLabel, inlineField, textField } from "../../classes";
 import type { RangeState } from "../../services/range";
 import DashboardWidget from "../DashboardWidget";
+import DashboardWidgetSkeleton from "../DashboardWidgetSkeleton";
 import {
   CHART_KIND_OPTIONS,
   changeDisplayKind,
   describeWidgetQuery,
+  describeWidgetTitle,
   DISPLAY_KIND_OPTIONS,
   listWidgetQueries,
   measureRowsHeightPx,
@@ -29,10 +31,7 @@ interface WidgetEditorProps {
 
 export default function WidgetEditor(props: WidgetEditorProps) {
   const [widget, setWidget] = createSignal<Widget>(untrack(() => props.widget));
-  // The preview holds what it reads until its answer lands, so the form reads
-  // the latest widget and a quick second change builds on the first.
-  const editedWidget = () => latest(widget);
-  const display = () => editedWidget().display;
+  const display = () => widget().display;
   const changeDisplay = (changed: WidgetDisplay) =>
     setWidget((current) => ({ ...current, display: changed }));
   const timeseries = () => {
@@ -68,7 +67,7 @@ export default function WidgetEditor(props: WidgetEditorProps) {
         <input
           aria-label="Title"
           class={`${inlineField} h-8 min-w-48 flex-1 text-md font-semibold`}
-          value={editedWidget().title}
+          value={widget().title}
           placeholder={titlePlaceholder()}
           onInput={(e) => {
             const title = e.currentTarget.value;
@@ -85,15 +84,20 @@ export default function WidgetEditor(props: WidgetEditorProps) {
       </header>
       <div class="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:overflow-hidden">
         <section aria-label="Preview" class="bg-page p-4 lg:overflow-y-auto">
-          <div style={{ height: `${measureRowsHeightPx(editedWidget().layout.height)}px` }}>
-            <DashboardWidget widget={widget()} range={props.range} />
+          <div style={{ height: `${measureRowsHeightPx(widget().layout.height)}px` }}>
+            <Loading
+              on={widget().display}
+              fallback={<DashboardWidgetSkeleton title={describeWidgetTitle(widget())} />}
+            >
+              <DashboardWidget widget={widget()} range={props.range} />
+            </Loading>
           </div>
         </section>
         <form
           class="flex flex-col gap-4 border-t border-line p-4 lg:overflow-y-auto lg:border-t-0 lg:border-l"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!isMissingMetric()) props.onApply(latest(widget));
+            if (!isMissingMetric()) props.onApply(widget());
           }}
         >
           <Show when={timeseries()}>

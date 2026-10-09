@@ -8,6 +8,7 @@ import { ChartPanel, Panel } from "@otelo/viz";
 import { ApiContext } from "../../api";
 import { describeError, freezeDeeply } from "../../fetch";
 import { createRangeFetch, type RangeState } from "../../services/range";
+import DashboardWidgetSkeleton from "../DashboardWidgetSkeleton";
 import { type FetchedDisplay, fetchWidgetData, type WidgetData } from "../fetch-widget";
 import type { MeasuredChart } from "../measure";
 import { describeWidgetTitle } from "../widget";
@@ -55,7 +56,7 @@ export default function DashboardWidgetData(props: DashboardWidgetDataProps) {
     <Errored
       fallback={(error) => drawMessage(<Callout tone="error">{describeError(error())}</Callout>)}
     >
-      <Switch fallback={drawMessage("Loading…")}>
+      <Switch fallback={<DashboardWidgetSkeleton title={title()} actions={props.actions} />}>
         <Match when={fetched.errorMessage()}>
           {(errorMessage) => drawMessage(<Callout tone="error">{errorMessage()}</Callout>)}
         </Match>

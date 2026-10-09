@@ -1,4 +1,4 @@
-import { createSignal, For, latest, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 
 import type { GroupedQuery } from "@otelo/api";
 import { CloseIcon, PlusIcon } from "@otelo/icons";
@@ -17,7 +17,7 @@ interface WidgetEditorQueriesProps {
 
 export default function WidgetEditorQueries(props: WidgetEditorQueriesProps) {
   const [chosenIndex, setChosenIndex] = createSignal(0);
-  const shownIndex = () => Math.min(latest(chosenIndex), props.queries.length - 1);
+  const shownIndex = () => Math.min(chosenIndex(), props.queries.length - 1);
   const shownQuery = () => props.queries[shownIndex()];
   const addQuery = () => {
     const lastQuery = props.queries.at(-1);

@@ -3,7 +3,12 @@ import { expect, test } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import type { Api, Dashboard, DashboardDefinition, MetricSeries } from "@otelo/api";
-import { createHeldAnswers, expectNoReactivityMistakes, type HeldAnswers } from "@otelo/testing";
+import {
+  createDeferred,
+  createHeldAnswers,
+  expectNoReactivityMistakes,
+  type HeldAnswers,
+} from "@otelo/testing";
 
 import { createFakeApi } from "./fake-api";
 import { toDashboardList, toEmptyMetricSeries, toMetricList } from "./fixtures";
@@ -30,6 +35,21 @@ const CPU_DEFINITION: DashboardDefinition = {
           { by: [], query: { signal: "metrics", name: "cpu", filter: "", aggregation: "avg" } },
           { by: [], query: { signal: "metrics", name: "memory", filter: "", aggregation: "avg" } },
         ],
+      },
+    },
+  ],
+};
+
+const VALUE_DEFINITION: DashboardDefinition = {
+  name: "Hosts",
+  description: "",
+  widgets: [
+    {
+      title: "CPU",
+      layout: { column: 0, row: 0, width: 6, height: 6 },
+      display: {
+        kind: "value",
+        query: { signal: "metrics", name: "cpu", filter: "", aggregation: "avg" },
       },
     },
   ],
@@ -77,6 +97,26 @@ test("a dashboard keeps its edits apart from what it saved, through reloads, a d
   });
 
   expect(sentDefinitions).toEqual([{ ...SAVED_DEFINITION, name: "Latency by route" }]);
+  expectNoReactivityMistakes(artifact);
+});
+
+test("a widget draws a skeleton until its first answer lands", async () => {
+  const series = createDeferred<MetricSeries>();
+  const api = createFakeApi({
+    getDashboard: () => Promise.resolve(toDashboard(VALUE_DEFINITION)),
+    getMetricSeries: () => series.promise,
+  });
+  const skeleton = page.getByRole("status", { name: "Loading" });
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/dashboards/1");
+    await expect.element(skeleton).toBeInTheDocument();
+    await expect.element(page.getByRole("heading", { name: "CPU" })).toBeInTheDocument();
+
+    series.resolve(CPU_SERIES);
+    await expect.element(skeleton).not.toBeInTheDocument();
+  });
+
   expectNoReactivityMistakes(artifact);
 });
 
@@ -139,6 +179,44 @@ test("cancelling an edit while its preview loads keeps the next pages navigating
   expectNoReactivityMistakes(artifact);
 });
 
+test("switching a value widget to a time series shows the chart form while the preview loads", async () => {
+  const series = createHeldSeries();
+  const api = createCpuDashboardApi(series, VALUE_DEFINITION);
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/dashboards/1");
+    await openCpuEditor();
+    await userEvent.click(page.getByRole("tab", { name: "Time series" }));
+    await expect.element(page.getByRole("tab", { name: "Line" })).toBeInTheDocument();
+    await expect.element(page.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Cancel", exact: true }));
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+
+    releaseHeldSeries(series);
+  });
+
+  expectNoReactivityMistakes(artifact);
+});
+
+test("switching a query to spans shows the span form while the preview loads", async () => {
+  const series = createHeldSeries();
+  const api = createCpuDashboardApi(series);
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/dashboards/1");
+    await openCpuEditor();
+    await userEvent.click(page.getByRole("tab", { name: "Spans" }));
+    await expect.element(page.getByRole("button", { name: /^Measure/ })).toBeInTheDocument();
+    await expect.element(page.getByRole("status", { name: "Loading" })).toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Cancel", exact: true }));
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+
+    releaseHeldSeries(series);
+  });
+
+  expectNoReactivityMistakes(artifact);
+});
+
 interface HeldSeries {
   readonly cpu: HeldAnswers<MetricSeries>;
   readonly memory: HeldAnswers<MetricSeries>;
@@ -153,9 +231,12 @@ function releaseHeldSeries(series: HeldSeries) {
   series.memory.releaseAll(MEMORY_SERIES);
 }
 
-function createCpuDashboardApi(series: HeldSeries): Api {
+function createCpuDashboardApi(
+  series: HeldSeries,
+  definition: DashboardDefinition = CPU_DEFINITION,
+): Api {
   return createFakeApi({
-    getDashboard: () => Promise.resolve(toDashboard(CPU_DEFINITION)),
+    getDashboard: () => Promise.resolve(toDashboard(definition)),
     getMetricSeries: (name, _query, signal) =>
       (name === "memory" ? series.memory : series.cpu).answer(signal),
     getMetrics: () => Promise.resolve(toMetricList(["cpu", "memory"])),

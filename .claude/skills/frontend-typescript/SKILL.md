@@ -100,6 +100,13 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   `latest()` too, as `list.addTerm` does. `loading()` shows the wait. A fetch that joins a
   key another one shows skips the reload on mount, or the reload holds whatever mounted
   it, such as the widget editor.
+- **A form whose edits feed a preview** puts the preview behind `<Loading on={…}>`, keyed
+  on what the form edits, as `WidgetEditor` does. Its fallback is the skeleton the widget
+  draws until its first answer, `DashboardWidgetSkeleton` around the `ChartSkeleton` of viz.
+  Each edit then commits at once and the form reads its state plainly. Never read such a
+  form through `latest()`: a `<Show>` whose condition flips during the hold mounts its
+  branch on the new value, the branch's accessor re-checks the old one and throws, and the
+  whole app stops updating.
 - **A loading flag renders as text** in an element that stays mounted, as `PageBar` does. In
   rc.14 an element that `<Show>` or a ternary mounts from `loading()` keeps the pending value
   after the answer lands.
