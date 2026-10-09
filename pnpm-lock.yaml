@@ -68,7 +68,7 @@ catalogs:
       version: 5.0.3
 
 patchedDependencies:
-  '@solidjs/signals@2.0.0-rc.14': c15c55676f96921ea995e8a87c3d80370d6aeb6718f92fce14e6888ab2012353
+  '@solidjs/signals@2.0.0-rc.14': 849bb20867911465bfa75da2eeb2cf860c73c8b5f9d52dc616e2b26d3a424081
 
 importers:
 
@@ -2493,7 +2493,7 @@ snapshots:
 
   '@solidjs/diagnostics@2.0.0-rc.14(@solidjs/web@2.0.0-rc.14(solid-js@2.0.0-rc.14))(solid-js@2.0.0-rc.14)(vitest@5.0.3)':
     dependencies:
-      '@solidjs/signals': 2.0.0-rc.14(patch_hash=c15c55676f96921ea995e8a87c3d80370d6aeb6718f92fce14e6888ab2012353)
+      '@solidjs/signals': 2.0.0-rc.14(patch_hash=849bb20867911465bfa75da2eeb2cf860c73c8b5f9d52dc616e2b26d3a424081)
       '@solidjs/web': 2.0.0-rc.14(solid-js@2.0.0-rc.14)
       solid-js: 2.0.0-rc.14
     optionalDependencies:
@@ -2504,7 +2504,7 @@ snapshots:
       '@solidjs/web': 2.0.0-rc.14(solid-js@2.0.0-rc.14)
       solid-js: 2.0.0-rc.14
 
-  '@solidjs/signals@2.0.0-rc.14(patch_hash=c15c55676f96921ea995e8a87c3d80370d6aeb6718f92fce14e6888ab2012353)': {}
+  '@solidjs/signals@2.0.0-rc.14(patch_hash=849bb20867911465bfa75da2eeb2cf860c73c8b5f9d52dc616e2b26d3a424081)': {}
 
   '@solidjs/vite-plugin@3.0.0-next.47(@solidjs/web@2.0.0-rc.14(solid-js@2.0.0-rc.14))(solid-js@2.0.0-rc.14)(supports-color@10.2.2)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0))':
     dependencies:
@@ -3235,7 +3235,7 @@ snapshots:
 
   solid-js@2.0.0-rc.14:
     dependencies:
-      '@solidjs/signals': 2.0.0-rc.14(patch_hash=c15c55676f96921ea995e8a87c3d80370d6aeb6718f92fce14e6888ab2012353)
+      '@solidjs/signals': 2.0.0-rc.14(patch_hash=849bb20867911465bfa75da2eeb2cf860c73c8b5f9d52dc616e2b26d3a424081)
       csstype: 3.2.3
       seroval: 1.6.8
       seroval-plugins: 1.6.8(seroval@1.6.8)

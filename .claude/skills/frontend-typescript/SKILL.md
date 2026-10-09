@@ -126,11 +126,11 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   keys `TraceView` by the trace id, never changes key, so its reads need no boundary.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
   remove listeners and abort requests, and leave signals untouched. Libraries still write
-  in theirs, the solid-query hook among them. In rc.14 such a write to a held signal,
-  made while its transaction lands, left the scheduler joined to the landed transaction,
-  so no later write committed and the router stopped updating the URL. `patches/` makes
-  the scheduler skip a landed transaction. Drop the patch once Solid ships the fix
-  (SIN-31).
+  in theirs, the solid-query hook among them. In rc.14 such a write to a held signal
+  kept the scheduler joined to its transaction past the flush. Later writes were then
+  held in it, for good once it had landed, so the router stopped updating the URL.
+  `patches/` drops that join when the transaction lands and when the flush ends. Drop the
+  patch once Solid ships the fix (SIN-31).
 
 The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 
