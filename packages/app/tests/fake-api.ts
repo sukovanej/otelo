@@ -1,6 +1,7 @@
 import type { Api } from "@otelo/api";
 
-// Each endpoint a test leaves out fails the request that reaches it, with its name.
+// Each endpoint a test leaves out fails the request that reaches it, with its name, and the
+// events of one it leaves out never come.
 export function createFakeApi(endpoints: Partial<Api>): Api {
   return {
     getLogs: endpoints.getLogs ?? rejectUnexpectedCall("getLogs"),
@@ -24,6 +25,7 @@ export function createFakeApi(endpoints: Partial<Api>): Api {
     addIndex: endpoints.addIndex ?? rejectUnexpectedCall("addIndex"),
     logIn: endpoints.logIn ?? rejectUnexpectedCall("logIn"),
     logOut: endpoints.logOut ?? rejectUnexpectedCall("logOut"),
+    subscribeToIndexing: endpoints.subscribeToIndexing ?? (() => () => undefined),
   };
 }
 

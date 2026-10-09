@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use otelo_indexed_storage::query::{LogLine, PageRequest, SpanSort, TraceSpan};
-use otelo_indexed_storage::{PipelineMeters, RangeQueries, TimeRange, now_unix_nanos};
+use otelo_indexed_storage::{Indexing, PipelineMeters, RangeQueries, TimeRange, now_unix_nanos};
 use otelo_indexed_storage_sqlite::{Config, FrameMapper, Indexer, Reader, TELEMETRY_FILE_NAME};
 use otelo_journal::{Journal, SyncedEndInbox};
 use otelo_journal_files::{JournalFiles, JournalThreads};
@@ -81,6 +81,7 @@ impl Receiver {
             journal.synced_ends.take().unwrap(),
             map_frame,
             Arc::clone(&meters),
+            tokio::sync::watch::Sender::new(Indexing::STARTING),
         )
         .unwrap();
         Self::start_servers(Some(indexer), meters, journal)

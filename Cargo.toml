@@ -17,6 +17,7 @@ clap = { version = "4", features = ["derive", "env"] }
 crc32c = "0.6.8"
 data-encoding = "2.11"
 flate2 = "1"
+futures-util = { version = "0.3.34", default-features = false }
 getrandom = "0.4"
 insta = { version = "1.49", features = ["glob"] }
 jiff = "0.2.38"

@@ -8,6 +8,7 @@ use otelo_api::{
 use otelo_indexed_storage_sqlite::{Day, Sqlite};
 use otelo_query::Signal;
 use otelo_state::StateFile;
+use tokio_util::sync::CancellationToken;
 
 const HOUR_NS: i64 = 3600 * 1_000_000_000;
 
@@ -30,6 +31,7 @@ fn caps_the_range_at_the_retention_of_its_signals() {
     let api = Api::new(
         Arc::new(Sqlite::open(dir.path(), BTreeSet::new()).unwrap()),
         Arc::new(StateFile::open(dir.path()).unwrap()),
+        CancellationToken::new(),
     );
     let range = api
         .resolve_range_within_retention(

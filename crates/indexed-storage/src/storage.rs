@@ -2,13 +2,14 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use otelo_query::{Catalog, Query, Signal};
+use tokio::sync::watch;
 
 use crate::query::{
     AttributeKeys, GroupBuckets, LogCounts, LogGroupingField, LogGroups, Logs, MetricFilter,
     MetricList, MetricSeries, PageRequest, RankOrder, Resolution, Service, Services,
     SpanGroupRanking, SpanGroupingField, SpanGroups, SpanSort, Spans, Trace, Traces,
 };
-use crate::{IndexedAttribute, Result, TimeRange, TraceId};
+use crate::{IndexedAttribute, Indexing, Result, TimeRange, TraceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StorageSize {
@@ -27,6 +28,8 @@ pub trait Storage: Send + Sync {
     fn indexed_attributes(&self) -> BTreeSet<IndexedAttribute>;
 
     fn replace_indexed_attributes(&self, attributes: BTreeSet<IndexedAttribute>);
+
+    fn watch_indexing(&self) -> watch::Receiver<Indexing>;
 }
 
 pub trait RangeQueries: Catalog {

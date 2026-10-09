@@ -8,10 +8,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use otelo_indexed_storage::{
-    Batch, FrameCounts, PipelineMeters, RecordCounts, Records, now_unix_nanos,
+    Batch, FrameCounts, Indexing, PipelineMeters, RecordCounts, Records, SignalIndexing,
+    now_unix_nanos,
 };
 use otelo_journal::{Frame, Frames, Hour, Journal, Position, SyncedEnd, SyncedEndInbox};
 use otelo_query::Signal;
+use tokio::sync::watch;
 
 use crate::day::Day;
 use crate::indexes::{Indexes, VersionedAttributes};
@@ -28,6 +30,8 @@ const MAX_FRAMES_PER_TRANSACTION: usize = 64;
 const INDEX_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 // A frame the journal cannot read stays unreadable, and each retry would log it again.
 const RETRY_AFTER_READ_FAILURE: Duration = Duration::from_mins(1);
+// A burst of frames puts the index a moment behind, which is not worth telling the reader.
+const MAX_LAG_OF_CAUGHT_UP_INDEX: Duration = Duration::from_secs(10);
 
 pub type FrameMapper = Arc<dyn Fn(Signal, &[u8]) -> anyhow::Result<Batch> + Send + Sync>;
 
@@ -75,8 +79,9 @@ impl Indexer {
         synced_ends: SyncedEndInbox,
         map_frame: FrameMapper,
         meters: Arc<PipelineMeters>,
+        indexing: watch::Sender<Indexing>,
     ) -> anyhow::Result<Self> {
-        let state = IndexerState::open(config, journal, map_frame, meters)?;
+        let state = IndexerState::open(config, journal, map_frame, meters, indexing)?;
         let thread = thread::Builder::new()
             .name("telemetry-indexer".into())
             .spawn(move || state.index_until_journal_stops(&synced_ends))
@@ -98,7 +103,13 @@ pub fn index_journal_until_caught_up(
     meters: Arc<PipelineMeters>,
     mut report_indexed_hour: impl FnMut(Signal, Hour),
 ) -> anyhow::Result<()> {
-    let mut state = IndexerState::open(config, journal, map_frame, meters)?;
+    let mut state = IndexerState::open(
+        config,
+        journal,
+        map_frame,
+        meters,
+        watch::Sender::new(Indexing::STARTING),
+    )?;
     state.apply_index_changes();
     for signal in Signal::ALL {
         let mut reported_hour = None;
@@ -144,7 +155,33 @@ struct SignalCursor {
     indexed_position: Option<Position>,
     indexed_until: IndexedUntil,
     newest_journal_received_at: Option<i64>,
+    catch_up_first_received_at: Option<i64>,
     journal_read: JournalRead,
+}
+
+impl SignalCursor {
+    fn follow_catch_up(
+        &mut self,
+        index_lag: Duration,
+        first_frame_received_at: i64,
+        last_frame_received_at: i64,
+        journal_received_until: i64,
+    ) -> SignalIndexing {
+        if index_lag <= MAX_LAG_OF_CAUGHT_UP_INDEX {
+            self.catch_up_first_received_at = None;
+            return SignalIndexing::CaughtUp;
+        }
+        let catch_up_first_received_at = *self
+            .catch_up_first_received_at
+            .get_or_insert(first_frame_received_at);
+        SignalIndexing::CatchingUp {
+            indexed_percent: measure_indexed_percent(
+                catch_up_first_received_at,
+                last_frame_received_at,
+                journal_received_until,
+            ),
+        }
+    }
 }
 
 struct IndexerState {
@@ -153,6 +190,7 @@ struct IndexerState {
     journal: Arc<dyn Journal>,
     map_frame: FrameMapper,
     meters: Arc<PipelineMeters>,
+    indexing: watch::Sender<Indexing>,
     cursors: [SignalCursor; 3],
     applied_indexes: Option<VersionedAttributes>,
     rejected_points: u64,
@@ -165,6 +203,7 @@ impl IndexerState {
         journal: Arc<dyn Journal>,
         map_frame: FrameMapper,
         meters: Arc<PipelineMeters>,
+        indexing: watch::Sender<Indexing>,
     ) -> anyhow::Result<Self> {
         let file = TelemetryFile::open(&config.directory)?;
         let mut cursors: [SignalCursor; 3] = Default::default();
@@ -177,6 +216,7 @@ impl IndexerState {
             journal,
             map_frame,
             meters,
+            indexing,
             cursors,
             applied_indexes: None,
             rejected_points: 0,
@@ -308,7 +348,10 @@ impl IndexerState {
         let caught_up = read_frames.len() < MAX_FRAMES_PER_TRANSACTION;
         let Some(last_frame) = read_frames.last() else {
             self.meters.set_index_lag(signal, Duration::ZERO);
-            self.cursor_mut(signal).indexed_until = IndexedUntil::JournalEnd;
+            let cursor = self.cursor_mut(signal);
+            cursor.indexed_until = IndexedUntil::JournalEnd;
+            cursor.catch_up_first_received_at = None;
+            self.report_signal_indexing(signal, SignalIndexing::CaughtUp);
             return Ok(Progress::CaughtUp);
         };
         let transaction_started_at = Instant::now();
@@ -354,22 +397,37 @@ impl IndexerState {
         } else {
             IndexedUntil::FrameReceivedAt(last_frame.received_at)
         };
+        let journal_received_until = cursor
+            .newest_journal_received_at
+            .unwrap_or_else(now_unix_nanos);
         let index_lag = if caught_up {
             Duration::ZERO
         } else {
-            let newest_journal_received_at = cursor
-                .newest_journal_received_at
-                .unwrap_or_else(now_unix_nanos);
             Duration::from_nanos(
-                u64::try_from(newest_journal_received_at - last_frame.received_at).unwrap_or(0),
+                u64::try_from(journal_received_until - last_frame.received_at).unwrap_or(0),
             )
         };
         meters.set_index_lag(signal, index_lag);
-        if caught_up {
-            return Ok(Progress::CaughtUp);
+        let signal_indexing = cursor.follow_catch_up(
+            index_lag,
+            read_frames[0].received_at,
+            last_frame.received_at,
+            journal_received_until,
+        );
+        if !caught_up {
+            cursor.journal_read = JournalRead::Reading(frames);
         }
-        cursor.journal_read = JournalRead::Reading(frames);
-        Ok(Progress::MoreIsDue)
+        self.report_signal_indexing(signal, signal_indexing);
+        Ok(if caught_up {
+            Progress::CaughtUp
+        } else {
+            Progress::MoreIsDue
+        })
+    }
+
+    fn report_signal_indexing(&self, signal: Signal, signal_indexing: SignalIndexing) {
+        self.indexing
+            .send_if_modified(|indexing| indexing.replace_signal(signal, signal_indexing));
     }
 
     fn select_retained_records<'a>(
@@ -494,6 +552,18 @@ fn choose_resume_position(indexed_position: Option<Position>, oldest_retained_at
     indexed_position
         .filter(|position| *position >= oldest_retained_position)
         .unwrap_or(oldest_retained_position)
+}
+
+fn measure_indexed_percent(
+    catch_up_first_received_at: i64,
+    indexed_received_at: i64,
+    journal_received_until: i64,
+) -> u8 {
+    let indexed_nanos = i128::from(indexed_received_at - catch_up_first_received_at);
+    let catch_up_nanos = i128::from(journal_received_until - catch_up_first_received_at).max(1);
+    // A catch-up that reached 100 % has caught up.
+    let indexed_percent = (indexed_nanos * 100 / catch_up_nanos).clamp(0, 99);
+    u8::try_from(indexed_percent).expect("a percent fits a u8")
 }
 
 const fn signal_index(signal: Signal) -> usize {

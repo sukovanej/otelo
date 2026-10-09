@@ -2,6 +2,7 @@ mod auth;
 mod catalog;
 mod dashboards;
 mod error;
+mod events;
 mod indexes;
 mod logs;
 mod metrics;
@@ -24,6 +25,7 @@ use otelo_indexed_storage::query::{MAX_PAGE_ROWS, SpanGroupRank, SpanSort};
 use otelo_indexed_storage::{RangeQueries, Storage, TimeRange};
 use otelo_query::Signal;
 use otelo_state::StateFile;
+use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use tracing::field::Empty;
 use utoipa::OpenApi;
@@ -89,6 +91,7 @@ struct OpenApiInfo;
 pub struct Api {
     storage: Arc<dyn Storage>,
     state: Arc<StateFile>,
+    shutdown: CancellationToken,
 }
 
 fn build_api_routes() -> OpenApiRouter<Api> {
@@ -117,6 +120,7 @@ fn build_api_routes() -> OpenApiRouter<Api> {
         ))
         .routes(routes!(indexes::list_indexes))
         .routes(routes!(indexes::add_index, indexes::remove_index))
+        .routes(routes!(events::stream_events))
         .routes(routes!(auth::log_in))
         .routes(routes!(auth::log_out))
 }
@@ -215,8 +219,16 @@ pub enum DefaultSince {
 
 impl Api {
     #[must_use]
-    pub fn new(storage: Arc<dyn Storage>, state: Arc<StateFile>) -> Self {
-        Self { storage, state }
+    pub const fn new(
+        storage: Arc<dyn Storage>,
+        state: Arc<StateFile>,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            storage,
+            state,
+            shutdown,
+        }
     }
 
     async fn run_blocking_query<T: Send + 'static>(
