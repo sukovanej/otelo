@@ -23,8 +23,9 @@ pub struct Services {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct ServiceSummary {
     pub service: String,
-    /// The attributes of the newest resource of the service that has any,
-    /// such as `telemetry.sdk.language`.
+    /// The attributes of the resource of the newest log or span of the
+    /// service, preferring a resource that has any, such as
+    /// `telemetry.sdk.language`.
     pub resource: Attributes,
     pub stats: ServiceStats,
     /// Every step of the range, oldest first.
@@ -35,8 +36,9 @@ pub struct ServiceSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct Service {
     pub service: String,
-    /// The attributes of the newest resource of the service. Empty when the
-    /// range has none of its telemetry.
+    /// The attributes of the resource of the newest log or span of the
+    /// service, preferring a resource that has any. Empty when the service
+    /// sent no log or span.
     pub resource: Attributes,
     /// The range, after the retention capped it.
     #[schema(value_type = String, format = DateTime)]

@@ -2700,7 +2700,7 @@
           },
           "resource": {
             "$ref": "#/components/schemas/Attributes",
-            "description": "The attributes of the newest resource of the service. Empty when the\nrange has none of its telemetry."
+            "description": "The attributes of the resource of the newest log or span of the\nservice, preferring a resource that has any. Empty when the service\nsent no log or span."
           },
           "service": {
             "type": "string"
@@ -2800,7 +2800,7 @@
           },
           "resource": {
             "$ref": "#/components/schemas/Attributes",
-            "description": "The attributes of the newest resource of the service that has any,\nsuch as `telemetry.sdk.language`."
+            "description": "The attributes of the resource of the newest log or span of the\nservice, preferring a resource that has any, such as\n`telemetry.sdk.language`."
           },
           "service": {
             "type": "string"
