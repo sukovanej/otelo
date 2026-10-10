@@ -5,7 +5,12 @@ All notable changes to otelo are in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.7...main)
+## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.8...main)
+
+## [0.0.8](https://github.com/sukovanej/otelo/compare/v0.0.7...v0.0.8) - 2026-10-10
+
+The storage version goes up to 5. `otelo serve` rebuilds `telemetry.sqlite`
+from the journal when it starts, so the update needs no `otelo reindex`.
 
 ### Added
 
@@ -23,6 +28,21 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an update that changes the storage needs no stop and no `otelo reindex`.
   Until the indexer catches up, queries miss the newest hours. The daemon logs
   `caught up with the journal` when it has.
+- `telemetry.sqlite` stores the attributes of a log or a span by how often
+  their values repeat. A value that repeats across a group of records is kept
+  once for the group or once in a table of values, and only the rest stay on
+  the row. On 242,270 spans the file went from 261 MB to 48.8 MB, and a filter
+  on one attribute went from 180 to 430 ms down to 6 to 200 ms.
+- The service pages read summaries of the spans by the minute and the hour, in
+  place of every span of the range. A summary covers the spans of one service,
+  name, kind, status, and the attributes that the OpenTelemetry semantic
+  conventions group duration metrics by. A week of one app took 4.5 s of
+  database queries on a 1-CPU server before.
+- The indexer replaces the literals in `db.query.text` and `db.statement` of a
+  SQL database with `?` and collapses lists. An app that writes its values into
+  the query text now gets one query group per query, not one per call.
+- A dashboard widget draws a skeleton of its chart while it loads, in place of
+  "Loading…".
 
 ### Fixed
 
@@ -33,11 +53,24 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it. They marked minutes and hours as done before their points were indexed,
   and a chart over more than a few hours showed nothing for them. A rebuild of
   the storage lost the rollups of nearly every day it rebuilt. The rollups now
-  stop at the last frame the indexer has read. The storage version goes to 4,
-  so the daemon builds `telemetry.sqlite` again, with the rollups it lost.
+  stop at the last frame the indexer has read, and the rebuild of this update
+  brings back the rollups it lost.
 - A thread of the daemon that panicked, such as the indexer, printed to stderr
   only, and nothing in otelo's own logs showed it. The panic is now an error
   log with its message, thread, file, line, and backtrace.
+- Leaving a page while it still loaded, such as a click on a nav link right
+  after "Earlier", broke the router until a reload. The URL stopped changing
+  and "Loading…" stayed. A patch of Solid's scheduler fixes it until Solid
+  ships its own fix.
+- Switching a widget from Value to Time series, or a query from Metrics to
+  Spans, stopped the whole web UI, Cancel included.
+- During a slow load, the range label showed the old and the new range at
+  once, Group by still offered a name just picked, "Edit the widget" waited
+  for the reload to finish, and "Add a query" kept the editor on the old query.
+- The services view lost the language of a service after `otelo reindex`. A
+  service took the resource of its host metrics, which has no
+  `telemetry.sdk.language`. It now takes the resource of its newest log or
+  span.
 
 ## [0.0.7](https://github.com/sukovanej/otelo/compare/v0.0.6...v0.0.7) - 2026-10-08
 
