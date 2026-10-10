@@ -3,8 +3,8 @@ mod common;
 use std::path::Path;
 
 use otelo_indexed_storage::{
-    Attributes, Batch, Log, RangeQueries, Records, Resource, Severity, Span, SpanId, SpanKind,
-    SpanStatus, TimeRange, TraceContext, TraceId,
+    Attributes, Batch, Log, Metric, NumberPoint, Points, RangeQueries, Records, Resource, Severity,
+    Span, SpanId, SpanKind, SpanStatus, TimeRange, TraceContext, TraceId,
 };
 use otelo_indexed_storage_sqlite::{Config, Day, Reader};
 use serde_json::{Value, json};
@@ -280,6 +280,47 @@ fn a_service_has_its_requests_over_time() {
             .iter()
             .all(|bucket| bucket.requests.count == 0)
     );
+}
+
+#[test]
+fn a_service_has_the_resource_of_its_newest_log_or_span() {
+    let directory = tempfile::tempdir().unwrap();
+    let today_start_at = Day::today().start_at();
+
+    let mut new_sdk = records("api", &json!({"telemetry.sdk.language": "rust"}));
+    new_sdk.spans = vec![span(
+        1,
+        1,
+        None,
+        SpanKind::Internal,
+        "tick",
+        today_start_at + 2 * SECOND,
+    )];
+    let mut old_sdk = records("api", &json!({"telemetry.sdk.language": "go"}));
+    old_sdk.logs = vec![log(today_start_at + SECOND, Severity::INFO)];
+    let mut host = records("api", &json!({"host.name": "server"}));
+    host.metrics = vec![Metric {
+        name: "process.memory.usage".into(),
+        unit: "By".into(),
+        attributes: Attributes::new(),
+        points: Points::UpDown(vec![NumberPoint {
+            recorded_at: today_start_at + 3 * SECOND,
+            value: 1.0,
+        }]),
+    }];
+    write_batch(directory.path(), vec![new_sdk, old_sdk, host]);
+
+    let reader = Reader::open(
+        directory.path(),
+        TimeRange::new(today_start_at, today_start_at + MINUTE).unwrap(),
+    )
+    .unwrap();
+    let rust = attributes_from_json(json!({"telemetry.sdk.language": "rust"}));
+    assert_eq!(
+        reader.list_services(MINUTE, 10).unwrap().services[0].resource,
+        rust
+    );
+    assert_eq!(reader.get_service("api", MINUTE).unwrap().resource, rust);
 }
 
 #[test]

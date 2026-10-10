@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::iter;
 use std::ops::ControlFlow;
 
@@ -15,6 +16,7 @@ use super::span_stats::SpanTally;
 use super::traces::compile_span_query;
 use super::{LOG_ALIASES, SPAN_ALIASES, WhereClause, timestamp_from_nanos, truncate_to_limit};
 use crate::Reader;
+use crate::series::ResourceId;
 
 fn http_request_query() -> Query {
     Query {
@@ -278,27 +280,75 @@ impl Reader {
         let mut where_clause = WhereClause::new();
         if let Some(service) = only_service {
             where_clause.push_condition_with_param(
-                "service = :service",
+                "resource.service = :service",
                 ":service",
                 service.to_owned(),
             );
         }
-        where_clause.push_param(":no_attributes", Attributes::new().to_json());
-        let mut resources = HashMap::new();
-        // A resource with attributes wins over one without, and a newer one over an older one.
+        // Metrics don't pick the resource, because otelo's host collector sends those of a service
+        // under a resource of its own, without the attributes of the service's SDK.
         let sql = format!(
-            "SELECT service, attributes, attributes != :no_attributes AS has_attributes
-             FROM resources
+            "SELECT resource.service,
+                    resource.attributes,
+                    resource.id,
+                    max(coalesce((SELECT max(span.started_at)
+                                  FROM spans span
+                                  WHERE span.stable_attribute_set_id = stable_attribute_set.id),
+                                 (SELECT max(log.logged_at)
+                                  FROM logs log
+                                  WHERE log.stable_attribute_set_id = stable_attribute_set.id)))
+                        AS newest_log_or_span_at
+             FROM resources resource
+             JOIN record_groups record_group ON record_group.resource_id = resource.id
+             JOIN stable_attribute_sets stable_attribute_set
+               ON stable_attribute_set.record_group_id = record_group.id
              WHERE {}
-             ORDER BY has_attributes, id",
+             GROUP BY resource.id",
             where_clause.sql()
         );
+        let mut picked_resources: HashMap<String, ResourceCandidate> = HashMap::new();
         self.scan_rows(&sql, &where_clause, |row| {
+            let Some(newest_log_or_span_at) = row.get(3)? else {
+                return Ok(ControlFlow::Continue(()));
+            };
             let attributes: String = row.get(1)?;
-            resources.insert(row.get(0)?, serde_json::from_str(&attributes)?);
+            let candidate = ResourceCandidate {
+                attributes: serde_json::from_str(&attributes)?,
+                newest_log_or_span_at,
+                resource_id: row.get(2)?,
+            };
+            match picked_resources.entry(row.get(0)?) {
+                Entry::Occupied(mut entry) => {
+                    if entry.get().rank() < candidate.rank() {
+                        entry.insert(candidate);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(candidate);
+                }
+            }
             Ok(ControlFlow::Continue(()))
         })?;
-        Ok(resources)
+        Ok(picked_resources
+            .into_iter()
+            .map(|(service, candidate)| (service, candidate.attributes))
+            .collect())
+    }
+}
+
+struct ResourceCandidate {
+    attributes: Attributes,
+    newest_log_or_span_at: i64,
+    resource_id: ResourceId,
+}
+
+impl ResourceCandidate {
+    fn rank(&self) -> (bool, i64, ResourceId) {
+        (
+            !self.attributes.is_empty(),
+            self.newest_log_or_span_at,
+            self.resource_id,
+        )
     }
 }
 

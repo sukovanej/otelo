@@ -8,7 +8,7 @@ use twox_hash::XxHash3_64;
 // One attribute that holds a user ID would otherwise make a series per user.
 pub const MAX_SERIES_PER_METRIC: i64 = 1000;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResourceId(i64);
 
 impl ToSql for ResourceId {

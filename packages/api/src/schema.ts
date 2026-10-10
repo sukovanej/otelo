@@ -943,8 +943,9 @@ export interface components {
             /** Format: date-time */
             end_at: string;
             /**
-             * @description The attributes of the newest resource of the service. Empty when the
-             *     range has none of its telemetry.
+             * @description The attributes of the resource of the newest log or span of the
+             *     service, preferring a resource that has any. Empty when the service
+             *     sent no log or span.
              */
             resource: components["schemas"]["Attributes"];
             service: string;
@@ -996,8 +997,9 @@ export interface components {
             /** @description Every step of the range, oldest first. */
             buckets: components["schemas"]["ServiceBucket"][];
             /**
-             * @description The attributes of the newest resource of the service that has any,
-             *     such as `telemetry.sdk.language`.
+             * @description The attributes of the resource of the newest log or span of the
+             *     service, preferring a resource that has any, such as
+             *     `telemetry.sdk.language`.
              */
             resource: components["schemas"]["Attributes"];
             service: string;
