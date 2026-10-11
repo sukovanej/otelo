@@ -27,6 +27,7 @@ export default function ServicePageSpanGroups(props: ServicePageSpanGroupsProps)
       id: "name",
       label: props.nameLabel,
       width: "minmax(24ch,5fr)",
+      narrowScreenWidth: "minmax(0,1fr)",
       sortBy: (group) => group.name,
       cell: (group) => (
         <SpanTitle variant="group" name={group.name} attributes={group.attributes} />
@@ -44,6 +45,7 @@ export default function ServicePageSpanGroups(props: ServicePageSpanGroupsProps)
       id: "rate",
       label: "Rate",
       unit: "rate",
+      hiddenOnNarrowScreen: true,
       value: (group) => toRate(group.spans.count, rangeSeconds()),
     },
     {
@@ -51,6 +53,7 @@ export default function ServicePageSpanGroups(props: ServicePageSpanGroupsProps)
       id: "errors",
       label: "Error rate",
       unit: "ratio",
+      hiddenOnNarrowScreen: true,
       value: (group) => toShare(group.spans.errors, group.spans.count),
       tone: (group) => (group.spans.errors > 0 ? "error" : undefined),
     },
@@ -59,6 +62,7 @@ export default function ServicePageSpanGroups(props: ServicePageSpanGroupsProps)
       id: percentile,
       label: percentile.toUpperCase(),
       unit: "duration",
+      hiddenOnNarrowScreen: percentile !== "p95",
       value: (group) => group.spans.latency?.[percentile] ?? null,
     })),
     {
@@ -67,6 +71,7 @@ export default function ServicePageSpanGroups(props: ServicePageSpanGroupsProps)
       label: "Total time",
       description: "The durations of its spans added up",
       unit: "duration",
+      hiddenOnNarrowScreen: true,
       value: (group) => group.spans.total_ns,
     },
   ]);

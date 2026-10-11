@@ -196,6 +196,30 @@ export function toEmptyMetricSeries(name: string): MetricSeries {
   };
 }
 
+export function toBusyMetricSeries(name: string, groupCount: number, base = 0): MetricSeries {
+  const startMs = Date.parse(RANGE_START);
+  const stepMs = 60_000;
+  const bucketCount = (Date.parse(RANGE_END) - startMs) / stepMs;
+  return {
+    ...toEmptyMetricSeries(name),
+    step_ns: stepMs * 1e6,
+    groups: Array.from({ length: groupCount }, (_group, groupIndex) => ({
+      kind: "gauge",
+      unit: "By",
+      key: { type: "series", service: `api-${groupIndex}`, attributes: {}, resource: {} },
+      buckets: Array.from({ length: bucketCount }, (_bucket, bucketIndex) => ({
+        start_at: new Date(startMs + bucketIndex * stepMs).toISOString(),
+        count: 1,
+        min: base + bucketIndex,
+        max: base + bucketIndex,
+        avg: base + bucketIndex,
+        last: base + bucketIndex,
+        change: { kind: "none" },
+      })),
+    })),
+  };
+}
+
 export function toDashboardList(names: ReadonlyArray<string>): DashboardList {
   return {
     dashboards: names.map((name, index) => ({

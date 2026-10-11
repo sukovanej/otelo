@@ -2,7 +2,7 @@ import type { JSX } from "@solidjs/web";
 import { onCleanup, onSettled } from "solid-js";
 
 const SIZE_CLASSES: Record<ModalSize, string> = {
-  page: "h-[88dvh] w-[min(94vw,96rem)]",
+  page: "h-[88dvh] w-[min(94vw,96rem)] max-md:h-dvh max-md:w-screen max-md:rounded-none max-md:border-0",
   dialog: "w-[min(92vw,28rem)]",
 };
 

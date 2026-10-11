@@ -32,10 +32,12 @@ interface ColumnBase<R> {
   readonly label: string;
   readonly description?: string;
   readonly tone?: (row: R) => CellTone | undefined;
+  readonly hiddenOnNarrowScreen?: boolean;
 }
 
 interface SizedColumnBase<R> extends ColumnBase<R> {
   readonly width?: string;
+  readonly narrowScreenWidth?: string;
 }
 
 interface NumberColumn<R> extends SizedColumnBase<R> {
@@ -84,6 +86,19 @@ export function pickGridTracks<R>(column: Column<R>): string {
   return column.width ?? DEFAULT_TRACKS[column.kind];
 }
 
+export function fitColumnsToNarrowScreen<R>(
+  columns: ReadonlyArray<Column<R>>,
+): ReadonlyArray<Column<R>> {
+  return columns
+    .filter((column) => !column.hiddenOnNarrowScreen)
+    .map((column) => fitColumnToNarrowScreen(column));
+}
+
 export function pickSortValueReader<R>(column: Column<R>): ((row: R) => SortValue) | undefined {
   return column.kind === "cell" ? column.sortBy : column.value;
+}
+
+function fitColumnToNarrowScreen<R>(column: Column<R>): Column<R> {
+  if (column.kind === "meter") return { ...column, kind: "number" };
+  return column.narrowScreenWidth ? { ...column, width: column.narrowScreenWidth } : column;
 }

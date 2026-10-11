@@ -28,7 +28,7 @@ export default function PageBar(props: PageBarProps) {
         <span class="flex-1" />
         <span aria-live="polite">{props.fetched.loading() ? "Loading…" : ""}</span>
         <Show when={props.fetched.updatedAt()}>
-          {(updatedAt) => <span>Updated {formatTime(updatedAt())}</span>}
+          {(updatedAt) => <span class="max-md:hidden">Updated {formatTime(updatedAt())}</span>}
         </Show>
         {props.end}
       </div>

@@ -1,8 +1,8 @@
 import type { TraceSummary } from "@otelo/api";
 import { type Column, Table } from "@otelo/viz";
 
+import RowTime from "../RowTime";
 import ServiceName from "../ServiceName";
-import { formatTime, parseTime } from "../time";
 import { type SpanSorting, toTableSorting } from "./sort";
 import SpanTitle from "./SpanTitle";
 
@@ -13,17 +13,14 @@ const COLUMNS: Column<TraceSummary>[] = [
     label: "Time",
     width: "max-content",
     tone: () => "muted",
-    cell: (trace) => (
-      <time class="whitespace-nowrap" datetime={trace.started_at}>
-        {formatTime(parseTime(trace.started_at))}
-      </time>
-    ),
+    cell: (trace) => <RowTime at={trace.started_at} />,
   },
   {
     kind: "cell",
     id: "service",
     label: "Service",
     width: "minmax(6ch,16ch)",
+    hiddenOnNarrowScreen: true,
     tone: () => "muted",
     cell: (trace) => <ServiceName name={trace.service} resource={trace.resource} />,
   },
@@ -41,7 +38,14 @@ const COLUMNS: Column<TraceSummary>[] = [
       />
     ),
   },
-  { kind: "number", id: "spans", label: "Spans", unit: "count", value: (trace) => trace.spans },
+  {
+    kind: "number",
+    id: "spans",
+    label: "Spans",
+    unit: "count",
+    hiddenOnNarrowScreen: true,
+    value: (trace) => trace.spans,
+  },
   {
     kind: "meter",
     id: "duration",

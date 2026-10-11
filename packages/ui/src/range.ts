@@ -56,6 +56,11 @@ export interface RangeLabelPart {
   readonly dim: boolean;
 }
 
+export interface StackedRangeLabel {
+  readonly days: string | undefined;
+  readonly clocks: string;
+}
+
 export function parseDuration(text: string): number | undefined {
   if (!DURATION_PATTERN.test(text)) return undefined;
   let totalMs = 0;
@@ -160,6 +165,25 @@ export function splitRangeLabel(range: Range, nowMs: number): RangeLabelPart[] {
   return [...startParts, toDimPart(formatDayName(end, today)), toClockPart(end)];
 }
 
+export function stackRangeLabel(range: Range, nowMs: number): StackedRangeLabel {
+  const endsNow = range.until === UNTIL_NOW;
+  const resolved = resolveRange(range, nowMs);
+  const isRelative =
+    findPreset(range) !== undefined || (endsNow && parseDuration(range.since) !== undefined);
+  if (isRelative || !resolved) return { days: undefined, clocks: formatRangeLabel(range, nowMs) };
+  const [start, end, today] = [
+    new Date(resolved.startMs),
+    new Date(resolved.endMs),
+    new Date(nowMs),
+  ];
+  const clocks = `${toMinuteClock(start)} – ${endsNow ? "now" : toMinuteClock(end)}`;
+  const startDay = formatDayName(start, today);
+  if (endsNow || isSameDay(start, end)) {
+    return { days: isSameDay(start, today) ? undefined : startDay, clocks };
+  }
+  return { days: `${startDay} – ${formatDayName(end, today)}`, clocks };
+}
+
 export function formatRangeLabel(range: Range, nowMs: number): string {
   return splitRangeLabel(range, nowMs)
     .map((part) => part.text)
@@ -184,6 +208,10 @@ function lengthenToNextStep(lengthMs: number): number {
 function shortenToPreviousStep(lengthMs: number): number | undefined {
   const stepMs = RESIZE_STEPS_MS.findLast((candidateMs) => candidateMs < lengthMs);
   return stepMs && (Math.ceil(lengthMs / stepMs) - 1) * stepMs;
+}
+
+function toMinuteClock(date: Date): string {
+  return toLocalClock(date).slice(0, 5);
 }
 
 function isSameDay(date: Date, otherDate: Date): boolean {

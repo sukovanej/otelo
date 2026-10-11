@@ -8,6 +8,7 @@ import { createFakeApi } from "./fake-api";
 import { toDashboardList, toLogLine, toLogs } from "./fixtures";
 import { mountApp } from "./mount";
 import { expectNavigationToReach } from "./navigation";
+import { switchToPhoneScreen } from "./screen";
 
 const ERROR_SEVERITY = 17;
 
@@ -45,10 +46,36 @@ test("leaving the logs while a range change loads keeps the next pages navigatin
     const app = mountApp(api, "/logs");
     await expect.element(page.getByText("payment declined")).toBeInTheDocument();
     await userEvent.click(page.getByRole("button", { name: /^Earlier by/ }));
+    await expect.poll(() => logs.held.length).toBe(1);
 
     await expectNavigationToReach(app, "Dashboards", "/dashboards");
     logs.releaseAll(SHOWN_LOGS);
     await expectNavigationToReach(app, "Logs", "/logs");
+  });
+
+  expectNoReactivityMistakes(artifact);
+});
+
+test("on a phone an open line covers the lines, which come back when it closes", async () => {
+  await switchToPhoneScreen();
+  const api = createFakeApi({ getLogs: () => Promise.resolve(SHOWN_LOGS) });
+  const lines = page.getByRole("table", { name: "Log lines" });
+  const linePanel = page.getByRole("complementary", { name: "Log line" });
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/logs");
+    await expect.element(lines.getByText("payment declined")).toBeVisible();
+    await expect
+      .element(lines.getByRole("columnheader", { name: "Service" }))
+      .not.toBeInTheDocument();
+
+    await userEvent.click(lines.getByText("payment declined"));
+    await expect.element(linePanel).toBeVisible();
+    expect(linePanel.element().getBoundingClientRect().width).toBe(window.innerWidth);
+
+    await userEvent.click(linePanel.getByRole("button", { name: "Close" }));
+    await expect.element(linePanel).not.toBeInTheDocument();
+    await expect.element(lines.getByText("payment declined")).toBeVisible();
   });
 
   expectNoReactivityMistakes(artifact);

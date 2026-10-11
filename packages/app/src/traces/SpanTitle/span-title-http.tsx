@@ -16,7 +16,7 @@ interface SpanTitleHttpProps {
 export default function SpanTitleHttp(props: SpanTitleHttpProps) {
   return (
     <>
-      <Tooltip content="HTTP request" class="self-center">
+      <Tooltip content="HTTP request" class="self-center max-md:hidden">
         <GlobeIcon class="text-muted" title="HTTP request" />
       </Tooltip>
       <Show when={props.meaning.method}>{(method) => <HttpMethodBadge method={method()} />}</Show>

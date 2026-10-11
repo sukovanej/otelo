@@ -13,7 +13,7 @@ export default function SidePanel(props: SidePanelProps) {
   return (
     <aside
       aria-label={props.label}
-      class="relative z-10 flex w-[clamp(24rem,42%,44rem)] shrink-0 flex-col border-l border-line bg-surface shadow-(--floating) motion-safe:animate-panel-in"
+      class="z-10 flex shrink-0 flex-col max-md:absolute max-md:inset-0 md:relative md:w-[clamp(24rem,42%,44rem)] border-l border-line bg-surface shadow-(--floating) motion-safe:animate-panel-in"
     >
       <div class="flex shrink-0 items-center gap-3 border-b border-line bg-subtle px-4 py-2.5">
         {props.header}

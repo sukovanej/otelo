@@ -2,8 +2,8 @@ import type { LogLine } from "@otelo/api";
 import { LevelBadge } from "@otelo/ui";
 import { type Column, Table } from "@otelo/viz";
 
+import RowTime from "../RowTime";
 import ServiceName from "../ServiceName";
-import { formatTime, parseTime } from "../time";
 import { toLevelName } from "./level";
 
 const MIN_ERROR_SEVERITY = 17;
@@ -15,11 +15,7 @@ const COLUMNS: Column<LogLine>[] = [
     label: "Time",
     width: "max-content",
     tone: () => "muted",
-    cell: (line) => (
-      <time class="whitespace-nowrap" datetime={line.logged_at}>
-        {formatTime(parseTime(line.logged_at))}
-      </time>
-    ),
+    cell: (line) => <RowTime at={line.logged_at} />,
   },
   {
     kind: "cell",
@@ -33,6 +29,7 @@ const COLUMNS: Column<LogLine>[] = [
     id: "service",
     label: "Service",
     width: "minmax(6ch,16ch)",
+    hiddenOnNarrowScreen: true,
     tone: () => "muted",
     cell: (line) => <ServiceName name={line.service} resource={line.resource} />,
   },

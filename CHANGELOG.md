@@ -7,6 +7,30 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased](https://github.com/sukovanej/otelo/compare/v0.0.8...main)
 
+### Added
+
+- The web UI works on a phone. Below 768 px wide:
+  - Tables keep the columns that name a row and its main number, and drop the
+    rest. The traces show their time, root span, and duration.
+  - An open log line or span covers the list, and Close brings the list back.
+  - The metrics page shows either the list of names or one metric, with a link
+    back to the list.
+  - A trace and the widget editor fill the screen.
+  - The range picker fills its row, and shows the day of a past range above
+    its times, without seconds.
+
+### Changed
+
+- The step buttons of the range picker (‹, ›, −, +, and Now) wait 500 ms after
+  the last click before the page reads the new range, so a few quick clicks
+  ask the daemon once. The label follows each click at once.
+
+### Fixed
+
+- The From and To fields of an open range picker follow a step of the range.
+- A metric of many points no longer makes its chart subscribe to each point,
+  which the dev build reported as `HUGE_FAN_IN` and `GRAPH_GROWTH`.
+
 ## [0.0.8](https://github.com/sukovanej/otelo/compare/v0.0.7...v0.0.8) - 2026-10-10
 
 The storage version goes up to 5. `otelo serve` rebuilds `telemetry.sqlite`

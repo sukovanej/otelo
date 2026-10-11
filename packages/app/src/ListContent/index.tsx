@@ -39,7 +39,7 @@ export default function ListContent<
   const list = () => props.list;
   const [scrollElement, setScrollElement] = createSignal<HTMLDivElement>();
   return (
-    <div class="flex min-h-0 flex-1">
+    <div class="relative flex min-h-0 flex-1">
       <div ref={setScrollElement} class={`min-w-0 flex-1 ${pageContent}`}>
         <Show when={list().fetched.errorMessage()}>
           {(errorMessage) => (

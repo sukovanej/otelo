@@ -17,7 +17,7 @@ export default function SpanTitleDatabase(props: SpanTitleDatabaseProps) {
   const queryOrName = () => props.meaning.query ?? props.name;
   return (
     <>
-      <Tooltip content={`Database call to ${system()}`} class="self-center">
+      <Tooltip content={`Database call to ${system()}`} class="self-center max-md:hidden">
         <DatabaseSystemIcon system={iconId()} title={`Database call to ${system()}`} />
       </Tooltip>
       <Show

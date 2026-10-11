@@ -74,12 +74,14 @@ export default function WidgetEditor(props: WidgetEditorProps) {
             setWidget((current) => ({ ...current, title }));
           }}
         />
-        <Tabs
-          label="Visualization"
-          options={DISPLAY_KIND_OPTIONS}
-          value={display().kind}
-          onChange={(kind) => changeDisplay(changeDisplayKind(display(), kind))}
-        />
+        <div class="max-md:order-last">
+          <Tabs
+            label="Visualization"
+            options={DISPLAY_KIND_OPTIONS}
+            value={display().kind}
+            onChange={(kind) => changeDisplay(changeDisplayKind(display(), kind))}
+          />
+        </div>
         <CloseButton onClose={props.onClose} />
       </header>
       <div class="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(22rem,30rem)] lg:overflow-hidden">

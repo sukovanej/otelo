@@ -46,6 +46,11 @@ interface ZoomDrag {
   readonly toX: number;
 }
 
+interface ValueTableRow {
+  readonly time: string;
+  readonly cells: ReadonlyArray<string>;
+}
+
 type PlotHeight = "fixed" | "fill";
 
 interface ChartPanelPlotProps {
@@ -105,6 +110,12 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
       ? coloredSeries()
       : coloredSeries().filter((series) => series.index === isolatedIndex);
   });
+  const valueTableRows = createMemo<ValueTableRow[]>(() =>
+    frame().bucketStartsMs.map((bucketStartMs, bucketIndex) => ({
+      time: formatInstant(bucketStartMs),
+      cells: coloredSeries().map((series) => formatValue(series.values[bucketIndex], props.unit)),
+    })),
+  );
   const hasNoValues = createMemo(() =>
     coloredSeries().every((series) => series.values.every((value) => value === null)),
   );
@@ -454,12 +465,12 @@ export default function ChartPanelPlot(props: ChartPanelPlotProps) {
             </tr>
           </thead>
           <tbody>
-            <For each={frame().bucketStartsMs}>
-              {(bucketStartMs, bucketIndex) => (
+            <For each={valueTableRows()} keyed={false}>
+              {(row) => (
                 <tr>
-                  <th scope="row">{formatInstant(bucketStartMs)}</th>
-                  <For each={coloredSeries()} keyed={(series) => series.label}>
-                    {(series) => <td>{formatValue(series().values[bucketIndex()], props.unit)}</td>}
+                  <th scope="row">{row().time}</th>
+                  <For each={row().cells} keyed={false}>
+                    {(cell) => <td>{cell()}</td>}
                   </For>
                 </tr>
               )}

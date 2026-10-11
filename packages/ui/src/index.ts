@@ -12,6 +12,7 @@ export { default as LevelBadge, type LevelName } from "./LevelBadge";
 export { default as Modal } from "./Modal";
 export { default as QueryInput } from "./QueryInput";
 export { default as RangePicker } from "./RangePicker";
+export { createNarrowScreenSignal } from "./screen";
 export { default as Select, type SelectOption } from "./Select";
 export { default as SidePanel } from "./SidePanel";
 export { default as SpanKindBadge } from "./SpanKindBadge";
