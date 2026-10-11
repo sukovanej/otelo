@@ -42,7 +42,7 @@ export default function ServicePageOverview(props: ServicePageOverviewProps) {
 
   return (
     <>
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
         <Stat
           label="Requests"
           value={requests().count}

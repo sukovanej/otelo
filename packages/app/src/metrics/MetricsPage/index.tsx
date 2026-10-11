@@ -1,11 +1,11 @@
 import { type Params, useParams } from "@solidjs/router";
-import { createMemo, Errored, Show, useContext } from "solid-js";
+import { createMemo, Errored, latest, Show, useContext } from "solid-js";
 
 import { type MetricList, toQueryString } from "@otelo/api";
-import { Callout, EmptyMessage } from "@otelo/ui";
+import { Callout, createNarrowScreenSignal, EmptyMessage } from "@otelo/ui";
 
 import { ApiContext } from "../../api";
-import { pageContent } from "../../classes";
+import { link, pageContent } from "../../classes";
 import { formatCount } from "../../count";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { API_MAX_ROWS, createListState, DEFAULT_SINCE, usePageKeys } from "../../list";
@@ -36,19 +36,21 @@ export default function MetricsPage() {
   });
   const params = useParams<MetricPathParams>();
   const openName = () => params.name && decodePathSegment(params.name);
+  const isNarrowScreen = createNarrowScreenSignal();
 
   const allSeries = () => list.shownResult()?.body.series ?? [];
   const names = createMemo(() => summarizeMetricNames(allSeries()));
   const seriesOfOpenMetric = createMemo(() =>
     allSeries().filter((series) => series.name === openName()),
   );
-  const toMetricHref = (name: string) =>
-    `/metrics/${encodeURIComponent(name)}${toQueryString({
+  const toMetricsSearch = () =>
+    toQueryString({
       q: list.query() || undefined,
       since: list.since() === DEFAULT_SINCE ? undefined : list.since(),
       until: list.until() || undefined,
       live: list.live() ? "1" : undefined,
-    })}`;
+    });
+  const toMetricHref = (name: string) => `/metrics/${encodeURIComponent(name)}${toMetricsSearch()}`;
 
   let queryInput: HTMLInputElement | undefined;
   usePageKeys({ queryInput: () => queryInput });
@@ -86,7 +88,17 @@ export default function MetricsPage() {
             toHref={toMetricHref}
           />
         </Errored>
-        <div class={`min-w-0 flex-1 ${pageContent}`}>
+        <div
+          class={[
+            `min-w-0 flex-1 ${pageContent}`,
+            { "max-md:hidden": latest(openName) === undefined },
+          ]}
+        >
+          <Show when={isNarrowScreen()}>
+            <a href={`/metrics${toMetricsSearch()}`} class={`${link} mb-3 block`}>
+              ← Every metric
+            </a>
+          </Show>
           <Show when={list.fetched.errorMessage()}>
             {(errorMessage) => (
               <div class="mb-3">

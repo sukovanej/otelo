@@ -6,6 +6,7 @@ import { Callout, EmptyMessage, Select } from "@otelo/ui";
 import { ChartPanel, formatValue } from "@otelo/viz";
 
 import { ApiContext } from "../../api";
+import { freezeDeeply } from "../../fetch";
 import FetchErrorBoundary from "../../FetchErrorBoundary";
 import { createRangeFetch, type RangeState } from "../../services/range";
 import { listGroupingOptions, toMetricCharts, toMetricFrame } from "../metric";
@@ -51,17 +52,19 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
     "metric-series",
     () => ({ name: props.name, q: props.query.trim(), by: by().join(","), top: top() }),
     (key, signal) =>
-      api.getMetricSeries(
-        key.name,
-        {
-          q: key.q,
-          since: key.since,
-          until: key.until,
-          by: key.by,
-          ...(key.top === "" ? {} : { top: Number(key.top) }),
-        },
-        signal,
-      ),
+      api
+        .getMetricSeries(
+          key.name,
+          {
+            q: key.q,
+            since: key.since,
+            until: key.until,
+            by: key.by,
+            ...(key.top === "" ? {} : { top: Number(key.top) }),
+          },
+          signal,
+        )
+        .then(freezeDeeply),
   );
   const metric = () => {
     const answer = fetched.data();
@@ -84,7 +87,7 @@ export default function MetricsPageMetric(props: MetricsPageMetricProps) {
       <div class="flex flex-wrap items-center gap-3">
         <h1
           class={[
-            "m-0 min-w-0 flex-1 truncate font-mono text-base font-semibold transition-opacity",
+            "m-0 min-w-0 flex-1 truncate font-mono text-base font-semibold transition-opacity max-md:basis-full",
             { "opacity-60": fetched.loading() },
           ]}
           aria-busy={fetched.loading() ? "true" : undefined}

@@ -48,6 +48,7 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
       id: "span",
       label: "Span",
       width: "minmax(28ch,2fr)",
+      narrowScreenWidth: "minmax(0,2fr)",
       cell: (row) => {
         const isCollapsed = () => collapsedSpans[row.span.span_id] === true;
         return (
@@ -87,6 +88,7 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
       id: "service",
       label: "Service",
       width: "minmax(6ch,13ch)",
+      hiddenOnNarrowScreen: true,
       tone: () => "muted",
       cell: (row) => <ServiceName name={row.span.service} resource={row.span.resource} />,
     },
@@ -102,6 +104,7 @@ export default function TraceViewWaterfall(props: TraceViewWaterfallProps) {
       id: "timeline",
       label: "Timeline",
       width: "3fr",
+      narrowScreenWidth: "1fr",
       header: () => (
         <span class="@container relative h-[1lh] w-full">
           <For each={AXIS_TICKS}>

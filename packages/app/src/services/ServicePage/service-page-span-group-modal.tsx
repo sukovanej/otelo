@@ -111,7 +111,7 @@ export default function ServicePageSpanGroupModal(props: ServicePageSpanGroupMod
         </Show>
         <FetchErrorBoundary>
           <div class="flex flex-col gap-4">
-            <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
               <Stat
                 label={labels().count}
                 value={stats()?.count}

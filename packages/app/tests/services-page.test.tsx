@@ -26,6 +26,8 @@ test("the range follows each click while the services load", async () => {
     await userEvent.click(page.getByRole("button", { name: /^Earlier by/ }));
     await expect.poll(() => readShownRange(rangeButton.element())).not.toBe(firstShift);
     expect(readShownRange(rangeButton.element())).toBe(readNamedRange(rangeButton.element()));
+    await expect.element(page.getByText("Loading…")).toBeInTheDocument();
+    await expect.poll(() => services.held.length).toBe(1);
 
     services.releaseAll(SERVICES);
     await expect.element(page.getByText("Loading…")).not.toBeInTheDocument();
@@ -45,6 +47,7 @@ test("leaving the services while a range change loads keeps the next pages navig
     const app = mountApp(api, "/services");
     await expect.element(page.getByRole("row", { name: /api/ })).toBeInTheDocument();
     await userEvent.click(page.getByRole("button", { name: /^Earlier by/ }));
+    await expect.poll(() => services.held.length).toBe(1);
 
     await expectNavigationToReach(app, "Dashboards", "/dashboards");
     services.releaseAll(SERVICES);

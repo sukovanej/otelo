@@ -11,6 +11,7 @@ import {
   resolveRange,
   shiftRange,
   splitRangeLabel,
+  stackRangeLabel,
   UNTIL_NOW,
 } from "../src/range";
 
@@ -232,6 +233,31 @@ test("formatRangeLabel ends a range from a time with now", () => {
       SEPTEMBER_30_NOON_MS,
     ),
   ).toBe("Yesterday 08:00 – now");
+});
+
+test("stackRangeLabel puts the days of a range off today above its minutes", () => {
+  expect(stackRangeLabel({ since: "1h", until: UNTIL_NOW }, SEPTEMBER_30_NOON_MS)).toEqual({
+    days: undefined,
+    clocks: "Last hour",
+  });
+  expect(
+    stackRangeLabel(
+      { since: toIso(onSeptember30(8, 0, 5)), until: toIso(onSeptember30(9, 0, 5)) },
+      SEPTEMBER_30_NOON_MS,
+    ),
+  ).toEqual({ days: undefined, clocks: "08:00 – 09:00" });
+  expect(
+    stackRangeLabel(
+      { since: toIso(onSeptemberDay(29, 8)), until: UNTIL_NOW },
+      SEPTEMBER_30_NOON_MS,
+    ),
+  ).toEqual({ days: "Yesterday", clocks: "08:00 – now" });
+  expect(
+    stackRangeLabel(
+      { since: toIso(onSeptemberDay(27, 8)), until: toIso(onSeptember30(9)) },
+      SEPTEMBER_30_NOON_MS,
+    ),
+  ).toEqual({ days: "Sep 27 – Today", clocks: "08:00 – 09:00" });
 });
 
 test("splitRangeLabel dims the days and the dash", () => {

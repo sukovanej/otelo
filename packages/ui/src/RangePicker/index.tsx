@@ -1,4 +1,4 @@
-import { createMemo, createSignal, flush, For, Show } from "solid-js";
+import { createMemo, createSignal, flush, For, onCleanup, Show } from "solid-js";
 
 import { CheckIcon, ChevronIcon, MinusIcon, PlusIcon } from "@otelo/icons";
 
@@ -18,18 +18,22 @@ import {
   resolveRange,
   shiftRange,
   splitRangeLabel,
+  stackRangeLabel,
   UNTIL_NOW,
 } from "../range";
+import { createNarrowScreenSignal } from "../screen";
 import DateTimeInput from "./date-time-input";
 
 const FALLBACK_RANGE_MS = 3_600_000;
+
+const STEP_SETTLE_MS = 500;
 
 const SEGMENT_CLASSES = `${plain} relative -ml-px cursor-pointer border first:ml-0 first:rounded-l-md last:rounded-r-md enabled:hover:bg-hover focus-visible:z-10 disabled:cursor-default disabled:text-muted/50`;
 
 const SHIFT_BUTTON_CLASSES: Record<Size, string> = {
   sm: "h-6 w-6",
   md: "h-8 w-7",
-  lg: "h-10.5 w-9",
+  lg: "h-10.5 w-8 md:w-9",
 };
 
 interface RangePickerProps {
@@ -43,11 +47,18 @@ export default function RangePicker(props: RangePickerProps) {
   let trigger!: HTMLButtonElement;
   let presetList!: HTMLUListElement;
   const pickerPopover = createPopover({ returnFocusTo: () => trigger });
-  const [from, setFrom] = createSignal(new Date());
-  const [to, setTo] = createSignal(new Date());
+  const isNarrowScreen = createNarrowScreenSignal();
 
-  const range = (): Range => ({ since: props.since, until: props.until });
-  const endsNow = () => props.until === UNTIL_NOW;
+  const [steppedRange, setSteppedRange] = createSignal<Range>();
+  let stepTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(stepTimer));
+
+  const range = (): Range => steppedRange() ?? { since: props.since, until: props.until };
+  const stackedLabel = () => stackRangeLabel(range(), Date.now());
+  const fieldDates = createMemo(() => resolveFieldDates(range(), Date.now()));
+  const [from, setFrom] = createSignal(() => fieldDates().from);
+  const [to, setTo] = createSignal(() => fieldDates().to);
+  const endsNow = () => range().until === UNTIL_NOW;
   const pickedPreset = createMemo(() => findPreset(range()));
   const rangeLengthMs = () => {
     const resolved = resolveRange(range(), Date.now());
@@ -68,19 +79,22 @@ export default function RangePicker(props: RangePickerProps) {
     const resized = resizeRange(range(), step, Date.now());
     return resized ? `${direction}: ${formatRangeLabel(resized, Date.now())}` : direction;
   };
-  const changeRange = (next: Range | undefined) => {
-    if (next) props.onChange(next.since, next.until);
+  const commitRange = (next: Range) => {
+    clearTimeout(stepTimer);
+    setSteppedRange(undefined);
+    props.onChange(next.since, next.until);
+  };
+  const stepRange = (next: Range | undefined) => {
+    if (!next) return;
+    setSteppedRange(next);
+    clearTimeout(stepTimer);
+    stepTimer = setTimeout(() => commitRange(next), STEP_SETTLE_MS);
   };
 
   const openPicker = () => {
-    const nowMs = Date.now();
-    const resolved = resolveRange(range(), nowMs) ?? {
-      startMs: nowMs - FALLBACK_RANGE_MS,
-      endMs: nowMs,
-    };
-    // The fields hold whole seconds.
-    setFrom(new Date(Math.floor(resolved.startMs / 1000) * 1000));
-    setTo(new Date(Math.floor(resolved.endMs / 1000) * 1000));
+    const opened = resolveFieldDates(range(), Date.now());
+    setFrom(opened.from);
+    setTo(opened.to);
     pickerPopover.show();
     flush();
     (
@@ -102,14 +116,14 @@ export default function RangePicker(props: RangePickerProps) {
 
   return (
     <div ref={pickerPopover.rootRef} class="relative flex items-center gap-1.5">
-      <div class="flex">
+      <div class="flex grow">
         <button
           type="button"
           class={stepButtonClasses()}
           aria-label={`Earlier${shiftLabelSuffix()}`}
           title={`Earlier${shiftLabelSuffix()}`}
           disabled={rangeLengthMs() === undefined}
-          onClick={() => changeRange(shiftRange(range(), -1, Date.now()))}
+          onClick={() => stepRange(shiftRange(range(), -1, Date.now()))}
         >
           <ChevronIcon direction="left" size={13} />
         </button>
@@ -119,31 +133,52 @@ export default function RangePicker(props: RangePickerProps) {
           aria-label={describeResize(-1)}
           title={describeResize(-1)}
           disabled={resizeRange(range(), -1, Date.now()) === undefined}
-          onClick={() => changeRange(resizeRange(range(), -1, Date.now()))}
+          onClick={() => stepRange(resizeRange(range(), -1, Date.now()))}
         >
           <MinusIcon size={13} />
         </button>
         <button
           ref={trigger}
           type="button"
-          class={cx(SEGMENT_CLASSES, sizes[props.size ?? "md"], "group flex items-center gap-2")}
+          class={cx(
+            SEGMENT_CLASSES,
+            sizes[props.size ?? "md"],
+            "group flex grow items-center justify-center gap-2",
+          )}
           aria-label={`Range: ${formatRangeLabel(range(), Date.now())}`}
           aria-haspopup="dialog"
           aria-expanded={pickerPopover.open() ? "true" : "false"}
           onClick={() => (pickerPopover.open() ? pickerPopover.hide() : openPicker())}
         >
-          <span class="flex gap-1.5 whitespace-nowrap">
-            <For
-              each={keyLabelParts(splitRangeLabel(range(), Date.now()))}
-              keyed={(part) => part.key}
-            >
-              {(part) => (
-                <span class={part().dim ? "text-muted" : "font-medium tabular-nums"}>
-                  {part().text}
-                </span>
-              )}
-            </For>
-          </span>
+          <Show
+            when={isNarrowScreen()}
+            fallback={
+              <span class="flex gap-1.5 whitespace-nowrap">
+                <For
+                  each={keyLabelParts(splitRangeLabel(range(), Date.now()))}
+                  keyed={(part) => part.key}
+                >
+                  {(part) => (
+                    <span class={part().dim ? "text-muted" : "font-medium tabular-nums"}>
+                      {part().text}
+                    </span>
+                  )}
+                </For>
+              </span>
+            }
+          >
+            <span class="flex flex-col items-center leading-none whitespace-nowrap">
+              <span
+                class={[
+                  "mb-0.5 text-2xs text-muted",
+                  { hidden: stackedLabel().days === undefined },
+                ]}
+              >
+                {stackedLabel().days}
+              </span>
+              <span class="font-medium tabular-nums">{stackedLabel().clocks}</span>
+            </span>
+          </Show>
           <ChevronIcon size={13} class="text-muted group-aria-expanded:rotate-180" />
         </button>
         <button
@@ -152,7 +187,7 @@ export default function RangePicker(props: RangePickerProps) {
           aria-label={describeResize(1)}
           title={describeResize(1)}
           disabled={resizeRange(range(), 1, Date.now()) === undefined}
-          onClick={() => changeRange(resizeRange(range(), 1, Date.now()))}
+          onClick={() => stepRange(resizeRange(range(), 1, Date.now()))}
         >
           <PlusIcon size={13} />
         </button>
@@ -162,7 +197,7 @@ export default function RangePicker(props: RangePickerProps) {
           aria-label={`Later${shiftLabelSuffix()}`}
           title={endsNow() ? "The range ends now" : `Later${shiftLabelSuffix()}`}
           disabled={endsNow() || rangeLengthMs() === undefined}
-          onClick={() => changeRange(shiftRange(range(), 1, Date.now()))}
+          onClick={() => stepRange(shiftRange(range(), 1, Date.now()))}
         >
           <ChevronIcon direction="right" size={13} />
         </button>
@@ -171,20 +206,24 @@ export default function RangePicker(props: RangePickerProps) {
         size={props.size}
         title={endsNow() ? "The range ends now" : "Move the range to end now"}
         disabled={endsNow() || rangeLengthMs() === undefined}
-        onClick={() => changeRange(moveRangeToNow(range(), Date.now()))}
+        onClick={() => stepRange(moveRangeToNow(range(), Date.now()))}
       >
         Now
       </Button>
       <Show when={pickerPopover.open()}>
         <div
           ref={pickerPopover.panelRef}
-          class={cx(popover, "flex", pickerPopover.alignsRight() ? "right-0" : "left-0")}
+          class={cx(
+            popover,
+            "flex max-md:flex-col",
+            pickerPopover.alignsRight() ? "right-0" : "left-0",
+          )}
           role="dialog"
           aria-label="Range"
         >
           <ul
             ref={presetList}
-            class="m-0 list-none border-r border-line p-1"
+            class="m-0 grid list-none border-line p-1 max-md:grid-cols-2 max-md:border-b md:border-r"
             aria-label="Ranges that end now"
             onKeyDown={onPresetKeyDown}
           >
@@ -200,7 +239,7 @@ export default function RangePicker(props: RangePickerProps) {
                     aria-current={pickedPreset() === preset ? "true" : undefined}
                     onClick={() => {
                       closePicker();
-                      props.onChange(preset.since, UNTIL_NOW);
+                      commitRange({ since: preset.since, until: UNTIL_NOW });
                     }}
                   >
                     <CheckIcon
@@ -229,7 +268,7 @@ export default function RangePicker(props: RangePickerProps) {
                 disabled={from() >= to()}
                 onClick={() => {
                   closePicker();
-                  props.onChange(from().toISOString(), to().toISOString());
+                  commitRange({ since: from().toISOString(), until: to().toISOString() });
                 }}
               >
                 Apply
@@ -240,6 +279,23 @@ export default function RangePicker(props: RangePickerProps) {
       </Show>
     </div>
   );
+}
+
+interface FieldDates {
+  readonly from: Date;
+  readonly to: Date;
+}
+
+function resolveFieldDates(range: Range, nowMs: number): FieldDates {
+  const resolved = resolveRange(range, nowMs) ?? {
+    startMs: nowMs - FALLBACK_RANGE_MS,
+    endMs: nowMs,
+  };
+  // The fields hold whole seconds.
+  return {
+    from: new Date(Math.floor(resolved.startMs / 1000) * 1000),
+    to: new Date(Math.floor(resolved.endMs / 1000) * 1000),
+  };
 }
 
 interface KeyedLabelPart extends RangeLabelPart {

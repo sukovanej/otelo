@@ -14,6 +14,7 @@ import { createFakeApi } from "./fake-api";
 import { toDashboardList, toEmptyMetricSeries, toMetricList } from "./fixtures";
 import { mountApp } from "./mount";
 import { expectNavigationToReach } from "./navigation";
+import { expectOnOneRow, expectToFillScreen, switchToPhoneScreen } from "./screen";
 
 const SAVED_DEFINITION: DashboardDefinition = {
   name: "Latency",
@@ -131,6 +132,23 @@ test("opening a widget's editor requests none of the series the widget shows", a
   });
 
   expect([...series.cpu.held, ...series.memory.held]).toHaveLength(0);
+  expectNoReactivityMistakes(artifact);
+});
+
+test("on a phone a widget's editor fills the screen with its title beside its close button", async () => {
+  await switchToPhoneScreen();
+  const series = createHeldSeries();
+  const api = createCpuDashboardApi(series);
+  const editor = page.getByRole("dialog");
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/dashboards/1");
+    await openCpuEditor();
+    await expect.element(editor.getByRole("tab", { name: "Query A" })).toBeInTheDocument();
+  });
+
+  expectToFillScreen(editor);
+  expectOnOneRow(editor.getByLabelText("Title"), editor.getByRole("button", { name: "Close" }));
   expectNoReactivityMistakes(artifact);
 });
 

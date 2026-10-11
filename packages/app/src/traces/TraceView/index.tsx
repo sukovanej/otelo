@@ -91,16 +91,17 @@ export default function TraceView(props: TraceViewProps) {
             </h1>
             <Show when={rootSpan()}>
               {(span) => (
-                <span class="min-w-0 font-mono text-muted">
+                <span class="min-w-0 font-mono text-muted max-md:hidden">
                   <ServiceName name={span().service} resource={span().resource} />
                 </span>
               )}
             </Show>
-            <span class="flex-1" />
-            <span class="font-mono text-xs text-muted" title="Trace ID">
-              {props.id}
+            <span class="ml-auto flex shrink-0 items-center gap-3">
+              <span class="font-mono text-xs text-muted max-md:hidden" title="Trace ID">
+                {props.id}
+              </span>
+              {props.actions}
             </span>
-            {props.actions}
           </div>
         }
         end={
@@ -121,13 +122,17 @@ export default function TraceView(props: TraceViewProps) {
         <Show when={rootSpan()}>
           {(span) => (
             <span>
-              <Value value={measureTraceNanos(rows())} unit="duration" /> from{" "}
-              <time
-                datetime={span().started_at}
-                title={formatDateTime(parseTime(span().started_at))}
-              >
-                {formatTime(parseTime(span().started_at))}
-              </time>
+              <Value value={measureTraceNanos(rows())} unit="duration" />
+              <span class="max-md:hidden">
+                {" "}
+                from{" "}
+                <time
+                  datetime={span().started_at}
+                  title={formatDateTime(parseTime(span().started_at))}
+                >
+                  {formatTime(parseTime(span().started_at))}
+                </time>
+              </span>
               <Show when={failedSpanCount() > 0}>
                 , {formatCount(failedSpanCount(), "failed span")}
               </Show>
@@ -136,7 +141,7 @@ export default function TraceView(props: TraceViewProps) {
         </Show>
       </PageBar>
 
-      <div class="flex min-h-0 flex-1">
+      <div class="relative flex min-h-0 flex-1">
         <div class={`min-w-0 flex-1 bg-page ${pageContent}`}>
           <Show when={fetched.errorMessage()}>
             {(errorMessage) => (

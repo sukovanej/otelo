@@ -2,8 +2,8 @@ import type { TraceSpan } from "@otelo/api";
 import { SpanKindBadge } from "@otelo/ui";
 import { type Column, Table } from "@otelo/viz";
 
+import RowTime from "../RowTime";
 import ServiceName from "../ServiceName";
-import { formatTime, parseTime } from "../time";
 import { type SpanSorting, toTableSorting } from "./sort";
 import { isFailedSpan, toKindName } from "./span";
 import SpanTitle from "./SpanTitle";
@@ -15,17 +15,14 @@ const COLUMNS: Column<TraceSpan>[] = [
     label: "Time",
     width: "max-content",
     tone: () => "muted",
-    cell: (span) => (
-      <time class="whitespace-nowrap" datetime={span.started_at}>
-        {formatTime(parseTime(span.started_at))}
-      </time>
-    ),
+    cell: (span) => <RowTime at={span.started_at} />,
   },
   {
     kind: "cell",
     id: "service",
     label: "Service",
     width: "minmax(6ch,16ch)",
+    hiddenOnNarrowScreen: true,
     tone: () => "muted",
     cell: (span) => <ServiceName name={span.service} resource={span.resource} />,
   },
@@ -48,6 +45,7 @@ const COLUMNS: Column<TraceSpan>[] = [
     id: "kind",
     label: "Kind",
     width: "max-content",
+    hiddenOnNarrowScreen: true,
     cell: (span) => <SpanKindBadge kind={toKindName(span.kind)} />,
   },
   {

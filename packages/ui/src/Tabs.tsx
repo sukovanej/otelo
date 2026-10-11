@@ -31,7 +31,7 @@ export default function Tabs<T extends string>(props: TabsProps<T>) {
             type="button"
             role="tab"
             aria-selected={props.value === option.value ? "true" : "false"}
-            class={`${plain} -ml-px flex h-7 cursor-pointer items-center gap-1.5 border px-2.5 text-muted first:ml-0 first:rounded-l-md last:rounded-r-md hover:bg-hover aria-selected:bg-active aria-selected:text-ink`}
+            class={`${plain} -ml-px flex h-7 cursor-pointer items-center gap-1.5 border px-2.5 whitespace-nowrap text-muted first:ml-0 first:rounded-l-md last:rounded-r-md hover:bg-hover aria-selected:bg-active aria-selected:text-ink`}
             onClick={() => props.onChange(option.value)}
           >
             {option.icon?.({ size: 13 })}

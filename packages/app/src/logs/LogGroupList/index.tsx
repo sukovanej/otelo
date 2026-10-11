@@ -48,6 +48,7 @@ export default function LogGroupList(props: LogGroupListProps) {
       id: "services",
       label: "Services",
       width: "minmax(8ch,20ch)",
+      hiddenOnNarrowScreen: true,
       value: (group) => group.services.join(", "),
       tone: () => "muted",
     },
@@ -57,6 +58,7 @@ export default function LogGroupList(props: LogGroupListProps) {
       label: "Last",
       align: "end",
       width: "max-content",
+      hiddenOnNarrowScreen: true,
       tone: () => "muted",
       cell: (group) => (
         <time class="whitespace-nowrap" datetime={group.last_at} title={group.last_at}>

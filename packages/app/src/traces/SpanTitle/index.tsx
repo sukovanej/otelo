@@ -58,7 +58,7 @@ export default function SpanTitle(props: SpanTitleProps) {
       <Switch
         fallback={
           <>
-            <Tooltip content="Span" class="self-center">
+            <Tooltip content="Span" class="self-center max-md:hidden">
               <SpanIcon class="text-muted" title="Span" />
             </Tooltip>
             <span class="truncate">{props.name}</span>

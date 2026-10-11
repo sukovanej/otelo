@@ -4,9 +4,17 @@ export function parseTime(rfc3339: string): Date {
 }
 
 export function formatTime(date: Date, now = new Date()): string {
+  return `${formatTimeToSecond(date, now)}.${formatMillisOfSecond(date)}`;
+}
+
+export function formatTimeToSecond(date: Date, now = new Date()): string {
   return isSameDay(date, now)
-    ? formatClock(date)
-    : `${padWithZeros(date.getMonth() + 1)}-${padWithZeros(date.getDate())} ${formatClock(date)}`;
+    ? formatClockToSecond(date)
+    : `${padWithZeros(date.getMonth() + 1)}-${padWithZeros(date.getDate())} ${formatClockToSecond(date)}`;
+}
+
+export function formatMillisOfSecond(date: Date): string {
+  return padWithZeros(date.getMilliseconds(), 3);
 }
 
 export function formatAge(date: Date, now = new Date()): string {
@@ -47,7 +55,11 @@ function isSameDay(date: Date, other: Date): boolean {
 }
 
 function formatClock(date: Date): string {
-  return `${padWithZeros(date.getHours())}:${padWithZeros(date.getMinutes())}:${padWithZeros(date.getSeconds())}.${padWithZeros(date.getMilliseconds(), 3)}`;
+  return `${formatClockToSecond(date)}.${formatMillisOfSecond(date)}`;
+}
+
+function formatClockToSecond(date: Date): string {
+  return `${padWithZeros(date.getHours())}:${padWithZeros(date.getMinutes())}:${padWithZeros(date.getSeconds())}`;
 }
 
 type MillisAndNanos = readonly [epochMillis: number, nanosPastMillis: number];

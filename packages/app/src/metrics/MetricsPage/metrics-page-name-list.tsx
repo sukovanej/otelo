@@ -15,7 +15,10 @@ export default function MetricsPageNameList(props: MetricsPageNameListProps) {
   return (
     <nav
       aria-label="Metrics"
-      class="w-80 shrink-0 overflow-y-auto border-r border-line bg-surface py-2"
+      class={[
+        "w-full shrink-0 overflow-y-auto border-r border-line bg-surface py-2 md:w-80",
+        { "max-md:hidden": latest(() => props.openName) !== undefined },
+      ]}
     >
       <Show
         when={props.names.length > 0 || !props.loaded}

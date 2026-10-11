@@ -27,6 +27,7 @@ export default function ServicesPage() {
       kind: "cell",
       id: "service",
       label: "Service",
+      narrowScreenWidth: "minmax(0,1fr)",
       sortBy: (service) => service.service,
       cell: (service) => <ServiceName name={service.service} resource={service.resource} />,
     },
@@ -35,6 +36,7 @@ export default function ServicesPage() {
       id: "traffic",
       label: "Requests over time",
       width: "max-content",
+      hiddenOnNarrowScreen: true,
       cell: (service) => (
         <Sparkline
           kind="bar"
@@ -62,6 +64,7 @@ export default function ServicesPage() {
       id: "rate",
       label: "Rate",
       unit: "rate",
+      hiddenOnNarrowScreen: true,
       value: (service) => toRate(service.stats.requests.count, rangeSeconds()),
     },
     {
@@ -77,6 +80,7 @@ export default function ServicesPage() {
       id: percentile,
       label: percentile.toUpperCase(),
       unit: "duration",
+      hiddenOnNarrowScreen: percentile !== "p95",
       value: (service) => service.stats.requests.latency?.[percentile] ?? null,
     })),
     {
@@ -84,6 +88,7 @@ export default function ServicesPage() {
       id: "logs",
       label: "Logs",
       unit: "count",
+      hiddenOnNarrowScreen: true,
       value: (service) => service.stats.logs,
     },
     {
@@ -91,6 +96,7 @@ export default function ServicesPage() {
       id: "error_logs",
       label: "Error logs",
       unit: "count",
+      hiddenOnNarrowScreen: true,
       value: (service) => service.stats.error_logs,
       tone: (service) => (service.stats.error_logs > 0 ? "error" : "muted"),
     },

@@ -9,8 +9,11 @@ import {
   untrack,
 } from "solid-js";
 
+import { createNarrowScreenSignal } from "@otelo/ui";
+
 import {
   type Column,
+  fitColumnsToNarrowScreen,
   pickAlignClass,
   pickGridTracks,
   pickSortValueReader,
@@ -55,6 +58,10 @@ interface TableProps<R> {
 }
 
 export default function Table<R>(props: TableProps<R>) {
+  const isNarrowScreen = createNarrowScreenSignal();
+  const shownColumns = createMemo(() =>
+    isNarrowScreen() ? fitColumnsToNarrowScreen(props.columns) : props.columns,
+  );
   const [tableOrder, setTableOrder] = createSignal<TableSortOrder | undefined>(
     untrack(() => (props.sorting?.kind === "table" ? props.sorting.initialOrder : undefined)),
   );
@@ -76,7 +83,7 @@ export default function Table<R>(props: TableProps<R>) {
   const largestMeterValues = createMemo(
     () => {
       const largest = new Map<string, number>();
-      for (const column of props.columns) {
+      for (const column of shownColumns()) {
         if (column.kind !== "meter") continue;
         const values = props.rows.map((row) => column.value(row)).filter((value) => value !== null);
         largest.set(column.id, Math.max(0, ...values));
@@ -101,14 +108,17 @@ export default function Table<R>(props: TableProps<R>) {
       role={props.level ? "treegrid" : "table"}
       aria-label={props.label}
       aria-busy={props.loading ? "true" : undefined}
-      class={["grid gap-x-3 font-mono text-sm transition-opacity", { "opacity-60": props.loading }]}
-      style={{ "grid-template-columns": props.columns.map(pickGridTracks).join(" ") }}
+      class={[
+        "grid gap-x-2 font-mono md:gap-x-3 text-sm transition-opacity",
+        { "opacity-60": props.loading },
+      ]}
+      style={{ "grid-template-columns": shownColumns().map(pickGridTracks).join(" ") }}
     >
       <div
         role="row"
         class="sticky top-0 z-10 col-span-full grid grid-cols-subgrid items-center border-b border-line bg-(--viz-surface,var(--color-surface)) px-3 py-2 font-sans text-2xs font-semibold tracking-[0.04em] text-muted uppercase"
       >
-        <For each={props.columns}>
+        <For each={shownColumns()}>
           {(column) => {
             const isSorted = () => sortOrder()?.columnId === column.id;
             const drawHeader = column.kind === "cell" ? column.header : undefined;
@@ -169,7 +179,7 @@ export default function Table<R>(props: TableProps<R>) {
             <>
               <TableRow
                 row={row()}
-                columns={props.columns}
+                columns={shownColumns()}
                 largestMeterValues={largestMeterValues()}
                 href={props.href?.(row())}
                 onRowClick={props.onRowClick}
