@@ -35,6 +35,22 @@ test("a second filter click while the first one loads keeps both terms", async (
   expectNoReactivityMistakes(artifact);
 });
 
+test("the open line shows its level as a badge", async () => {
+  const api = createFakeApi({ getLogs: () => Promise.resolve(SHOWN_LOGS) });
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/logs");
+    await userEvent.click(page.getByText("payment declined"));
+
+    const levelRow = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("rowheader", { name: "level", exact: true }) });
+    await expect.element(levelRow.getByText("ERROR", { exact: true })).toHaveClass(/text-error/);
+  });
+
+  expectNoReactivityMistakes(artifact);
+});
+
 test("leaving the logs while a range change loads keeps the next pages navigating", async () => {
   const logs = createHeldAnswers(SHOWN_LOGS);
   const api = createFakeApi({

@@ -7,6 +7,7 @@ import {
   listAttributeFields,
   listResourceFields,
   toBuiltinField,
+  viewField,
 } from "../../field";
 import FieldSections from "../../FieldSections";
 import { toServicePagePath, toTracePagePath } from "../../path";
@@ -28,7 +29,10 @@ export default function LinePanelContent(props: LinePanelContentProps) {
           toBuiltinField("service", props.line.service),
           toServicePagePath(props.line.service),
         ),
-        toBuiltinField("level", level(), level().toLowerCase()),
+        viewField(toBuiltinField("level", level(), level().toLowerCase()), {
+          kind: "level",
+          level: level(),
+        }),
         linkField(
           toBuiltinField("trace_id", props.line.trace_id),
           props.line.trace_id && toTracePagePath(props.line.trace_id),

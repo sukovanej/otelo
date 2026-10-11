@@ -16,6 +16,7 @@ export { createNarrowScreenSignal } from "./screen";
 export { default as Select, type SelectOption } from "./Select";
 export { default as SidePanel } from "./SidePanel";
 export { default as SpanKindBadge } from "./SpanKindBadge";
+export { default as SpanStatusBadge } from "./SpanStatusBadge";
 export { default as SqlCode } from "./SqlCode";
 export { default as SqlStart } from "./SqlStart";
 export { default as Tabs, type TabOption } from "./Tabs";

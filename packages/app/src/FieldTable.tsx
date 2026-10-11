@@ -1,7 +1,7 @@
 import { For, Match, Show, Switch } from "solid-js";
 
 import type { AttributeValue } from "@otelo/api";
-import { Button, SqlCode } from "@otelo/ui";
+import { Button, LevelBadge, SpanKindBadge, SpanStatusBadge, SqlCode } from "@otelo/ui";
 
 import { link } from "./classes";
 import type { Field } from "./field";
@@ -35,8 +35,17 @@ export default function FieldTable(props: FieldTableProps) {
                       </a>
                     )}
                   </Match>
-                  <Match when={field.isSqlQuery}>
+                  <Match when={field.view.kind === "sql_query"}>
                     <SqlCode text={formatAttributeValue(field.value)} />
+                  </Match>
+                  <Match when={field.view.kind === "level" && field.view}>
+                    {(view) => <LevelBadge level={view().level} />}
+                  </Match>
+                  <Match when={field.view.kind === "span_kind"}>
+                    <SpanKindBadge kind={formatAttributeValue(field.value)} />
+                  </Match>
+                  <Match when={field.view.kind === "span_status"}>
+                    <SpanStatusBadge status={formatAttributeValue(field.value)} />
                   </Match>
                 </Switch>
               </td>

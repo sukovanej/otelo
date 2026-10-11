@@ -36,3 +36,24 @@ test("folding a span hides the spans under it", async () => {
 
   expectNoReactivityMistakes(artifact);
 });
+
+test("the open span shows its kind and its status as badges", async () => {
+  const failedSpan = { ...toTraceSpan("root", null, 0, 100), kind: 2, status: 2 };
+  const api = createFakeApi({ getTrace: () => Promise.resolve(toTrace([failedSpan])) });
+
+  const { artifact } = await captureArtifact(async () => {
+    mountApp(api, "/traces/t1?span=root");
+
+    await expect.element(fieldValue("kind", "server")).toHaveClass(/text-info/);
+    await expect.element(fieldValue("status", "error")).toHaveClass(/text-error/);
+  });
+
+  expectNoReactivityMistakes(artifact);
+});
+
+function fieldValue(fieldName: string, value: string) {
+  return page
+    .getByRole("row")
+    .filter({ has: page.getByRole("rowheader", { name: fieldName, exact: true }) })
+    .getByText(value, { exact: true });
+}

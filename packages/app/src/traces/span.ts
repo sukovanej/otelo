@@ -8,6 +8,7 @@ import {
   listResourceFields,
   toBuiltinField,
   toUnnamedField,
+  viewField,
 } from "../field";
 import { toServicePagePath, toTracePagePath } from "../path";
 
@@ -32,8 +33,8 @@ export function listSpanSections(span: TraceSpan): FieldSection[] {
     linkField(toBuiltinField("service", span.service), toServicePagePath(span.service)),
     toBuiltinField("name", span.name),
     // The query language has no name for an unspecified kind.
-    toBuiltinField("kind", kind, span.kind === 0 ? null : kind),
-    toBuiltinField("status", status, status),
+    viewField(toBuiltinField("kind", kind, span.kind === 0 ? null : kind), { kind: "span_kind" }),
+    viewField(toBuiltinField("status", status, status), { kind: "span_status" }),
     linkField(toBuiltinField("trace_id", span.trace_id), toTracePagePath(span.trace_id)),
     linkField(
       toBuiltinField("span_id", span.span_id),
