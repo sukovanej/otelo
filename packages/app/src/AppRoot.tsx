@@ -41,7 +41,6 @@ export default function AppRoot(props: AppRootProps) {
   const Router = createRouter({
     routes: ROUTES,
     history: untrack(() => props.history),
-    preloadLinks: false,
   });
   return (
     <ApiContext value={props.api}>

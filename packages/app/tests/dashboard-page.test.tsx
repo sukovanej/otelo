@@ -2,7 +2,7 @@ import { captureArtifact } from "@solidjs/diagnostics";
 import { expect, test } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
-import type { Api, Dashboard, DashboardDefinition, MetricSeries } from "@otelo/api";
+import type { Api, Dashboard, DashboardDefinition, MetricSeries, SpanGroups } from "@otelo/api";
 import {
   createDeferred,
   createHeldAnswers,
@@ -11,7 +11,7 @@ import {
 } from "@otelo/testing";
 
 import { createFakeApi } from "./fake-api";
-import { toDashboardList, toEmptyMetricSeries, toMetricList } from "./fixtures";
+import { toDashboardList, toEmptyMetricSeries, toMetricList, toSpanGroups } from "./fixtures";
 import { mountApp } from "./mount";
 import { expectNavigationToReach } from "./navigation";
 import { expectOnOneRow, expectToFillScreen, switchToPhoneScreen } from "./screen";
@@ -218,7 +218,11 @@ test("switching a value widget to a time series shows the chart form while the p
 
 test("switching a query to spans shows the span form while the preview loads", async () => {
   const series = createHeldSeries();
-  const api = createCpuDashboardApi(series);
+  const spanGroups = createDeferred<SpanGroups>();
+  const api = {
+    ...createCpuDashboardApi(series),
+    getSpanGroups: () => spanGroups.promise,
+  } satisfies Api;
 
   const { artifact } = await captureArtifact(async () => {
     mountApp(api, "/dashboards/1");
@@ -230,6 +234,7 @@ test("switching a query to spans shows the span form while the preview loads", a
     await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
 
     releaseHeldSeries(series);
+    spanGroups.resolve(toSpanGroups([]));
   });
 
   expectNoReactivityMistakes(artifact);
