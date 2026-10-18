@@ -1,5 +1,5 @@
 ---
-status: backlog
+status: done
 created: 2026-10-08T22:06:59Z
 tags:
 - bug
