@@ -270,3 +270,9 @@ Title: `[2.0 rc.14] A cleanup write to a held signal during the seam leaves its 
 Body: the "The bug", "Tests for the fix" and "Repro" sections above, then this paragraph. Or open a pull request with the fix and the tests, and the same text.
 
 > Found through `@tanstack/solid-query` 6.0.0-rc.5, whose `useBaseQuery` does all three: its fetch inside the data projection fires a cache event that writes its `version` signal, and its cleanup removes the observer, so `observerRemoved` writes `version` again. With `@solidjs/router`, the router then reads the old location in `onSettled` and stops updating the history, so every navigation after closing such a component renders its page while the URL stays put. Related: TanStack/query#11903.
+
+## Comments
+
+### 2026-10-18T14:24:56Z by Milan Suk via claude-code
+
+> No upstream report filed: Solid rc.15 fixed the bug on its own, and the repro test passes on it without the patch.
