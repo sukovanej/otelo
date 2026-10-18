@@ -6,10 +6,10 @@ packages:
 catalog:
   "@fontsource/ibm-plex-mono": ^5.3.0
   "@fontsource/ibm-plex-sans": ^5.3.0
-  "@solidjs/diagnostics": 2.0.0-rc.14
-  "@solidjs/router": 2.0.0-next.37
-  "@solidjs/vite-plugin": 3.0.0-next.47
-  "@solidjs/web": 2.0.0-rc.14
+  "@solidjs/diagnostics": 2.0.0-rc.15
+  "@solidjs/router": 2.0.0-next.40
+  "@solidjs/vite-plugin": 3.0.0-next.50
+  "@solidjs/web": 2.0.0-rc.15
   "@tailwindcss/vite": ^4.3.3
   "@tanstack/solid-query": 6.0.0-rc.5
   "@types/node": ^24.19.1
@@ -19,7 +19,7 @@ catalog:
   oxlint: ^1.87.0
   oxlint-tsgolint: ^7.0.2003
   playwright: ^1.64.0
-  solid-js: 2.0.0-rc.14
+  solid-js: 2.0.0-rc.15
   tailwindcss: ^4.3.3
   typescript: ^7.0.2
   vite: ^8.3.3
@@ -28,6 +28,3 @@ catalog:
 # Wait an hour before installing a new release, not the day pnpm defaults to, so
 # new versions arrive fast and a hijacked release caught in its first hour never does.
 minimumReleaseAge: 60
-
-patchedDependencies:
-  "@solidjs/signals@2.0.0-rc.14": patches/@solidjs__signals@2.0.0-rc.14.patch

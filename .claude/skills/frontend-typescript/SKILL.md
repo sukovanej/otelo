@@ -107,9 +107,8 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   form through `latest()`: a `<Show>` whose condition flips during the hold mounts its
   branch on the new value, the branch's accessor re-checks the old one and throws, and the
   whole app stops updating.
-- **A loading flag renders as text** in an element that stays mounted, as `PageBar` does. In
-  rc.14 an element that `<Show>` or a ternary mounts from `loading()` keeps the pending value
-  after the answer lands.
+- **A loading flag renders as text** in an element that stays mounted, as `PageBar` does. A
+  live region announces only a change to an element already in the page.
 - **Fetched rows are a store a reload merges into by position**, since the daemon's rows
   carry no `id`. A row kept past the next answer turns into whatever record lands at its
   index, so a selection keeps `snapshot(row)`, as `TracesPage` does.
@@ -133,11 +132,7 @@ memory comes out as Solid 1. Look an API up at https://v2.solidjs.com before you
   keys `TraceView` by the trace id, never changes key, so its reads need no boundary.
 - **Cleanups only release.** `onCleanup` and the cleanup an effect returns clear timers,
   remove listeners and abort requests, and leave signals untouched. Libraries still write
-  in theirs, the solid-query hook among them. In rc.14 such a write to a held signal
-  kept the scheduler joined to its transaction past the flush. Later writes were then
-  held in it, for good once it had landed, so the router stopped updating the URL.
-  `patches/` drops that join when the transaction lands and when the flush ends. Drop the
-  patch once Solid ships the fix (SIN-31).
+  in theirs, the solid-query hook among them.
 
 The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 
@@ -158,8 +153,8 @@ The typecheck rejects the Solid 1 form. This is the Solid 2 one:
 A boolean `aria-*` value renders as an empty attribute, which `aria-selected:` and the
 other Tailwind variants do not match.
 
-Link preloading stays off in `AppRoot`: no route preloads anything, and the router of
-next.37 runs its hover timer after it is disposed.
+`AppRoot` gives the router no `preloadLinks`, so it preloads no link, since no route has a
+`preload` function.
 
 ## Tests
 
