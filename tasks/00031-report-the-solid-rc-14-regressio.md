@@ -5,6 +5,7 @@ tags:
 - bug
 pull_requests:
 - https://github.com/sukovanej/otelo/pull/66
+- https://github.com/sukovanej/otelo/pull/77
 ---
 # Report the Solid rc.14 scheduler bug that stops writes committing, and drop the signals patch
 
